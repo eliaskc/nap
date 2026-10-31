@@ -5,8 +5,12 @@ import { production as settings, productionSettings } from "../infra/production.
 
 const root = napConfig.rootDomain;
 
+// A complete configuration that decides access with people, whatever this instance uses.
 const complete = () => ({
   ...structuredClone(settings),
+  people: ["you@example.com"],
+  accessPolicies: undefined,
+  bypassPolicy: undefined,
   accessIssuer: "https://example.cloudflareaccess.com",
   dns: [
     { name: root, type: "AAAA", content: "100::", proxied: true, ttl: 1 },
