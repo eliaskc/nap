@@ -97,7 +97,11 @@ the secrets and a deploy workflow that deploys this code with them.
    certificate in one PEM) and `NAP_ASC_PRIVATE_KEY` (the `.p8`), and the
    variables `NAP_ASC_KEY_ID` and `NAP_ASC_ISSUER_ID`.
 
-To add someone, put their email in `people` and push. To work on Nap against
+To stay on a release instead of `main`, set the config repository variable
+`NAP_REF` to a tag of this repository. To add someone, put their email in
+`people` and push. An account that already has Access policies for its people
+can use them instead: `accessPolicies` takes their ids, and then Nap makes no
+Access policies of its own. To work on Nap against
 your instance, check out both repositories side by side and link the folder:
 `ln -s ../<config repo>/instance instance`.
 

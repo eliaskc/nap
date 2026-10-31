@@ -13,8 +13,7 @@ on:
   workflow_dispatch:
     inputs:
       ref:
-        description: "eliaskc/nap ref to deploy"
-        default: main
+        description: "eliaskc/nap branch or tag to deploy (default: NAP_REF, or main)"
 
 permissions:
   contents: read
@@ -35,12 +34,13 @@ jobs:
           path: config
           persist-credentials: false
 
-      # Never a SHA from a payload: a branch or tag of eliaskc/nap, default main.
+      # Never a SHA from a payload: a branch or tag of eliaskc/nap.
       - name: Check out Nap
         uses: actions/checkout@v6
         with:
           repository: eliaskc/nap
-          ref: ${{ inputs.ref || 'main' }}
+          # To stay on a release, set the repository variable NAP_REF to a tag of eliaskc/nap.
+          ref: ${{ inputs.ref || vars.NAP_REF || 'main' }}
           path: nap
           persist-credentials: false
 

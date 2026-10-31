@@ -19,10 +19,19 @@ export type ProductionSettings = {
     comment?: string;
   }>;
   /**
-   * Who can sign in: emails, and "@example.com" for everyone at a domain. They use any login
-   * method of the Zero Trust team, such as a one-time PIN by email or Google.
+   * Who can sign in: emails, and "@example.com" for everyone at a domain. Nap makes them its own
+   * reusable Access policy, "Nap people", and makes "Nap bypass" for the paths that skip Access.
+   * People use any login method of the Zero Trust team, such as a one-time PIN or Google.
    */
-  people: string[];
+  people?: string[];
+  /**
+   * Instead of people: the ids of existing reusable Access policies that decide who can sign in,
+   * for an account that already manages its policies. Nap then makes no account policies: the
+   * paths that skip Access use bypassPolicy, or an Access policy of their own application.
+   */
+  accessPolicies?: string[];
+  /** With accessPolicies: an existing reusable bypass policy for the paths that skip Access. */
+  bypassPolicy?: string;
   humanAccess: ApplicationProps | null;
 };
 
@@ -53,7 +62,9 @@ export function productionSettings(config = production, rootDomain = root): Prod
     ) ||
     !config.humanAccess ||
     config.humanAccess.type !== "self_hosted" ||
-    !config.people.length ||
+    // Either people or accessPolicies decides who can sign in.
+    !config.people?.length === !config.accessPolicies?.length ||
+    (config.bypassPolicy && !config.accessPolicies?.length) ||
     ![rootDomain, `${rootDomain}/*`].some((path) => protectedPaths.has(path)) ||
     ![`*.${rootDomain}`, `*.${rootDomain}/*`].some((path) => protectedPaths.has(path))
   ) {

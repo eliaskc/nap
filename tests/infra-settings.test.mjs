@@ -37,3 +37,25 @@ test("production cannot omit wildcard Access protection or people", () => {
   config.people = [];
   assert.throws(() => productionSettings(config), /Invalid production settings/);
 });
+
+test("either people or existing Access policies decide who can sign in", () => {
+  const withPolicies = { ...complete(), people: undefined, accessPolicies: ["policy-id"] };
+  assert.equal(productionSettings(withPolicies), withPolicies);
+  withPolicies.bypassPolicy = "bypass-id";
+  assert.equal(productionSettings(withPolicies), withPolicies);
+  assert.throws(
+    () => productionSettings({ ...complete(), accessPolicies: ["policy-id"] }),
+    /Invalid production settings/,
+    "not both",
+  );
+  assert.throws(
+    () => productionSettings({ ...complete(), people: undefined }),
+    /Invalid production settings/,
+    "not neither",
+  );
+  assert.throws(
+    () => productionSettings({ ...complete(), bypassPolicy: "bypass-id" }),
+    /Invalid production settings/,
+    "bypassPolicy only with accessPolicies",
+  );
+});

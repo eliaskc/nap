@@ -71,10 +71,23 @@ export const Bypass = Cloudflare.Access.Policy("Bypass", {
 export const People = Cloudflare.Access.Policy("People", {
   name: "Nap people",
   decision: "allow",
-  include: productionSettings().people.map((entry) =>
+  include: (productionSettings().people ?? []).map((entry) =>
     entry.startsWith("@") ? { emailDomain: entry.slice(1) } : { email: entry },
   ),
 }).pipe(RemovalPolicy.retain());
+
+/**
+ * The policies of an application whose path skips Access: "Nap bypass", or with accessPolicies
+ * the given bypassPolicy or a bypass policy of the application's own.
+ */
+function bypassPolicies(app: string) {
+  return Effect.gen(function* () {
+    const settings = productionSettings();
+    if (!settings.accessPolicies?.length) return [yield* Bypass];
+    if (settings.bypassPolicy) return [{ id: settings.bypassPolicy, precedence: 1 }];
+    return [{ name: `bypass-${app}`, decision: "bypass" as const, include: ["everyone" as const] }];
+  });
+}
 
 // Agents upload drafts without a login. Access must bypass exactly this path; the Worker
 // stores drafts without serving them until a signed-in person claims them.
@@ -85,7 +98,7 @@ export const DraftUploadAccess = Cloudflare.Access.Application(
       type: "self_hosted" as const,
       name: "nap-agent-drafts",
       domain: `${ROOT_DOMAIN}/_nap/drafts`,
-      policies: [yield* Bypass],
+      policies: yield* bypassPolicies("nap-agent-drafts"),
       appLauncherVisible: false,
     };
   }),
@@ -101,7 +114,7 @@ export const AgentApiAccess = Cloudflare.Access.Application(
       type: "self_hosted" as const,
       name: "nap-agent-api",
       domain: `${ROOT_DOMAIN}/_nap/api/*`,
-      policies: [yield* Bypass],
+      policies: yield* bypassPolicies("nap-agent-api"),
       appLauncherVisible: false,
     };
   }),
@@ -118,7 +131,7 @@ export const ArtifactFrameAccess = Cloudflare.Access.Application(
       type: "self_hosted" as const,
       name: "nap-artifact-frames",
       domain: `${ROOT_DOMAIN}/_nap/frame/*`,
-      policies: [yield* Bypass],
+      policies: yield* bypassPolicies("nap-artifact-frames"),
       appLauncherVisible: false,
     };
   }),
@@ -134,7 +147,7 @@ export const AppInstallAccess = Cloudflare.Access.Application(
       type: "self_hosted" as const,
       name: "nap-app-installs",
       domain: `${ROOT_DOMAIN}/_nap/install/*`,
-      policies: [yield* Bypass],
+      policies: yield* bypassPolicies("nap-app-installs"),
       appLauncherVisible: false,
     };
   }),
@@ -149,7 +162,7 @@ export const DeviceEnrollAccess = Cloudflare.Access.Application(
       type: "self_hosted" as const,
       name: "nap-device-enrollment",
       domain: `${ROOT_DOMAIN}/_nap/enroll/*`,
-      policies: [yield* Bypass],
+      policies: yield* bypassPolicies("nap-device-enrollment"),
       appLauncherVisible: false,
     };
   }),
@@ -311,10 +324,11 @@ export default Alchemy.Stack(
           comment: record.comment,
         }).pipe(RemovalPolicy.retain());
       }
-      const people = yield* People;
       yield* Cloudflare.Access.Application("HumanAccess", {
         ...settings.humanAccess!,
-        policies: [people],
+        policies: settings.accessPolicies?.length
+          ? settings.accessPolicies.map((id, index) => ({ id, precedence: index + 1 }))
+          : [yield* People],
       }).pipe(RemovalPolicy.retain());
       yield* DraftUploadAccess;
       yield* AgentApiAccess;
