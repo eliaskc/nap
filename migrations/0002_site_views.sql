@@ -1,0 +1,2 @@
+ALTER TABLE sites ADD COLUMN view_count INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE sites ADD COLUMN last_viewed_at TEXT;

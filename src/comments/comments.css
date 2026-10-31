@@ -1,0 +1,21 @@
+/* Styles for the comments bundle on artifact hosts. It shares the dashboard's shadcn theme. */
+@import "tailwindcss" source(none);
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+@import "../styles/theme.css";
+
+@source "./";
+@source "../components/ui";
+
+@custom-variant dark (&:is(.dark *));
+
+/* The toolbar page loads no web fonts. */
+@theme inline {
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+}

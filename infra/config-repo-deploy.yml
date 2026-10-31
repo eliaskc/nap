@@ -1,0 +1,94 @@
+name: Deploy Nap
+
+# The deploy workflow of a Nap config repository. Copy it to .github/workflows/deploy.yml there,
+# next to your instance/ folder (see "Run your own Nap" in the README).
+#
+# It deploys eliaskc/nap with your instance/. It runs when the config repository changes, daily
+# (so Nap updates reach you), and on demand: gh workflow run deploy.yml [-f ref=<branch or tag>]
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "17 4 * * *"
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "eliaskc/nap ref to deploy"
+        default: main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nap-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Build, test, and deploy Nap
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out this config
+        uses: actions/checkout@v6
+        with:
+          path: config
+          persist-credentials: false
+
+      # Never a SHA from a payload: a branch or tag of eliaskc/nap, default main.
+      - name: Check out Nap
+        uses: actions/checkout@v6
+        with:
+          repository: eliaskc/nap
+          ref: ${{ inputs.ref || 'main' }}
+          path: nap
+          persist-credentials: false
+
+      - name: Add the instance
+        run: rm -rf nap/instance && cp -R config/instance nap/instance
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+          run_install: false
+
+      - name: Set up Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: "26"
+          cache: pnpm
+          cache-dependency-path: nap/pnpm-lock.yaml
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.2"
+
+      - name: Install, build, and test
+        working-directory: nap
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm run build
+          pnpm test
+
+      - name: Plan and deploy
+        working-directory: nap
+        env:
+          ALCHEMY_PROFILE: nap
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          # S3 credentials of the R2 token that signs direct upload URLs (nap-sites objects only).
+          NAP_R2_ACCESS_KEY_ID: ${{ secrets.NAP_R2_ACCESS_KEY_ID }}
+          NAP_R2_SECRET_ACCESS_KEY: ${{ secrets.NAP_R2_SECRET_ACCESS_KEY }}
+          # Apps only (napConfig.apps): the Apple Distribution key and certificate (one PEM), and the
+          # App Store Connect team key.
+          NAP_APPLE_SIGNING_PEM: ${{ secrets.NAP_APPLE_SIGNING_PEM }}
+          NAP_ASC_PRIVATE_KEY: ${{ secrets.NAP_ASC_PRIVATE_KEY }}
+          NAP_ASC_KEY_ID: ${{ vars.NAP_ASC_KEY_ID }}
+          NAP_ASC_ISSUER_ID: ${{ vars.NAP_ASC_ISSUER_ID }}
+        run: |
+          test -n "$CLOUDFLARE_API_TOKEN" || { echo "Missing secret CLOUDFLARE_API_TOKEN"; exit 1; }
+          test -n "$NAP_R2_ACCESS_KEY_ID" && test -n "$NAP_R2_SECRET_ACCESS_KEY" || { echo "Missing secrets NAP_R2_ACCESS_KEY_ID and NAP_R2_SECRET_ACCESS_KEY"; exit 1; }
+          pnpm plan
+          pnpm exec alchemy deploy --stage prod --yes

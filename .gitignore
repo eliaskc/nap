@@ -1,0 +1,13 @@
+node_modules
+.DS_Store
+.cache
+.env
+.env.*
+.alchemy
+backups
+dist
+.amp/portals/*
+.wrangler/
+
+# Each deployment provides its own instance/ (see instance.example/).
+/instance

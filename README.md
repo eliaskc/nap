@@ -1,0 +1,409 @@
+# Nap
+
+A private host for the things you and your agents make, for a small group of
+people. You upload built files. A site can
+also keep its source in a Git repo on Nap, so agents can change it later.
+
+- **Dashboard:** `<root domain>`
+- **Sites:** `<slug>.<root domain>`
+- **Artifacts:** `<root domain>/artifact/<id>`
+- **Local:** `/s/<slug>/` and `/artifact/<id>`
+
+The app uses TanStack Start, React, Tailwind CSS v4, and shadcn/ui with Base
+UI. A Cloudflare Worker serves it. Private R2 stores the site files, and D1
+stores the metadata and collections. Cloudflare Access protects the dashboard
+and the hosted sites.
+
+This README covers the architecture, the security model, and operations. For
+UI behaviour, limits, and endpoint details, read the code.
+
+## Development
+
+Use pnpm, Bun for Alchemy, and Node 24+ for the tests.
+
+```sh
+pnpm install
+pnpm infra:login     # Configure the local Alchemy profile named nap
+pnpm dev             # Alchemy development runtime
+pnpm dev:local       # Fully local stage: D1, R2, and Durable Objects in workerd, no login
+pnpm run build       # Bundle and type-check app and infrastructure
+pnpm test
+pnpm test:http       # HTTP checks against a new local stage, no login
+pnpm test:sources    # Source repos against real Artifacts (test namespace; nap profile)
+```
+
+Stages named `local*` keep their Alchemy state in `.alchemy/` and run every
+resource in workerd, so they need no Cloudflare credentials. Their `SOURCES`
+binding is remote, because Artifacts has no local emulation: it fails
+without credentials, and Nap answers source requests with 503. `test:http`
+starts a new local stage per run with `alchemy dev` and removes it again.
+
+For `pnpm infra:login`, select the stored Cloudflare API credentials and the
+existing GitHub CLI login. Alchemy stores the credentials in your local
+profile, outside the repository; you do not need a `.env`. Use a Cloudflare
+token that is scoped to the instance's account and zone.
+It needs access to Workers, D1, R2, Artifacts, DNS, Access, and the Secrets Store
+bindings of the shared state store. Keep credentials out of source control
+and logs.
+
+## Run your own Nap
+
+An instance is a domain on Cloudflare plus a private config repository. This
+repository holds no instance settings; the config repository holds them, with
+the secrets and a deploy workflow that deploys this code with them.
+
+1. **Cloudflare.** Add your domain as a zone. The dashboard is at the root
+   domain you choose and sites at `<slug>.<root domain>`, so the root domain
+   is the zone apex or one level below it (Universal SSL covers one wildcard
+   level). Apps need the Workers Paid plan, for the signer Container.
+2. **Zero Trust.** Create a team; its domain
+   (`https://<team>.cloudflareaccess.com`) is your `accessIssuer`. Under
+   Authentication, add the login methods people will use: One-time PIN works
+   for any email, and Google or your company's identity provider work too.
+   Nap only checks the email: `people` lists emails, and `@example.com` lets
+   in everyone at a domain.
+3. **API token.** Create one for the deploys with these permissions on your
+   account: Workers Scripts, Workers KV Storage, Workers R2 Storage, D1,
+   Workers Containers, Workers Observability, Artifacts, Secrets Store,
+   Access: Apps and Policies, Access: Organizations, Identity Providers, and
+   Groups, and Access: Service Tokens (all Edit), plus Workers Tail and Account
+   Settings (Read). On your zone: Workers Routes and DNS (Edit), Zone and Zone
+   Settings (Read). Workers Containers is only needed with apps.
+4. **R2 signing token.** Create a user API token with only "Workers R2
+   Storage Bucket Item Write" on the bucket `nap-sites` (the bucket can not
+   exist yet). Its id is `NAP_R2_ACCESS_KEY_ID`, and the SHA-256 of its value
+   is `NAP_R2_SECRET_ACCESS_KEY` (see "R2 signing token" below).
+5. **Config repository.** Create a private repository with:
+   - `instance/`, copied from `instance.example/`. In `config.ts`, set your
+     domain, organisation name, admin, `defaultAccess`, and `apps: null`
+     unless you set up apps (step 7). In `production.ts`, set the account id,
+     zone id and name, `accessIssuer`, and `people`. Leave `databaseId` empty.
+   - `.github/workflows/deploy.yml`, copied from
+     `infra/config-repo-deploy.yml`.
+   - Secrets `CLOUDFLARE_API_TOKEN`, `NAP_R2_ACCESS_KEY_ID`, and
+     `NAP_R2_SECRET_ACCESS_KEY`, and the variable `CLOUDFLARE_ACCOUNT_ID`.
+6. **First deploy.** Push, or run `gh workflow run deploy.yml`. Alchemy
+   creates its state store, the database, the bucket, DNS, Access, and the
+   Worker. Put the `databaseId` from its output in `instance/production.ts`
+   and push; from then on, `pnpm plan` checks the live resources against it.
+   Open the root domain, sign in, and give your agent
+   `https://<root domain>/_nap/api/instructions`, or install the skill in
+   `skills/nap`.
+7. **Apps (optional).** With an Apple Developer account: create a wildcard
+   App ID `<bundleIdPrefix>.*`, an Apple Distribution certificate, and an ad
+   hoc profile for that App ID named as `profileName`, and an App Store
+   Connect team key with the Admin role. Set `apps` in `instance/config.ts`.
+   Add the secrets `NAP_APPLE_SIGNING_PEM` (the certificate's private key and
+   certificate in one PEM) and `NAP_ASC_PRIVATE_KEY` (the `.p8`), and the
+   variables `NAP_ASC_KEY_ID` and `NAP_ASC_ISSUER_ID`.
+
+To add someone, put their email in `people` and push. To work on Nap against
+your instance, check out both repositories side by side and link the folder:
+`ln -s ../<config repo>/instance instance`.
+
+## Infrastructure
+
+`alchemy.run.ts` declares the Cloudflare resources: the Worker, storage, DNS,
+and Access. Bindings are inferred from the Worker declaration.
+
+This repository knows no instance. Each instance keeps its settings in
+`instance/` (copy `instance.example/`; the folder is gitignored):
+`instance/config.ts` has the domain, organisation and apps, and
+`instance/production.ts` the account, zone, Access, and people. Its Access
+application lets in the people listed there, with any login method of the
+Zero Trust team. Alchemy keeps its state in the account's state store.
+
+```sh
+pnpm infra:inventory # Read-only inspection; private snapshots in backups/
+pnpm plan            # Inspect the proposed changes
+pnpm deploy          # Apply infrastructure and application changes
+pnpm logs
+```
+
+CI here only builds and tests, with `instance.example/`. Each instance has a
+private config repository with its `instance/` folder, its secrets, and a
+deploy workflow that checks out this repository, adds `instance/`, and runs
+`alchemy deploy`. It runs on pushes to the config repository, daily, and on
+demand, so a change here reaches an instance by its next run. Cloudflare's native Git build integration must stay disconnected, so
+that nothing deploys outside Alchemy.
+
+Rules for production:
+
+- Keep R2 private and both Worker bypass URLs disabled.
+- Review every plan for replacements. The live database and bucket must never
+  be recreated. Keep database backups private.
+- Alchemy owns the production migrations in `migrations/`. Do not apply them
+  by hand.
+
+## Sites and artifacts
+
+Both are rows in `sites`, and `kind` says how each one is served. They share
+`sites.slug`, so the owner can move a nap between the two, and the old URL
+redirects.
+
+- **Sites** have their own host, `<slug>.<root>`. Each one has its own origin,
+  so sites cannot read each other's data, and they get real browser storage.
+  They are for things that people come back to.
+- **Artifacts** are at `<root>/artifact/<id>`. The id is random, not made
+  from the title, and cannot be renamed. They are quick pages, and each one
+  shows only to its owner on the dashboard.
+
+A site that moves to Artifacts gets a random id; the R2 files and rows move
+to the new key (`src/lib/rekey.ts`). The old slug stays in `nap_redirects`.
+It only redirects, from both `<slug>.<root>` and `<root>/artifact/<slug>`,
+and is never shown. A live nap with that slug always wins over a redirect. An
+artifact that moves to Sites keeps its id as its host until the owner renames
+it.
+
+New naps are private. The owner can invite people or open a nap
+to everyone who can sign in; Cloudflare Access is still the outer limit.
+Anyone who can view a nap can also publish new versions of it and restore
+old ones (`canViewSite` in `src/lib/site-access.ts`). Versions are immutable,
+so a bad upload is one restore away. Only the owner changes who can view it,
+its settings, its URL, or its owner, or deletes it. A transfer goes only to
+someone who has used Nap, and the previous owner stays invited. Sites
+can show an optional Nap toolbar (`src/lib/nap-toolbar.ts`). It serves the
+site in a frame on the same host, so there is only one Access cookie.
+
+### Collections
+
+Each nap has JSON document collections in D1 (`src/lib/site-data.ts`), with
+a browser client at `/_nap/client.js`. Every write raises the document's
+`version` and gives it the site's next change number, `seq`. Conditional
+writes compare `version`, so an app can refuse to overwrite an edit it has
+not seen. Deletes stay as tombstones, so the changes feed (rows after a
+`seq`) also reports them.
+
+Live updates go through one Durable Object per nap (`src/lib/site-live.ts`),
+named by its slug. D1 stays the only store: the Worker commits the write, then
+hands the change to the object, which sends it to every page with a socket
+open on `/_nap/live`. The object holds nothing but hibernating WebSockets.
+The Worker checks access before it opens a socket, and the object checks
+again on every send and closes the sockets of people who lost access. The
+client polls the changes feed when it connects and, more slowly, while
+connected, so a missed message only delays an update.
+
+### Channels
+
+Channels (`src/lib/site-channel.ts`) are for multiplayer pages: one Durable
+Object per nap and channel name, named `<slug>/<channel>`. Pages connect to
+`/_nap/channel/<name>`, send messages to each other, and each keep a small
+presence state. Nothing is stored: presence lives in each socket's
+attachment, so it survives hibernation. The object stamps every message with
+the sender from the identity the Worker checked, rate-limits each socket, and
+rechecks access at most once a minute while messages flow. Nap runs no game
+logic; pages agree on the longest-connected peer as the host for shared state.
+
+### Fetches
+
+A site's pages can read public data from other origins through `/_nap/fetch`
+(`src/lib/site-fetch.ts`), for APIs that send no CORS headers. The site lists the hosts in a
+`nap.json` at the root of its live version, so each publish decides what it may reach. Nap
+checks that the person can view the site, fetches only GET over https from those hosts (and
+never Nap's own), checks every redirect against the list, and sends nothing of the viewer's:
+no cookies, no Access headers. Responses are cached at the edge for a few minutes, are size
+limited, and carry a sandbox CSP, because they are served from the site's own origin.
+Artifacts cannot use it.
+
+### The artifact viewer
+
+`src/lib/artifact-viewer.ts` serves `/artifact/<slug>` behind Access. It shows
+the Nap bar and an iframe that is sandboxed without `allow-same-origin`, so
+the artifact runs in an opaque origin. It cannot read the dashboard or other
+artifacts, and the dashboard's same-origin checks refuse its requests.
+
+The frame cannot depend on the Access cookie. Each viewer load creates a
+short-lived frame token (only its hash is stored), and the frame loads its
+files and the `/_nap/*` data endpoints from `/_nap/frame/<token>/`. Access
+bypasses that path, so the Worker checks the token and the person's current
+access on each request. The token is the credential: it appears only in the
+frame URL and is not sent in the referrer.
+
+### Comments
+
+Viewers can select text in an artifact and comment on it. The Nap bar loads
+`/_nap/comments.js`, a React and shadcn bundle built from `src/comments`. The
+frame loads `comments-frame.js`, which finds the quoted text, draws the
+highlights, and reports positions, hovers, and clicks to the bar over
+`postMessage`. The bar draws avatar pins in the margin, or a slim tab on the
+frame's edge when the artifact has no margin, and popovers whose theme follows
+the artifact's background. Comments live in the D1 `comments` table and are
+anchored by the quote with some text before and after it, so they survive new
+versions while the quote is still there. The API is
+`/artifact/<slug>/_nap/comments`; the bar polls it every 30 seconds.
+
+Artifacts should use relative URLs. Apps that need root paths, client-side
+routing, or lasting browser storage should be sites.
+
+## Agent publishing
+
+The agent guide is in `src/content/instructions/`. `GET /_nap/api/instructions`
+serves its index without a login: enough for the common case, with a list of
+topics at `/_nap/api/instructions/<topic>`. Each instance fills in its own
+domain, organisation, and default access, and leaves out what it has turned
+off. The dashboard's "Copy prompt" copies the index. There is no CLI and no
+MCP; an agent needs only `curl`.
+
+`skills/nap/SKILL.md` is the agent skill: it tells agents when to suggest Nap,
+how to find the user's Naps (`~/.config/nap/<host>/`, which `login` writes),
+and to read that Nap's instructions. Install it from this repository; each Nap
+also serves it at `/_nap/api/skill`.
+
+New naps get the instance's `defaultAccess` (`private` or `everyone`) unless
+the publisher picks another. Every publish response says who can see the page,
+so agents always pass that on with the link.
+
+- **Tokens** (`src/lib/agent-auth.ts`). An agent signs in with a device code,
+  like the OAuth device flow, and the user approves it at `/connect`, behind
+  Access. D1 stores only hashes. A token acts as its owner, with less power:
+  it can publish new naps, update any nap its owner can view, and choose who
+  can view a new nap (up to everyone who can sign in), but it cannot change
+  access on an existing nap, rename, or delete them. On a nap someone else
+  owns, a token must send the
+  live version it read, so an agent cannot overwrite a change it has not
+  seen. A token stops
+  working when its owner has not used Nap through Access for some time, so
+  people that Access removes lose their tokens. People disconnect their
+  agents in the dashboard.
+- **Comments.** Tokens can read and write comments on artifacts their owner
+  can view:
+  `GET`/`POST /_nap/api/naps/<id>/comments`, `POST …/comments/<cid>/replies`,
+  and `PATCH …/comments/<cid>` with `{ "resolved": true }`.
+- **Direct uploads.** Uploads through the Worker are held in memory, so they
+  stay small. Larger uploads go straight to R2: Nap checks the token (or the
+  Access identity, for the dashboard) and the file list, picks the URL and a
+  new version id, and returns one presigned PUT URL per file. Each URL writes
+  one object under that new version, with a signed type and size, for an
+  hour. A commit checks the files in R2 and moves the live pointer, so a URL
+  can never change a live version. `src/content/publish.mjs`, served at
+  `/_nap/api/publish.mjs`, does the steps for agents.
+- **Claim links.** Agents without a token upload a draft to `/_nap/drafts`.
+  The user opens the claim link behind Access, checks the preview, and
+  publishes the draft. Drafts expire.
+
+Agents get everything they need from `GET /_nap/api/instructions`.
+
+### Paths without Access
+
+These are the only paths that bypass Access. Each one has its own Access
+application in `alchemy.run.ts`, and the Worker checks a credential itself:
+
+| Path              | Access app            | Credential                                  |
+| ----------------- | --------------------- | ------------------------------------------- |
+| `/_nap/drafts`    | `DraftUploadAccess`   | none; rate-limited, and drafts need a claim |
+| `/_nap/api/*`     | `AgentApiAccess`      | agent token                                 |
+| `/_nap/frame/*`   | `ArtifactFrameAccess` | frame token                                 |
+| `/_nap/install/*` | `AppInstallAccess`    | install token (one build, one hour)         |
+| `/_nap/enroll/*`  | `DeviceEnrollAccess`  | enrollment token (single use, one day)      |
+
+Code on these paths must never call `getIdentity()` or `ensureProfile()`.
+The Access headers are not set there, and a token must not keep its owner
+active.
+
+## Versions
+
+Uploads are immutable versions under `sites/<slug>/versions/<id>/`.
+`sites.current_version` points to the live one. Every upload adds a row to
+`versions` with its source and parent, whether it comes from the dashboard,
+an agent, or a claim (old rows also say GitHub). A restore moves the pointer
+and copies nothing.
+
+### R2 signing token
+
+Presigned URLs are signed with the S3 credentials of an R2 API token that has
+only "Workers R2 Storage Bucket Item Write" on `nap-sites`. Its access key id
+is the token id, and its secret access key is the SHA-256 of the token value.
+Deploys read them from the config repository secrets `NAP_R2_ACCESS_KEY_ID` and
+`NAP_R2_SECRET_ACCESS_KEY`; a production plan or deploy fails without them. To
+rotate, create a new token with the same scope, update both secrets, deploy,
+then delete the old token. Other stages have no token, and the dashboard falls
+back to uploads through the Worker.
+
+## Source repos
+
+A site can keep its source in a Cloudflare Artifacts repo, one per site, in the
+namespace bound as `SOURCES` (`nap-sites` in production). The agent
+instructions ask for one when a site has a real build step or will be worked
+on for long; plain HTML sites and artifacts do without. Nap never runs Git
+and never builds anything:
+
+```text
+agent → Nap token → short-lived Git token → git clone/push to Artifacts
+agent → local build → publish with sourceCommit → Nap checks the commit → R2 + D1
+```
+
+- **Tokens.** The agent API mints read or write tokens for one repo that last
+  15 minutes, for anyone who can view the site. Only the owner adds a repo to
+  an existing site. A new site can get its repo with its first direct upload
+  (`createSource`), so its first version is built from a commit; the upload
+  holds the repo until it is committed, and an expired upload deletes it.
+  Nap logs who got a token, never the token. Nobody has a lasting Git
+  credential.
+- **Publishing.** `sites.source_repo` names the repo. A new version of such a
+  site must name its commit, which must be the head of `main` and contain the
+  live version's commit. Artifacts allows force-pushes, so this check, not
+  Git, keeps published work from being dropped. Dashboard uploads and claim
+  links are off for these sites. Nap cannot prove that a build came from its
+  commit, the same trust as any agent upload.
+- **Restores, renames, deletes.** A restore moves the live pointer and leaves
+  the repo alone. A rename keeps the repo name. Deleting a site leaves its
+  repo, as it leaves its files in R2.
+
+Moving a site's source in: the owner's agent publishes with
+`publish.mjs --update <id> --source <dir>`, which creates the repo, pushes
+the history, and publishes with the commit. For a folder of another repo it
+splits the history out (`git subtree split --prefix=<folder>`), creates the
+repo (`publish.mjs source <id> --create`), pushes, and publishes with
+`--source-commit`. Sites that were published through GitHub Actions
+became ordinary sites in migration 0016 and move in the same way.
+
+## Apps
+
+Native iOS prototypes in SwiftUI, installed ad hoc on registered iPhones.
+`napConfig.apps` turns them on and names the Apple team, the bundle id
+prefix, and the ad hoc profile. Nap never builds apps; it signs them:
+
+```text
+agent → app repo (Artifacts) → Tuist project → xcodebuild without signing on a Mac
+agent → upload the zipped .app with sourceCommit → Nap checks the commit
+Nap → signer container (rcodesign) → signed .ipa in R2 → install link → iPhone
+```
+
+- **Repos.** An app is one Artifacts repo (`app-<slug>`, in `SOURCES`) with a
+  launcher and one module per prototype. Its targets are the launcher and any
+  standalone prototypes; each gets the bundle id `<prefix>.<target>`. Everyone
+  who can sign in can push to, publish, and install every app.
+- **Publishing.** A build names its commit, which must be the head of `main`
+  and contain the target's live build's commit, as with sites. Nap numbers
+  builds per target, keeps the unsigned zip and the signed `.ipa` under
+  `apps/<app>/builds/<id>/`, and moves `app_targets.live_build`.
+- **Signing.** The `SIGNER` binding is a Cloudflare Container built from
+  `containers/signer`. It gets the Apple Distribution key and certificate as an
+  environment variable, has no internet access, and signs without a timestamp.
+  It checks that the build is an arm64 iOS device build and that the profile
+  covers the bundle id. The profile comes from the App Store Connect API (team
+  key) and is cached in R2 at `apps/_signing/`. Deploys need Docker to build
+  the image.
+- **iPhones.** Ad hoc builds only install on iPhones in the profile. On
+  `/apps`, a signed-in person pastes an iPhone's UDID, or taps "Add this
+  iPhone" in Safari and installs a profile-service `.mobileconfig` whose UDID
+  iOS posts to `/_nap/enroll/<token>`. Nap registers the iPhone with Apple,
+  replaces the profile with one listing every enabled iPhone of the team, and
+  signs each live build again from its unsigned zip: at once for a pasted UDID,
+  at the next install for an enrollment. Apple allows 100 iPhones per team per
+  membership year.
+- **Installing.** The dashboard's `/apps` page makes an `itms-services` link.
+  iOS fetches the manifest and the `.ipa` from `/_nap/install/<token>/`
+  without the Access cookie, so each link is a token for one build that lasts
+  an hour.
+- **Data.** Apps cannot pass Access, so they sign in with the agent device
+  flow and use `/_nap/api/naps/<id>/data/*`, `/live`, and `/channel/<name>`
+  with the token. These are the site's own data and channel endpoints under
+  the token's identity; like frame requests, they do not count as using
+  Nap.
+- **Secrets.** `NAP_APPLE_SIGNING_PEM` and `NAP_ASC_PRIVATE_KEY` are
+  config repository secrets; `NAP_ASC_KEY_ID` and `NAP_ASC_ISSUER_ID` are
+  its variables. The Cloudflare API token needs Containers edit access.
+
+`pnpm test:apps` runs the whole path against an Artifacts test namespace with
+a real Xcode build and the real certificate (see the script for setup).

@@ -1,0 +1,20 @@
+#!/bin/sh
+# Builds a target and publishes it to Nap: pushes HEAD to main of the app's source repo, uploads
+# the unsigned build with that commit, and Nap signs it and makes it live.
+#   scripts/publish [target] ["notes for testers"]
+# Commit first: Nap only takes builds of the pushed head of main.
+set -eu
+cd "$(dirname "$0")/.."
+target=${1:-launcher}
+notes=${2:-}
+app=$(plutil -extract app raw -o - nap.json)
+nap=${NAP_URL:-https://{{rootDomain}}}
+
+if [ -n "$(git status --porcelain)" ]; then
+  echo "Commit your changes first: Nap publishes the commit you built." >&2
+  exit 1
+fi
+zip=$(./scripts/build "$target")
+script=$(mktemp -t nap-publish).mjs
+curl -fsSL "$nap/_nap/api/publish.mjs" -o "$script"
+node "$script" app publish "$app" "$zip" --target "$target" --source . --notes "$notes"

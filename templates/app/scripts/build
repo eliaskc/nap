@@ -1,0 +1,42 @@
+#!/bin/sh
+# Builds a target for iPhone without signing and zips it: build/<target>.zip.
+# Targets: "launcher", or the slug of a prototype with "standalone": true.
+# Nap signs the build when you publish it. Incremental builds take a few seconds.
+set -eu
+cd "$(dirname "$0")/.."
+target=${1:-launcher}
+case "$target" in
+  launcher) scheme=Launcher ;;
+  *)
+    if [ ! -f "Prototypes/$target/prototype.json" ]; then
+      echo "Unknown target: $target" >&2
+      exit 1
+    fi
+    scheme="Standalone_$(echo "$target" | tr - _)"
+    ;;
+esac
+
+./scripts/generate >/dev/null
+mkdir -p .build
+xcodebuild build \
+  -project NapApps.xcodeproj \
+  -scheme "$scheme" \
+  -configuration Debug \
+  -sdk iphoneos \
+  -destination 'generic/platform=iOS' \
+  -derivedDataPath .build/DerivedData \
+  CODE_SIGNING_ALLOWED=NO \
+  -quiet >.build/xcodebuild.log 2>&1 || {
+  grep -E "error:" .build/xcodebuild.log | sort -u >&2
+  echo "Build failed. Full log: .build/xcodebuild.log" >&2
+  exit 1
+}
+
+case "$scheme" in
+  Launcher) app=.build/DerivedData/Build/Products/Debug-iphoneos/Nap.app ;;
+  *) app=".build/DerivedData/Build/Products/Debug-iphoneos/$target.app" ;;
+esac
+mkdir -p build
+rm -f "build/$target.zip"
+ditto -c -k --keepParent "$app" "build/$target.zip"
+echo "build/$target.zip"

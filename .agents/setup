@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+# Prepares a fresh Amp orb for Nap. Must stay idempotent and non-interactive.
+set -euo pipefail
+
+cd "$(dirname "${BASH_SOURCE[0]}")/.."
+
+# Keep in sync with .github/workflows/ci.yml.
+PNPM_VERSION="10.33.0"
+BUN_VERSION="1.4.2"
+NODE_MAJOR="26"
+
+step() {
+  local label="$1"
+  shift
+  local start=$SECONDS
+  echo "==> $label"
+  "$@"
+  echo "<== $label ($((SECONDS - start))s)"
+}
+
+check_node() {
+  local major
+  major="$(node -p 'process.versions.node.split(".")[0]')"
+  if [[ "$major" != "$NODE_MAJOR" ]]; then
+    echo "warning: Node $major found; CI uses Node $NODE_MAJOR" >&2
+  fi
+}
+
+install_pnpm() {
+  if [[ "$(pnpm --version 2>/dev/null)" == "$PNPM_VERSION" ]]; then
+    echo "pnpm $PNPM_VERSION already installed"
+    return
+  fi
+  sudo npm install --global --no-fund --no-audit "pnpm@$PNPM_VERSION"
+}
+
+install_bun() {
+  if [[ "$(bun --version 2>/dev/null)" == "$BUN_VERSION" ]]; then
+    echo "bun $BUN_VERSION already installed"
+    return
+  fi
+  local tmp
+  tmp="$(mktemp -d)"
+  curl -fsSL -o "$tmp/bun.zip" \
+    "https://github.com/oven-sh/bun/releases/download/bun-v$BUN_VERSION/bun-linux-x64.zip"
+  unzip -q "$tmp/bun.zip" -d "$tmp"
+  sudo install -m 0755 "$tmp/bun-linux-x64/bun" /usr/local/bin/bun
+  rm -rf "$tmp"
+}
+
+install_deps() {
+  pnpm install --frozen-lockfile --prefer-offline
+  (cd sites/elo && pnpm install --frozen-lockfile --prefer-offline)
+}
+
+step "Check Node" check_node
+step "Install pnpm $PNPM_VERSION" install_pnpm
+step "Install Bun $BUN_VERSION" install_bun
+step "Install dependencies" install_deps
+
+echo "node $(node --version), pnpm $(pnpm --version), bun $(bun --version)"

@@ -1,0 +1,31 @@
+{
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    "nap.config.ts",
+    "vite.config.ts",
+    "alchemy.run.ts",
+    "scripts/infra/*.ts"
+  ],
+  "compilerOptions": {
+    "strict": true,
+    "types": ["node", "vite/client", "@cloudflare/workers-types"],
+    "esModuleInterop": true,
+    "jsx": "react-jsx",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["DOM", "DOM.Iterable", "ES2022"],
+    "isolatedModules": true,
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+    "target": "ES2022",
+    "allowJs": true,
+    "forceConsistentCasingInFileNames": true,
+    "paths": {
+      "~/nap.config": ["./nap.config.ts"],
+      "~/*": ["./src/*"]
+    },
+    "allowImportingTsExtensions": true,
+    "noEmit": true
+  }
+}
