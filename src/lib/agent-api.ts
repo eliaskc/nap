@@ -29,6 +29,7 @@ import { handleAppsApi, type AppsEnv } from "~/lib/apps";
 import { handleSiteDataRequest } from "~/lib/site-data";
 import { handleLiveRequest, publishChange, type SiteLive } from "~/lib/site-live";
 import { handleChannelRequest, type SiteChannel } from "~/lib/site-channel";
+import { handleRtcRequest, type RtcEnv } from "~/lib/site-rtc";
 
 /**
  * The agent API at <root>/_nap/api/*. Access bypasses this path, so every route except
@@ -44,7 +45,8 @@ import { handleChannelRequest, type SiteChannel } from "~/lib/site-channel";
  */
 
 type AgentEnv = DirectUploadEnv &
-  AppsEnv & {
+  AppsEnv &
+  RtcEnv & {
     DRAFT_LIMITER?: RateLimit;
     SOURCES?: unknown;
     LIVE?: DurableObjectNamespace<SiteLive>;
@@ -191,8 +193,9 @@ export async function handleAgentApi(
 
   if (rest === "" && method === "GET") return json({ nap: describe(nap) }, { headers: noStore });
 
-  // A nap's collections, live updates, and channels, for clients that cannot pass Access, such
-  // as native apps: the same calls as /_nap/data, /_nap/live, and /_nap/channel on the
+  // A nap's collections, live updates, channels, and ICE servers, for clients that cannot pass
+  // Access, such as native apps: the same calls as /_nap/data, /_nap/live, /_nap/channel, and
+  // /_nap/rtc on the
   // nap's own host, as the token's person. WebSockets send the token in the Authorization
   // header. Like artifact frames, these requests do not count as using Nap.
   if (rest.startsWith("/data/")) {
@@ -206,6 +209,7 @@ export async function handleAgentApi(
   if (rest.startsWith("/channel/")) {
     return handleChannelRequest(env, nap.slug, rest.slice("/channel/".length), request, agent);
   }
+  if (rest === "/rtc") return handleRtcRequest(env, nap.slug, request, agent);
 
   if (rest === "/versions" && method === "POST") {
     return publish(env, request, url, agent, nap.slug, (published) =>

@@ -208,6 +208,9 @@ export class NapWorker extends Cloudflare.Website.Vite<NapWorker>()(
     const ascPrivateKey = appsInProduction
       ? yield* secret("NAP_ASC_PRIVATE_KEY")
       : yield* optional("NAP_ASC_PRIVATE_KEY");
+    // Voice and video between the people on a nap (/_nap/rtc): a Cloudflare Realtime TURN key.
+    // Optional on every stage; without it, pages get STUN only, which fails on some networks.
+    const turnKeyToken = yield* optional("NAP_TURN_KEY_API_TOKEN");
     return {
       name: production ? "nap" : `nap-${stage}`,
       main: "./src/worker.ts",
@@ -268,6 +271,8 @@ export class NapWorker extends Cloudflare.Website.Vite<NapWorker>()(
         NAP_ASC_PRIVATE_KEY: ascPrivateKey,
         NAP_ASC_KEY_ID: yield* plain("NAP_ASC_KEY_ID"),
         NAP_ASC_ISSUER_ID: yield* plain("NAP_ASC_ISSUER_ID"),
+        NAP_TURN_KEY_ID: yield* plain("NAP_TURN_KEY_ID"),
+        NAP_TURN_KEY_API_TOKEN: turnKeyToken,
       },
       observability: { enabled: true },
     };

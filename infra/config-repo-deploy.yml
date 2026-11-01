@@ -87,6 +87,9 @@ jobs:
           NAP_ASC_PRIVATE_KEY: ${{ secrets.NAP_ASC_PRIVATE_KEY }}
           NAP_ASC_KEY_ID: ${{ vars.NAP_ASC_KEY_ID }}
           NAP_ASC_ISSUER_ID: ${{ vars.NAP_ASC_ISSUER_ID }}
+          # Optional: a Cloudflare Realtime TURN key, for voice and video on naps (/_nap/rtc).
+          NAP_TURN_KEY_ID: ${{ vars.NAP_TURN_KEY_ID }}
+          NAP_TURN_KEY_API_TOKEN: ${{ secrets.NAP_TURN_KEY_API_TOKEN }}
         run: |
           test -n "$CLOUDFLARE_API_TOKEN" || { echo "Missing secret CLOUDFLARE_API_TOKEN"; exit 1; }
           test -n "$NAP_R2_ACCESS_KEY_ID" && test -n "$NAP_R2_SECRET_ACCESS_KEY" || { echo "Missing secrets NAP_R2_ACCESS_KEY_ID and NAP_R2_SECRET_ACCESS_KEY"; exit 1; }

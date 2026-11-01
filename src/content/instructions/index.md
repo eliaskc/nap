@@ -58,6 +58,7 @@ Read one with `curl -fsSL https://{{rootDomain}}/_nap/api/instructions/<topic>`.
 - `source`: source repos for sites with a build step, and changing a site that has one.
 - `data`: collections that save JSON documents, with live updates (`nap.db`).
 - `channels`: multiplayer, presence, and messages between the people on a page (`nap.channel`).
+- `voice`: a live audio call between the people on a page (`nap.voice`).
 - `fetch`: reading public APIs from other origins from a site (`nap.fetch`).
 - `api`: the HTTP API without the script: sign-in, publishing, files, versions, restore, comments, and limits.
 - `drafts`: publishing without a token through a claim link the user opens.

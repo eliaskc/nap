@@ -18,6 +18,7 @@ import { handleSiteDataRequest } from "~/lib/site-data";
 import { serveSiteDataClient } from "~/lib/site-data-client";
 import { handleLiveRequest, publishChange } from "~/lib/site-live";
 import { handleChannelRequest } from "~/lib/site-channel";
+import { handleRtcRequest } from "~/lib/site-rtc";
 import { handleSiteFetch } from "~/lib/site-fetch";
 import { resolveHost, serveUploadedSite } from "~/lib/site-serving";
 import { serveShareWidget } from "~/lib/share-widget";
@@ -117,6 +118,10 @@ export default {
         const [, localSlug, name] = localChannelMatch;
         return handleChannelRequest(env, localSlug, name, request, getIdentity(request));
       }
+      const localRtcMatch = url.pathname.match(/^\/s\/([^/]+)\/_nap\/rtc$/);
+      if (localRtcMatch) {
+        return handleRtcRequest(env, localRtcMatch[1], request, getIdentity(request));
+      }
       const localFetchMatch = url.pathname.match(/^\/s\/([^/]+)\/_nap\/fetch$/);
       if (localFetchMatch) {
         const email = getIdentity(request).email;
@@ -166,6 +171,9 @@ export default {
       if (url.pathname.startsWith("/_nap/channel/")) {
         const name = url.pathname.slice("/_nap/channel/".length);
         return handleChannelRequest(env, slug, name, request, getIdentity(request));
+      }
+      if (url.pathname === "/_nap/rtc") {
+        return handleRtcRequest(env, slug, request, getIdentity(request));
       }
       if (url.pathname === "/_nap/fetch") {
         return handleSiteFetch(env, slug, request, getIdentity(request).email, rootDomain);

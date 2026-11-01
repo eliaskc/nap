@@ -7,6 +7,7 @@ import fetch from "~/content/instructions/fetch.md?raw";
 import index from "~/content/instructions/index.md?raw";
 import sites from "~/content/instructions/sites.md?raw";
 import source from "~/content/instructions/source.md?raw";
+import voice from "~/content/instructions/voice.md?raw";
 import { OPTIONAL_TOPICS, renderInstructions } from "~/lib/instructions-text";
 import { napConfig } from "~/nap.config";
 
@@ -20,6 +21,7 @@ const TOPICS: Record<string, string> = {
   source,
   data,
   channels,
+  voice,
   fetch,
   api,
   drafts,

@@ -474,6 +474,356 @@ const CLIENT_SOURCE = String.raw`(() => {
     return api;
   }
 
+  // Voice: one audio call among the pages on a channel. Each pair of pages in the call connects
+  // directly with WebRTC; the channel carries only presence ({ inCall, muted }) and the
+  // offers, answers, and candidates between them. /_nap/rtc gives TURN servers for networks
+  // that block direct connections. One object per name; voice(name) returns it until close().
+  const voices = new Map();
+  const VOICE_EVENTS = ["change", "error"];
+  const STUN_ONLY = [{ urls: ["stun:stun.cloudflare.com:3478"] }];
+  const SPEAKING_LEVEL = 0.015;
+  const SPEAKING_HOLD_MS = 400;
+
+  function voice(name = "voice") {
+    const existing = voices.get(name);
+    if (existing) return existing;
+    const room = channel(name);
+    const listeners = new Map(VOICE_EVENTS.map((event) => [event, new Set()]));
+    // Peer id: { pc, polite, makingOffer, ignoreOffer, audio, state }.
+    const links = new Map();
+    // Peer id (or "self"): { analyser, data, speaking, loudAt }.
+    const levels = new Map();
+    let status = "idle";
+    let muted = false;
+    let mic = null;
+    let iceServers = STUN_ONLY;
+    let iceTimer;
+    let levelTimer;
+    let audioContext = null;
+    let joining = null;
+    let closed = false;
+
+    function emit(event, value) {
+      for (const listener of listeners.get(event)) {
+        try {
+          listener(value);
+        } catch (error) {
+          console.error(error);
+        }
+      }
+    }
+    function changed() {
+      emit("change", api);
+    }
+    function fail(error) {
+      emit("error", error instanceof NapError ? error : new NapError(String(error && error.message || error), 500));
+    }
+    function inCall(peer) {
+      return Boolean(peer.state && peer.state.inCall);
+    }
+    function participants() {
+      return room.peers.filter(inCall).map((peer) => {
+        const level = levels.get(peer.self ? "self" : peer.id);
+        const link = links.get(peer.id);
+        return {
+          id: peer.id,
+          email: peer.email,
+          name: peer.name,
+          self: peer.self,
+          muted: Boolean(peer.state.muted),
+          speaking: Boolean(level && level.speaking) && !peer.state.muted,
+          // This page's connection to the peer: "connecting", "connected", "failed", ...
+          // null for this page, or while this page is not in the call.
+          connection: peer.self || status !== "joined" ? null : link ? link.state : "connecting",
+        };
+      });
+    }
+
+    async function loadIceServers() {
+      clearTimeout(iceTimer);
+      try {
+        const response = await fetch(napPath("rtc"));
+        const result = await response.json();
+        if (!response.ok) throw new NapError(result.error || "Nap request failed", response.status);
+        iceServers = result.iceServers;
+        if (result.expiresAt) {
+          // Ask again half an hour before the TURN credentials expire.
+          const wait = Date.parse(result.expiresAt) - Date.now() - 30 * 60 * 1000;
+          iceTimer = setTimeout(refreshIceServers, Math.max(wait, 60 * 1000));
+        }
+      } catch (error) {
+        console.warn("Nap voice: no TURN servers, some networks will not connect", error);
+        iceServers = STUN_ONLY;
+      }
+    }
+    async function refreshIceServers() {
+      await loadIceServers();
+      for (const link of links.values()) {
+        try {
+          link.pc.setConfiguration({ iceServers });
+        } catch {
+          // Closed.
+        }
+      }
+    }
+
+    // Speaking: the loudness of each stream, checked ten times a second.
+    function watchLevel(key, stream) {
+      if (!audioContext) return;
+      try {
+        const source = audioContext.createMediaStreamSource(stream);
+        const analyser = audioContext.createAnalyser();
+        analyser.fftSize = 512;
+        source.connect(analyser);
+        levels.set(key, { source, analyser, data: new Float32Array(analyser.fftSize), speaking: false, loudAt: 0 });
+      } catch {
+        return;
+      }
+      if (!levelTimer) levelTimer = setInterval(checkLevels, 100);
+    }
+    function unwatchLevel(key) {
+      const level = levels.get(key);
+      if (!level) return;
+      try {
+        level.source.disconnect();
+      } catch {
+        // Already gone.
+      }
+      levels.delete(key);
+    }
+    function checkLevels() {
+      const now = Date.now();
+      let any = false;
+      for (const level of levels.values()) {
+        level.analyser.getFloatTimeDomainData(level.data);
+        let sum = 0;
+        for (const value of level.data) sum += value * value;
+        if (Math.sqrt(sum / level.data.length) > SPEAKING_LEVEL) level.loudAt = now;
+        const speaking = now - level.loudAt < SPEAKING_HOLD_MS;
+        if (speaking !== level.speaking) {
+          level.speaking = speaking;
+          any = true;
+        }
+      }
+      if (any) changed();
+    }
+
+    // One connection per other person in the call ("perfect negotiation": both sides may offer,
+    // and the polite side gives way when offers cross).
+    function link(peerId) {
+      const existing = links.get(peerId);
+      if (existing) return existing;
+      const pc = new RTCPeerConnection({ iceServers });
+      const audio = document.createElement("audio");
+      audio.autoplay = true;
+      audio.hidden = true;
+      document.body.appendChild(audio);
+      const entry = { pc, audio, polite: room.id > peerId, makingOffer: false, ignoreOffer: false, state: "connecting" };
+      links.set(peerId, entry);
+      const signal = (data) => room.send(data, { to: peerId });
+      pc.onnegotiationneeded = async () => {
+        try {
+          entry.makingOffer = true;
+          await pc.setLocalDescription();
+          signal({ voice: "description", description: pc.localDescription.toJSON() });
+        } catch (error) {
+          if (links.get(peerId) === entry) fail(error);
+        } finally {
+          entry.makingOffer = false;
+        }
+      };
+      pc.onicecandidate = ({ candidate }) => {
+        if (candidate) signal({ voice: "candidate", candidate: candidate.toJSON() });
+      };
+      pc.ontrack = ({ track, streams }) => {
+        const stream = streams[0] || new MediaStream([track]);
+        if (audio.srcObject === stream) return;
+        audio.srcObject = stream;
+        audio.play().catch(() => undefined);
+        unwatchLevel(peerId);
+        watchLevel(peerId, stream);
+      };
+      pc.onconnectionstatechange = () => {
+        entry.state = pc.connectionState;
+        if (pc.connectionState === "failed") pc.restartIce();
+        changed();
+      };
+      for (const track of mic.getTracks()) pc.addTrack(track, mic);
+      return entry;
+    }
+    function unlink(peerId) {
+      const entry = links.get(peerId);
+      if (!entry) return;
+      links.delete(peerId);
+      entry.pc.close();
+      entry.audio.srcObject = null;
+      entry.audio.remove();
+      unwatchLevel(peerId);
+    }
+
+    async function onSignal(peerId, data) {
+      const entry = link(peerId);
+      const pc = entry.pc;
+      try {
+        if (data.voice === "description") {
+          const description = data.description;
+          const collision =
+            description.type === "offer" && (entry.makingOffer || pc.signalingState !== "stable");
+          entry.ignoreOffer = !entry.polite && collision;
+          if (entry.ignoreOffer) return;
+          await pc.setRemoteDescription(description);
+          if (description.type === "offer") {
+            await pc.setLocalDescription();
+            room.send({ voice: "description", description: pc.localDescription.toJSON() }, { to: peerId });
+          }
+        } else if (data.voice === "candidate") {
+          try {
+            await pc.addIceCandidate(data.candidate);
+          } catch (error) {
+            if (!entry.ignoreOffer) throw error;
+          }
+        }
+      } catch (error) {
+        if (links.get(peerId) === entry) fail(error);
+      }
+    }
+
+    // Connect to everyone in the call, and drop whoever left it.
+    function sync() {
+      if (status === "joined") {
+        const others = new Set(room.peers.filter((peer) => !peer.self && inCall(peer)).map((peer) => peer.id));
+        for (const peerId of [...links.keys()]) if (!others.has(peerId)) unlink(peerId);
+        for (const peerId of others) link(peerId);
+      }
+      changed();
+    }
+
+    const offPresence = room.on("presence", sync);
+    const offMessage = room.on("message", ({ from, data }) => {
+      if (status !== "joined" || !data || typeof data.voice !== "string" || from.id === room.id) return;
+      onSignal(from.id, data);
+    });
+    const offStatus = room.on("status", (next) => {
+      if (next === "closed" && status !== "idle") stop();
+      changed();
+    });
+    const offError = room.on("error", (error) => emit("error", error));
+
+    async function join() {
+      if (closed) throw new NapError("This voice call is closed", 400);
+      if (status === "joined") return;
+      if (joining) return joining;
+      if (!navigator.mediaDevices || typeof RTCPeerConnection !== "function") {
+        throw new NapError("Voice needs a browser with WebRTC, on https", 400);
+      }
+      status = "joining";
+      changed();
+      joining = (async () => {
+        try {
+          const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+          // Made during the click, so the browser lets it run.
+          if (AudioContextClass && !audioContext) audioContext = new AudioContextClass();
+          const [stream] = await Promise.all([
+            navigator.mediaDevices.getUserMedia({
+              audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+            }),
+            loadIceServers(),
+          ]);
+          if (status !== "joining") {
+            for (const track of stream.getTracks()) track.stop();
+            return;
+          }
+          mic = stream;
+          for (const track of mic.getAudioTracks()) track.enabled = !muted;
+          if (audioContext && audioContext.state === "suspended") audioContext.resume().catch(() => undefined);
+          watchLevel("self", mic);
+          status = "joined";
+          room.setPresence({ inCall: true, muted });
+          sync();
+        } catch (error) {
+          stop();
+          const napError =
+            error && error.name === "NotAllowedError"
+              ? new NapError("Microphone access was denied", 403)
+              : error && error.name === "NotFoundError"
+                ? new NapError("No microphone found", 404)
+                : error;
+          fail(napError);
+          throw napError;
+        } finally {
+          joining = null;
+        }
+      })();
+      return joining;
+    }
+
+    function stop() {
+      const wasActive = status !== "idle";
+      status = "idle";
+      clearTimeout(iceTimer);
+      for (const peerId of [...links.keys()]) unlink(peerId);
+      unwatchLevel("self");
+      clearInterval(levelTimer);
+      levelTimer = undefined;
+      if (mic) for (const track of mic.getTracks()) track.stop();
+      mic = null;
+      if (wasActive && room.status !== "closed") room.setPresence(null);
+    }
+
+    const api = Object.freeze({
+      name,
+      /** "idle", "joining", or "joined". */
+      get status() {
+        return status;
+      },
+      get joined() {
+        return status === "joined";
+      },
+      get muted() {
+        return muted;
+      },
+      /** Everyone in the call, this page included once joined (self: true), oldest first. */
+      get participants() {
+        return participants();
+      },
+      /** Asks for the microphone and joins. Call it from a click. */
+      join,
+      leave() {
+        stop();
+        changed();
+      },
+      setMuted(next) {
+        muted = Boolean(next);
+        if (mic) for (const track of mic.getAudioTracks()) track.enabled = !muted;
+        if (status === "joined") room.setPresence({ inCall: true, muted });
+        changed();
+      },
+      /** "change" (with this object) on every join, leave, mute, speaking, or connection change; "error". */
+      on(event, listener) {
+        const set = listeners.get(event);
+        if (!set) throw new TypeError("Unknown voice event: " + event);
+        set.add(listener);
+        return () => set.delete(listener);
+      },
+      /** Leaves the call and the channel. */
+      close() {
+        if (closed) return;
+        closed = true;
+        stop();
+        offPresence();
+        offMessage();
+        offStatus();
+        offError();
+        voices.delete(name);
+        room.leave();
+        if (audioContext) audioContext.close().catch(() => undefined);
+        audioContext = null;
+      },
+    });
+    voices.set(name, api);
+    return api;
+  }
+
   // Reads a public URL through Nap, for APIs that do not allow other origins. The site lists
   // the hosts in nap.json: { "fetch": ["api.example.com", "*.example.org"] }.
   async function proxyFetch(url, options = {}) {
@@ -492,6 +842,7 @@ const CLIENT_SOURCE = String.raw`(() => {
 
   const nap = Object.freeze({
     channel,
+    voice,
     fetch: proxyFetch,
     db: Object.freeze({ collection }),
     me,

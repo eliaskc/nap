@@ -356,6 +356,13 @@ try {
     );
   });
   assert.equal(welcome.t, "welcome", "the channel speaks to a token");
+  // ICE servers for voice: STUN at least, and TURN credentials when the stage has a TURN key.
+  const rtc = await call(`/_nap/api/naps/${direct.id}/rtc`, { headers: bearer(otherToken) });
+  assert.equal(rtc.status, 200, rtc.text);
+  assert.ok(rtc.json.iceServers.length > 0, "rtc lists ICE servers");
+  assert.equal(rtc.json.turn, Boolean(process.env.NAP_TURN_KEY_API_TOKEN), rtc.text);
+  assert.equal(rtc.headers["cache-control"], "no-store");
+  assert.equal((await call(`/_nap/api/naps/${direct.id}/rtc`)).status, 401, "rtc needs a token");
 
   // A direct upload of a new version keeps access; access on an update is an error.
   const directUpdate = await postJson(

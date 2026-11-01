@@ -96,6 +96,10 @@ the secrets and a deploy workflow that deploys this code with them.
    Add the secrets `NAP_APPLE_SIGNING_PEM` (the certificate's private key and
    certificate in one PEM) and `NAP_ASC_PRIVATE_KEY` (the `.p8`), and the
    variables `NAP_ASC_KEY_ID` and `NAP_ASC_ISSUER_ID`.
+8. **Voice (optional).** For calls on naps (`nap.voice`), create a TURN key:
+   `cf realtime turn keys create --name nap`. Its `uid` is the variable
+   `NAP_TURN_KEY_ID` and its `secret` is the secret `NAP_TURN_KEY_API_TOKEN`.
+   Without them, calls use STUN only and fail on some networks.
 
 To stay on a release instead of `main`, set the config repository variable
 `NAP_REF` to a tag of this repository. To add someone, put their email in
@@ -197,6 +201,17 @@ attachment, so it survives hibernation. The object stamps every message with
 the sender from the identity the Worker checked, rate-limits each socket, and
 rechecks access at most once a minute while messages flow. Nap runs no game
 logic; pages agree on the longest-connected peer as the host for shared state.
+
+### Voice
+
+`nap.voice` (in the client script) puts the people on a channel in one audio
+call. Each pair of pages connects directly with WebRTC, and the channel only
+carries the offers, answers, and candidates between them, so Nap never sees
+the audio. Direct connections fail on many mobile and office networks, so
+`/_nap/rtc` (`src/lib/site-rtc.ts`) gives people who can view the nap
+short-lived Cloudflare TURN credentials, made from the instance's TURN key.
+The key stays in the Worker. A connection to every other person keeps calls
+to about eight people.
 
 ### Fetches
 
@@ -401,7 +416,7 @@ Nap → signer container (rcodesign) → signed .ipa in R2 → install link → 
   without the Access cookie, so each link is a token for one build that lasts
   an hour.
 - **Data.** Apps cannot pass Access, so they sign in with the agent device
-  flow and use `/_nap/api/naps/<id>/data/*`, `/live`, and `/channel/<name>`
+  flow and use `/_nap/api/naps/<id>/data/*`, `/live`, `/channel/<name>`, and `/rtc`
   with the token. These are the site's own data and channel endpoints under
   the token's identity; like frame requests, they do not count as using
   Nap.

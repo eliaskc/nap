@@ -9,6 +9,7 @@ import { handleSiteDataRequest } from "~/lib/site-data";
 import { serveSiteDataClient } from "~/lib/site-data-client";
 import { handleLiveRequest, publishChange, type SiteLive } from "~/lib/site-live";
 import { handleChannelRequest, type SiteChannel } from "~/lib/site-channel";
+import { handleRtcRequest, type RtcEnv } from "~/lib/site-rtc";
 import { fileHeaders, findViewableNap, getNapFile, normalizeRequestPath } from "~/lib/site-serving";
 import { serveShareWidget } from "~/lib/share-widget";
 import { findVersion, listVersions, restoreVersion } from "~/lib/versions";
@@ -38,7 +39,7 @@ import COMMENTS_FRAME_SOURCE from "virtual:nap-comments-frame";
  *                                       an earlier version's files, for the history preview
  */
 
-type ViewerEnv = {
+type ViewerEnv = RtcEnv & {
   DB: D1Database;
   SITES: R2Bucket;
   LIVE?: DurableObjectNamespace<SiteLive>;
@@ -230,6 +231,9 @@ export async function handleFrameRequest(env: ViewerEnv, request: Request, ctx?:
   if (rest.startsWith("/_nap/channel/")) {
     const name = rest.slice("/_nap/channel/".length);
     return handleChannelRequest(env, frame.slug, name, request, identity, frame.expiresAt);
+  }
+  if (rest === "/_nap/rtc") {
+    return withCors(await handleRtcRequest(env, frame.slug, request, identity));
   }
   if (rest.startsWith("/_nap/")) return withCors(new Response("Not found", { status: 404 }));
 
