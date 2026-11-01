@@ -1,4 +1,4 @@
-import type { ApplicationProps } from "alchemy/Cloudflare/Access";
+import type { ApplicationProps } from "@alchemy.run/cloudflare/Access";
 import { napConfig } from "../nap.config.ts";
 
 const root = napConfig.rootDomain;

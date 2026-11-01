@@ -1,5 +1,5 @@
 import * as Alchemy from "alchemy";
-import * as Cloudflare from "alchemy/Cloudflare";
+import * as Cloudflare from "@alchemy.run/cloudflare";
 import * as RemovalPolicy from "alchemy/RemovalPolicy";
 import { Stack } from "alchemy/Stack";
 import * as Config from "effect/Config";
@@ -182,10 +182,10 @@ export class NapWorker extends Cloudflare.Website.Vite<NapWorker>()(
     // the Nap bucket. Deploys read its S3 credentials from the environment (GitHub secrets in
     // CI). Other stages leave them empty, and Nap falls back to uploads through the Worker.
     // Local stages may set all four from the environment: the HTTP tests use fake values.
-    const secret = (name: string) => Effect.orDie(Config.redacted(name));
+    const secret = (name: string) => Effect.orDie(Config.Redacted(name));
     const local = (name: string) =>
       isLocalStage()
-        ? Effect.orDie(Config.string(name).pipe(Config.withDefault("")))
+        ? Effect.orDie(Config.String(name).pipe(Config.withDefault("")))
         : Effect.succeed("");
     const r2AccessKeyId = production
       ? yield* secret("NAP_R2_ACCESS_KEY_ID")
@@ -199,9 +199,9 @@ export class NapWorker extends Cloudflare.Website.Vite<NapWorker>()(
     // Production reads them from the environment. Other stages may set them; without them,
     // publishing a build fails with a clear error.
     const optional = (name: string) =>
-      Effect.orDie(Config.redacted(name).pipe(Config.withDefault(Redacted.make(""))));
+      Effect.orDie(Config.Redacted(name).pipe(Config.withDefault(Redacted.make(""))));
     const appsInProduction = production && napConfig.apps !== null;
-    const plain = (name: string) => Effect.orDie(Config.string(name).pipe(Config.withDefault("")));
+    const plain = (name: string) => Effect.orDie(Config.String(name).pipe(Config.withDefault("")));
     const appSigningPem = appsInProduction
       ? yield* secret("NAP_APPLE_SIGNING_PEM")
       : yield* optional("NAP_APPLE_SIGNING_PEM");

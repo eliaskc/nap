@@ -1,7 +1,8 @@
-import { Credentials, CloudflareApiLive, CloudflareEnvironment } from "alchemy/Cloudflare";
+import { Credentials, CloudflareApiLive, CloudflareEnvironment } from "@alchemy.run/cloudflare";
 import { AuthProviders } from "alchemy/Auth";
 import { PlatformServices } from "alchemy/Util/PlatformServices";
 import * as Effect from "effect/Effect";
+import * as FetchHttpClient from "effect/http/FetchHttpClient";
 import * as Redacted from "effect/Redacted";
 
 // Use the nap Alchemy profile.
@@ -22,6 +23,7 @@ export const cloudflareAuth = () => {
       Effect.provide(CloudflareApiLive()),
       Effect.provideService(AuthProviders, {}),
       Effect.provide(PlatformServices),
+      Effect.provide(FetchHttpClient.layer),
     ),
   );
 };

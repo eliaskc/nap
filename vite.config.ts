@@ -3,6 +3,7 @@ import cloudflare from "@alchemy.run/cloudflare-runtime/vite";
 import { tanstackStart } from "@tanstack/react-start/plugin/vite";
 import viteReact from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
+import { napConfig } from "./nap.config.ts";
 
 /**
  * Builds part of the artifact comments (src/comments) as one self-contained file. They load
@@ -85,6 +86,8 @@ function commentsFrameModule(): Plugin {
 export default defineConfig({
   server: {
     port: 3000,
+    // Nap routes by host: the dashboard at the root domain, each site at <slug>.<root>.
+    allowedHosts: [`.${napConfig.rootDomain}`],
   },
   resolve: {
     tsconfigPaths: true,
