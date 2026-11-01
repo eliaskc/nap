@@ -1,10 +1,11 @@
+import { Effect, Predicate } from "effect";
 import { DEFAULT_ACCESS } from "~/lib/deployment-text";
-import { ensureProfile, json, objectKey, slugify, type Identity } from "~/lib/nap-server";
+import { ensureProfile, objectKey, slugify, type Identity } from "~/lib/nap-server";
 import {
   canViewSite,
   isSameEmail,
   isVisibility,
-  normalizeEmail,
+  normalizeEmails,
   type Visibility,
 } from "~/lib/site-access";
 import {
@@ -22,18 +23,16 @@ import {
   type SiteKind,
 } from "~/lib/uploads";
 import { insertVersion } from "~/lib/versions";
+import { Database, sql } from "~/server/database";
+import { fail, failText, json, noStore } from "~/server/http";
+import { RateLimiter } from "~/server/platform";
+import { objectHeaders, Storage } from "~/server/storage";
 
 export const DRAFT_TTL_HOURS = 24;
 const DRAFT_ID_PATTERN = /^[A-Za-z0-9_-]{24}$/;
 const MAX_REPLACES_CHAIN = 20;
 const UNTITLED_ARTIFACT = "Untitled artifact";
 const UNTITLED_SITE = "Untitled site";
-
-type DraftEnv = {
-  DB: D1Database;
-  SITES: R2Bucket;
-  DRAFT_LIMITER?: RateLimit;
-};
 
 type DraftRow = {
   id: string;
@@ -98,68 +97,59 @@ function parseDraftRef(value: string) {
  * - slug: suggested subdomain for a site
  * - replaces: claim id (or URL) of an earlier draft; publishing can update what it became
  */
-export async function handleCreateDraft(env: DraftEnv, request: Request) {
+export const handleCreateDraft = Effect.fn("handleCreateDraft")(function* (request: Request) {
   if (request.method !== "POST") {
-    return json(
-      { error: "Use POST to upload a draft" },
-      { status: 405, headers: { allow: "POST" } },
-    );
+    return yield* fail(405, "Use POST to upload a draft", {}, { allow: "POST" });
   }
 
-  if (env.DRAFT_LIMITER) {
-    const key = request.headers.get("cf-connecting-ip") ?? "unknown";
-    const { success } = await env.DRAFT_LIMITER.limit({ key });
-    if (!success) return json({ error: "Too many uploads. Wait a minute." }, { status: 429 });
+  const key = request.headers.get("cf-connecting-ip") ?? "unknown";
+  if (!(yield* (yield* RateLimiter).allow(key))) {
+    return yield* fail(429, "Too many uploads. Wait a minute.");
   }
 
-  const tooLarge = rejectLargeBody(request);
-  if (tooLarge) return tooLarge;
+  yield* rejectLargeBody(request);
 
   const url = new URL(request.url);
-  const parsed = await readUpload(request, url, ["title", "slug", "kind", "replaces"]);
-  if (parsed instanceof Response) return parsed;
+  const parsed = yield* readUpload(request, url, ["title", "slug", "kind", "replaces"]);
   const { files } = parsed;
   const title = parsed.fields.title.slice(0, 120);
   const slug = slugify(parsed.fields.slug);
   const fields = parsed.fields;
 
-  const checked = checkFiles(files);
-  if (checked instanceof Response) return checked;
-  const { totalBytes } = checked;
+  const { totalBytes } = yield* checkFiles(files);
 
   let replacesDraftId: string | null = null;
   let kind: SiteKind;
   if (fields.replaces) {
     replacesDraftId = parseDraftRef(fields.replaces);
-    const replaced = replacesDraftId ? await getDraft(env.DB, replacesDraftId) : null;
-    if (!replaced) return json({ error: "replaces: draft not found" }, { status: 404 });
+    const replaced = replacesDraftId ? yield* getDraft(replacesDraftId) : null;
+    if (!replaced) return yield* fail(404, "replaces: draft not found");
     // An update keeps the kind of what it updates.
     kind = replaced.kind;
   } else if (fields.kind === "site" || fields.kind === "artifact") {
     kind = fields.kind;
   } else if (fields.kind) {
-    return json({ error: 'kind must be "artifact" or "site"' }, { status: 400 });
+    return yield* fail(400, 'kind must be "artifact" or "site"');
   } else {
     kind = slug ? "site" : "artifact";
   }
 
+  const storage = yield* Storage;
   const id = newDraftId();
   for (const file of files) {
-    await env.SITES.put(draftKey(id, file.path), file.body.stream(), {
+    yield* storage.put(draftKey(id, file.path), file.body.stream(), {
       httpMetadata: { contentType: contentTypeForPath(file.path) },
     });
   }
 
+  const db = yield* Database;
   const expiresAt = new Date(Date.now() + DRAFT_TTL_HOURS * 60 * 60 * 1000).toISOString();
-  await env.DB.batch([
+  yield* db.batch([
     // Drop metadata for old drafts. An R2 lifecycle rule on `drafts/` removes their files.
-    env.DB.prepare(
-      "DELETE FROM drafts WHERE expires_at < strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-7 days')",
-    ),
-    env.DB.prepare(
+    sql("DELETE FROM drafts WHERE expires_at < strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-7 days')"),
+    sql(
       `INSERT INTO drafts (id, kind, title, slug, replaces_draft_id, file_count, total_bytes, expires_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).bind(
       id,
       kind,
       title,
@@ -186,68 +176,67 @@ export async function handleCreateDraft(env: DraftEnv, request: Request) {
     },
     { status: 201 },
   );
-}
+});
 
-async function getDraft(db: D1Database, id: string) {
+const getDraft = Effect.fnUntraced(function* (id: string) {
   if (!isDraftId(id)) return null;
-  return db
-    .prepare(
-      `SELECT id, kind, title, slug, replaces_draft_id AS replacesDraftId,
-              file_count AS fileCount, total_bytes AS totalBytes,
-              created_at AS createdAt, expires_at AS expiresAt, claimed_at AS claimedAt,
-              claimed_by_email AS claimedByEmail, site_slug AS siteSlug
-       FROM drafts WHERE id = ?`,
-    )
-    .bind(id)
-    .first<DraftRow>();
-}
+  const db = yield* Database;
+  return yield* db.first<DraftRow>(
+    `SELECT id, kind, title, slug, replaces_draft_id AS replacesDraftId,
+            file_count AS fileCount, total_bytes AS totalBytes,
+            created_at AS createdAt, expires_at AS expiresAt, claimed_at AS claimedAt,
+            claimed_by_email AS claimedByEmail, site_slug AS siteSlug
+     FROM drafts WHERE id = ?`,
+    id,
+  );
+});
 
-async function getTargetSite(db: D1Database, slug: string) {
-  return db
-    .prepare(
-      `SELECT slug, kind, title, current_version AS currentVersion,
-              created_by_email AS createdByEmail, source_repo AS sourceRepo, visibility
-       FROM sites WHERE slug = ?`,
-    )
-    .bind(slug)
-    .first<TargetSite>();
-}
+const getTargetSite = Effect.fnUntraced(function* (slug: string) {
+  const db = yield* Database;
+  return yield* db.first<TargetSite>(
+    `SELECT slug, kind, title, current_version AS currentVersion,
+            created_by_email AS createdByEmail, source_repo AS sourceRepo, visibility
+     FROM sites WHERE slug = ?`,
+    slug,
+  );
+});
 
 /**
  * Follows `replaces` links back to the first draft that was published, and returns that site.
  * An unpublished draft in the middle of the chain is skipped: its newer draft supersedes it.
  */
-async function resolveReplacedSite(db: D1Database, draft: DraftRow) {
+const resolveReplacedSite = Effect.fnUntraced(function* (draft: DraftRow) {
   let ref = draft.replacesDraftId;
   for (let step = 0; ref && step < MAX_REPLACES_CHAIN; step++) {
-    const previous = await getDraft(db, ref);
+    const previous = yield* getDraft(ref);
     if (!previous) return null;
-    if (previous.siteSlug) return getTargetSite(db, previous.siteSlug);
+    if (previous.siteSlug) return yield* getTargetSite(previous.siteSlug);
     ref = previous.replacesDraftId;
   }
   return null;
-}
+});
 
 /** The site this draft would update: from `replaces`, or for sites, an existing slug. */
-async function findTargetSite(db: D1Database, draft: DraftRow) {
-  const replaced = await resolveReplacedSite(db, draft);
+const findTargetSite = Effect.fnUntraced(function* (draft: DraftRow) {
+  const replaced = yield* resolveReplacedSite(draft);
   if (replaced) return replaced;
-  if (draft.kind === "site" && draft.slug) return getTargetSite(db, draft.slug);
+  if (draft.kind === "site" && draft.slug) return yield* getTargetSite(draft.slug);
   return null;
-}
+});
 
 /**
  * Anyone who can view a nap may publish a new version of it. Not from a claim link when the site
  * has a source repo: its versions must come from a pushed commit.
  */
-async function canUpdate(db: D1Database, site: TargetSite, identity: Identity) {
-  return !site.sourceRepo && canViewSite(db, site, identity.email);
-}
+const canUpdate = Effect.fnUntraced(function* (site: TargetSite, identity: Identity) {
+  if (site.sourceRepo) return false;
+  return yield* canViewSite(site, identity.email);
+});
 
 /** GET /api/drafts/:id — what the claim page shows. */
-export async function describeDraft(db: D1Database, identity: Identity, id: string) {
-  const draft = await getDraft(db, id);
-  if (!draft) return json({ error: "Draft not found" }, { status: 404 });
+export const describeDraft = Effect.fn("describeDraft")(function* (identity: Identity, id: string) {
+  const draft = yield* getDraft(id);
+  if (!draft) return yield* fail(404, "Draft not found");
 
   const claimedByMe = draft.claimedByEmail
     ? isSameEmail(draft.claimedByEmail, identity.email)
@@ -266,15 +255,16 @@ export async function describeDraft(db: D1Database, identity: Identity, id: stri
     viewerEmails?: Array<string>;
   } | null = null;
 
+  const db = yield* Database;
   if (!draft.claimedAt) {
-    const site = await findTargetSite(db, draft);
-    if (site && (await canUpdate(db, site, identity))) {
+    const site = yield* findTargetSite(draft);
+    if (site && (yield* canUpdate(site, identity))) {
       const isOwner = isSameEmail(site.createdByEmail, identity.email);
       const viewers = isOwner
-        ? await db
-            .prepare("SELECT email FROM site_viewers WHERE site_slug = ? ORDER BY email")
-            .bind(site.slug)
-            .all<{ email: string }>()
+        ? yield* db.all<{ email: string }>(
+            "SELECT email FROM site_viewers WHERE site_slug = ? ORDER BY email",
+            site.slug,
+          )
         : null;
       suggestedSite = {
         slug: site.slug,
@@ -285,7 +275,7 @@ export async function describeDraft(db: D1Database, identity: Identity, id: stri
         isOwner,
         ...(viewers && {
           visibility: site.visibility,
-          viewerEmails: viewers.results.map((row) => row.email),
+          viewerEmails: viewers.map((row) => row.email),
         }),
       };
     } else if (site && site.kind === "site" && draft.kind === "site") {
@@ -304,12 +294,10 @@ export async function describeDraft(db: D1Database, identity: Identity, id: stri
   // Tell the claim page when the agent has uploaded a newer version of this draft.
   const newer = draft.claimedAt
     ? null
-    : await db
-        .prepare(
-          "SELECT id FROM drafts WHERE replaces_draft_id = ? ORDER BY created_at DESC LIMIT 1",
-        )
-        .bind(draft.id)
-        .first<{ id: string }>();
+    : yield* db.first<{ id: string }>(
+        "SELECT id FROM drafts WHERE replaces_draft_id = ? ORDER BY created_at DESC LIMIT 1",
+        draft.id,
+      );
 
   return json(
     {
@@ -330,30 +318,29 @@ export async function describeDraft(db: D1Database, identity: Identity, id: stri
       },
       suggestedSite,
     },
-    { headers: { "cache-control": "no-store" } },
+    { headers: noStore },
   );
-}
+});
 
 /**
  * GET /api/drafts/:id/preview/* — serves unclaimed draft files for the claim page iframe.
  * The CSP sandbox gives the document an opaque origin, so draft code cannot act as the
  * signed-in person on the Nap dashboard origin.
  */
-export async function serveDraftFile(env: DraftEnv, id: string, path: string) {
-  const draft = await getDraft(env.DB, id);
+export const serveDraftFile = Effect.fn("serveDraftFile")(function* (id: string, path: string) {
+  const draft = yield* getDraft(id);
   if (!draft || draft.claimedAt || isExpired(draft)) {
-    return new Response("Draft not found", { status: 404 });
+    return yield* failText(404, "Draft not found");
   }
 
   const clean = normalizePath(path);
   const filePath = !clean || clean.endsWith("/") ? `${clean}index.html` : clean;
-  if (!isSafePath(filePath)) return new Response("Not found", { status: 404 });
+  if (!isSafePath(filePath)) return yield* failText(404, "Not found");
 
-  const object = await env.SITES.get(draftKey(id, filePath));
-  if (!object) return new Response("File not found", { status: 404 });
+  const object = yield* (yield* Storage).get(draftKey(id, filePath));
+  if (!object) return yield* failText(404, "File not found");
 
-  const headers = new Headers();
-  object.writeHttpMetadata(headers);
+  const headers = objectHeaders(object);
   headers.set("cache-control", "no-store");
   headers.set("x-content-type-options", "nosniff");
   headers.set(
@@ -361,7 +348,7 @@ export async function serveDraftFile(env: DraftEnv, id: string, path: string) {
     "sandbox allow-scripts allow-forms allow-popups allow-modals",
   );
   return new Response(object.body, { headers });
-}
+});
 
 /**
  * POST /api/drafts/:id — publishes a draft.
@@ -370,8 +357,7 @@ export async function serveDraftFile(env: DraftEnv, id: string, path: string) {
  * - Otherwise it creates a new site (chosen slug, or one made from the title) or a new
  *   artifact (always a random id).
  */
-export async function claimDraft(
-  env: DraftEnv,
+export const claimDraft = Effect.fn("claimDraft")(function* (
   identity: Identity,
   id: string,
   body: {
@@ -383,16 +369,17 @@ export async function claimDraft(
     emails?: unknown;
   },
 ) {
-  const draft = await getDraft(env.DB, id);
-  if (!draft) return json({ error: "Draft not found" }, { status: 404 });
-  if (draft.claimedAt) return json({ error: "This draft is already published" }, { status: 409 });
-  if (isExpired(draft)) return json({ error: "This draft has expired" }, { status: 410 });
+  const draft = yield* getDraft(id);
+  if (!draft) return yield* fail(404, "Draft not found");
+  if (draft.claimedAt) return yield* fail(409, "This draft is already published");
+  if (isExpired(draft)) return yield* fail(410, "This draft has expired");
 
   const replace = body.replace === true;
-  const requestedSlug = slugify(typeof body.slug === "string" ? body.slug : "");
-  let requestedTitle = (typeof body.title === "string" ? body.title : "").trim().slice(0, 120);
-  const expectedCurrentVersion =
-    typeof body.expectedCurrentVersion === "string" ? body.expectedCurrentVersion : null;
+  const requestedSlug = slugify(Predicate.isString(body.slug) ? body.slug : "");
+  let requestedTitle = (Predicate.isString(body.title) ? body.title : "").trim().slice(0, 120);
+  const expectedCurrentVersion = Predicate.isString(body.expectedCurrentVersion)
+    ? body.expectedCurrentVersion
+    : null;
 
   // New sites and artifacts get the default access. For updates, no visibility means "keep it".
   let visibility: Visibility | null = isVisibility(body.visibility)
@@ -400,36 +387,24 @@ export async function claimDraft(
     : replace
       ? null
       : DEFAULT_ACCESS;
-  const viewerEmails =
-    visibility === "selected" && Array.isArray(body.emails)
-      ? [
-          ...new Set(
-            body.emails
-              .filter((value): value is string => typeof value === "string")
-              .map(normalizeEmail)
-              .filter(Boolean),
-          ),
-        ]
-      : [];
+  const viewerEmails = visibility === "selected" ? normalizeEmails(body.emails) : [];
   if (visibility === "selected" && viewerEmails.length === 0) {
-    return json({ error: "Add at least one person" }, { status: 400 });
+    return yield* fail(400, "Add at least one person");
   }
 
-  await ensureProfile(env.DB, identity);
+  yield* ensureProfile(identity);
 
   let slug: string | null;
   let kind: SiteKind;
   let existing: TargetSite | null = null;
   if (replace) {
-    existing = requestedSlug ? await getTargetSite(env.DB, requestedSlug) : null;
-    if (!existing || !(await canUpdate(env.DB, existing, identity))) {
-      return json(
-        {
-          error: existing?.sourceRepo
-            ? "This site's source is in a Nap source repo. Ask the agent to push and publish instead."
-            : "You can only update sites you can view",
-        },
-        { status: 403 },
+    existing = requestedSlug ? yield* getTargetSite(requestedSlug) : null;
+    if (!existing || !(yield* canUpdate(existing, identity))) {
+      return yield* fail(
+        403,
+        existing?.sourceRepo
+          ? "This site's source is in a Nap source repo. Ask the agent to push and publish instead."
+          : "You can only update sites you can view",
       );
     }
     if (!isSameEmail(existing.createdByEmail, identity.email)) {
@@ -438,10 +413,7 @@ export async function claimDraft(
       requestedTitle = "";
     }
     if (expectedCurrentVersion && existing.currentVersion !== expectedCurrentVersion) {
-      return json(
-        { error: "It changed while you were here. Reload and try again." },
-        { status: 409 },
-      );
+      return yield* fail(409, "It changed while you were here. Reload and try again.");
     }
     slug = existing.slug;
     kind = existing.kind;
@@ -450,12 +422,8 @@ export async function claimDraft(
     slug = null;
     kind = draft.kind;
   } else {
-    if (isReservedSlug(requestedSlug)) {
-      return json({ error: "That URL is reserved" }, { status: 409 });
-    }
-    if (await getTargetSite(env.DB, requestedSlug)) {
-      return json({ error: "That URL is already taken" }, { status: 409 });
-    }
+    if (isReservedSlug(requestedSlug)) return yield* fail(409, "That URL is reserved");
+    if (yield* getTargetSite(requestedSlug)) return yield* fail(409, "That URL is already taken");
     slug = requestedSlug;
     kind = "site";
   }
@@ -465,91 +433,91 @@ export async function claimDraft(
     existing?.title ||
     draft.title ||
     (kind === "artifact" ? UNTITLED_ARTIFACT : UNTITLED_SITE);
-  const isTaken = async (candidate: string) => Boolean(await getTargetSite(env.DB, candidate));
+  const isTaken = (candidate: string) => getTargetSite(candidate).pipe(Effect.map(Boolean));
   slug ??=
-    kind === "artifact" ? await pickArtifactId(isTaken) : await pickGeneratedSlug(title, isTaken);
+    kind === "artifact" ? yield* pickArtifactId(isTaken) : yield* pickGeneratedSlug(title, isTaken);
+  const target = slug;
 
   // Take the draft first so two tabs cannot publish it twice.
-  const taken = await env.DB.prepare(
+  const db = yield* Database;
+  const taken = yield* db.run(
     `UPDATE drafts SET claimed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), claimed_by_email = ?
      WHERE id = ? AND claimed_at IS NULL`,
-  )
-    .bind(identity.email, id)
-    .run();
-  if (taken.meta.changes !== 1) {
-    return json({ error: "This draft is already published" }, { status: 409 });
-  }
+    identity.email,
+    id,
+  );
+  if (taken.changes !== 1) return yield* fail(409, "This draft is already published");
 
-  const release = () =>
-    env.DB.prepare("UPDATE drafts SET claimed_at = NULL, claimed_by_email = NULL WHERE id = ?")
-      .bind(id)
-      .run();
+  const release = db.run(
+    "UPDATE drafts SET claimed_at = NULL, claimed_by_email = NULL WHERE id = ?",
+    id,
+  );
 
   const version = crypto.randomUUID();
-  try {
-    const copied = await copyDraftFiles(env.SITES, id, slug, version);
+  const storage = yield* Storage;
+  // Any failure from here on releases the draft, so it can be published again.
+  yield* Effect.gen(function* () {
+    const copied = yield* copyDraftFiles(id, target, version);
     if (copied.keys.length !== draft.fileCount) {
-      await release();
-      return json({ error: "Draft files are missing. Upload again." }, { status: 410 });
+      return yield* fail(410, "Draft files are missing. Upload again.");
     }
 
-    const versionRow = insertVersion(env.DB, {
+    const versionRow = insertVersion({
       id: version,
-      slug,
+      slug: target,
       email: identity.email,
       fileCount: copied.keys.length,
       totalBytes: copied.totalBytes,
       parentVersionId: existing?.currentVersion ?? null,
       source: "claim",
     });
-    const draftRow = env.DB.prepare(
+    const draftRow = sql(
       "UPDATE drafts SET site_slug = ?, version_id = ? WHERE id = ?",
-    ).bind(slug, version, id);
+      target,
+      version,
+      id,
+    );
     const accessRows = visibility
       ? [
-          env.DB.prepare("UPDATE sites SET visibility = ? WHERE slug = ?").bind(visibility, slug),
-          env.DB.prepare("DELETE FROM site_viewers WHERE site_slug = ?").bind(slug),
+          sql("UPDATE sites SET visibility = ? WHERE slug = ?", visibility, target),
+          sql("DELETE FROM site_viewers WHERE site_slug = ?", target),
           ...viewerEmails.map((email) =>
-            env.DB.prepare("INSERT INTO site_viewers (site_slug, email) VALUES (?, ?)").bind(
-              slug,
-              email,
-            ),
+            sql("INSERT INTO site_viewers (site_slug, email) VALUES (?, ?)", target, email),
           ),
         ]
       : [];
 
     if (existing) {
-      const updated = await env.DB.prepare(
+      const updated = yield* db.run(
         `UPDATE sites
          SET title = ?, updated_by_email = ?, current_version = ?,
              updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
          WHERE slug = ? AND current_version = ? AND management_type = 'direct'`,
-      )
-        .bind(title, identity.email, version, slug, existing.currentVersion)
-        .run();
-      if (updated.meta.changes !== 1) {
-        await release();
-        return json(
-          { error: "It changed while you were here. Reload and try again." },
-          { status: 409 },
-        );
+        title,
+        identity.email,
+        version,
+        target,
+        existing.currentVersion,
+      );
+      if (updated.changes !== 1) {
+        return yield* fail(409, "It changed while you were here. Reload and try again.");
       }
-      await env.DB.batch([versionRow, draftRow, ...accessRows]);
+      yield* db.batch([versionRow, draftRow, ...accessRows]);
     } else {
-      await env.DB.batch([
-        env.DB.prepare(
+      const sortOrder = yield* nextSortOrder;
+      yield* db.batch([
+        sql(
           // Private and unlisted. Artifacts get the Nap toolbar; sites can turn it on.
           `INSERT INTO sites (slug, kind, title, created_by_email, updated_by_email, current_version,
                               sort_order, theme_json, visibility, listed, toolbar)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'private', 0, ?)`,
-        ).bind(
-          slug,
+          target,
           kind,
           title,
           identity.email,
           identity.email,
           version,
-          await nextSortOrder(env.DB),
+          sortOrder,
           JSON.stringify(randomTheme()),
           kind === "artifact" ? 1 : 0,
         ),
@@ -559,20 +527,19 @@ export async function claimDraft(
       ]);
     }
 
-    await env.SITES.delete(copied.sourceKeys).catch(() => undefined);
-  } catch (error) {
-    await release();
-    const message = error instanceof Error ? error.message : String(error);
-    if (/UNIQUE|PRIMARY KEY/i.test(message)) {
-      return json({ error: "That URL is already taken" }, { status: 409 });
-    }
-    throw error;
-  }
+    yield* Effect.ignore(storage.delete(copied.sourceKeys));
+  }).pipe(
+    Effect.tapCause(() => release),
+    Effect.catchIf(
+      (error) => error._tag === "DatabaseError" && error.isConstraint,
+      () => fail(409, "That URL is already taken"),
+    ),
+  );
 
   return json({
     ok: true,
     site: {
-      slug,
+      slug: target,
       kind,
       title,
       currentVersion: version,
@@ -580,31 +547,27 @@ export async function claimDraft(
       replaced: Boolean(existing),
     },
   });
-}
+});
 
-async function copyDraftFiles(bucket: R2Bucket, id: string, slug: string, version: string) {
+const copyDraftFiles = Effect.fnUntraced(function* (id: string, slug: string, version: string) {
+  const storage = yield* Storage;
   const prefix = `drafts/${id}/`;
   const keys: Array<string> = [];
   const sourceKeys: Array<string> = [];
   let totalBytes = 0;
-  let cursor: string | undefined;
 
-  do {
-    const listed = await bucket.list({ prefix, cursor });
-    for (const item of listed.objects) {
-      const source = await bucket.get(item.key);
-      if (!source) continue;
-      const path = item.key.slice(prefix.length);
-      const target = objectKey(slug, version, path);
-      await bucket.put(target, source.body, {
-        httpMetadata: { contentType: source.httpMetadata?.contentType ?? contentTypeForPath(path) },
-      });
-      keys.push(target);
-      sourceKeys.push(item.key);
-      totalBytes += item.size;
-    }
-    cursor = listed.truncated ? listed.cursor : undefined;
-  } while (cursor);
+  for (const item of yield* storage.list(prefix)) {
+    const source = yield* storage.get(item.key);
+    if (!source) continue;
+    const path = item.key.slice(prefix.length);
+    const target = objectKey(slug, version, path);
+    yield* storage.put(target, source.body, {
+      httpMetadata: { contentType: source.httpMetadata?.contentType ?? contentTypeForPath(path) },
+    });
+    keys.push(target);
+    sourceKeys.push(item.key);
+    totalBytes += item.size;
+  }
 
   return { keys, sourceKeys, totalBytes };
-}
+});

@@ -1,4 +1,9 @@
-import { json, type Identity } from "~/lib/nap-server";
+import { Effect } from "effect";
+import type { Identity } from "~/lib/nap-server";
+import { Database, sql } from "~/server/database";
+import { fail, failNoStore, json, noStore, readParams } from "~/server/http";
+import { RateLimiter } from "~/server/platform";
+import { randomString, sha256Hex } from "~/server/tokens";
 
 /**
  * Agent sign-in, as in the OAuth device flow (RFC 8628):
@@ -21,27 +26,7 @@ const USER_CODE_ALPHABET = "BCDFGHJKLMNPQRSTVWXZ";
 const TOKEN_PATTERN = /^nap_[A-Za-z0-9_-]{43}$/;
 const NOW = "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')";
 
-type AuthEnv = { DB: D1Database; DRAFT_LIMITER?: RateLimit };
-
 export type AgentIdentity = Identity & { tokenId: string; client: string };
-
-const noStore = { "cache-control": "no-store" };
-
-function base64url(bytes: Uint8Array) {
-  return btoa(String.fromCharCode(...bytes))
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/, "");
-}
-
-export function randomString(byteLength: number) {
-  return base64url(crypto.getRandomValues(new Uint8Array(byteLength)));
-}
-
-export async function sha256Hex(value: string) {
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
-  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
-}
 
 /** Eight consonants, for example QXRT-KLMB. No vowels, so codes do not spell words. */
 function newUserCode() {
@@ -68,67 +53,57 @@ function cleanClientName(value: string) {
   return name || "Agent";
 }
 
-/** Fields from a JSON body, a form body, or the query string. */
-export async function readParams(request: Request, url: URL) {
-  const params: Record<string, string> = Object.fromEntries(url.searchParams);
-  const contentType = request.headers.get("content-type") ?? "";
-  if (contentType.includes("application/json")) {
-    const body = (await request.json().catch(() => null)) as Record<string, unknown> | null;
-    for (const [key, value] of Object.entries(body ?? {})) {
-      if (typeof value === "string") params[key] = value;
-    }
-  } else if (
-    contentType.includes("application/x-www-form-urlencoded") ||
-    contentType.includes("multipart/form-data")
-  ) {
-    const form = await request.formData().catch(() => null);
-    for (const [key, value] of form?.entries() ?? []) {
-      if (typeof value === "string") params[key] = value;
-    }
-  }
-  return params;
-}
-
-function oauthError(error: string, description: string, status = 400) {
-  return json({ error, error_description: description }, { status, headers: noStore });
-}
+const oauthError = (error: string, description: string, status = 400) =>
+  fail(status, error, { error_description: description }, noStore);
 
 /** POST /_nap/api/auth/device — { client?: "Pi on elias-mbp" } */
-export async function startDeviceLogin(env: AuthEnv, request: Request, url: URL) {
-  if (request.method !== "POST") return json({ error: "Use POST" }, { status: 405 });
-  if (env.DRAFT_LIMITER) {
-    const ip = request.headers.get("cf-connecting-ip") ?? "unknown";
-    const { success } = await env.DRAFT_LIMITER.limit({ key: `device:${ip}` });
-    if (!success) return oauthError("slow_down", "Too many sign-in attempts. Wait a minute.", 429);
+export const startDeviceLogin = Effect.fn("startDeviceLogin")(function* (
+  request: Request,
+  url: URL,
+) {
+  if (request.method !== "POST") return yield* fail(405, "Use POST");
+  const ip = request.headers.get("cf-connecting-ip") ?? "unknown";
+  if (!(yield* (yield* RateLimiter).allow(`device:${ip}`))) {
+    return yield* oauthError("slow_down", "Too many sign-in attempts. Wait a minute.", 429);
   }
 
-  const params = await readParams(request, url);
+  const params = yield* readParams(request, url);
   const client = cleanClientName(params.client ?? params.client_name ?? "");
   const cf = (request as Request & { cf?: { city?: string; country?: string } }).cf;
   const requestedFrom = [cf?.city, cf?.country].filter(Boolean).join(", ").slice(0, 120);
   const deviceCode = randomString(32);
   const expiresAt = new Date(Date.now() + DEVICE_CODE_SECONDS * 1000).toISOString();
 
+  const db = yield* Database;
+  const deviceCodeHash = yield* sha256Hex(deviceCode);
   let userCode = "";
   for (let attempt = 0; attempt < 5 && !userCode; attempt++) {
     const candidate = newUserCode();
-    try {
-      await env.DB.prepare(
+    const inserted = yield* db
+      .run(
         `INSERT INTO device_codes (device_code_hash, user_code, client_name, requested_from, expires_at)
          VALUES (?, ?, ?, ?, ?)`,
+        deviceCodeHash,
+        candidate,
+        client,
+        requestedFrom,
+        expiresAt,
       )
-        .bind(await sha256Hex(deviceCode), candidate, client, requestedFrom, expiresAt)
-        .run();
-      userCode = candidate;
-    } catch (error) {
-      if (!/UNIQUE/i.test(String(error))) throw error;
-    }
+      .pipe(
+        Effect.as(true),
+        // The user code is taken. Try another.
+        Effect.catchIf(
+          (error) => error.isConstraint,
+          () => Effect.succeed(false),
+        ),
+      );
+    if (inserted) userCode = candidate;
   }
-  if (!userCode) return json({ error: "Could not start sign-in. Try again." }, { status: 503 });
+  if (!userCode) return yield* fail(503, "Could not start sign-in. Try again.");
 
-  await env.DB.prepare(
+  yield* db.run(
     `DELETE FROM device_codes WHERE expires_at < strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-1 day')`,
-  ).run();
+  );
 
   const verificationUri = `${url.origin}/connect`;
   return json(
@@ -143,7 +118,7 @@ export async function startDeviceLogin(env: AuthEnv, request: Request, url: URL)
     },
     { headers: noStore },
   );
-}
+});
 
 type DeviceRow = {
   userCode: string;
@@ -164,55 +139,68 @@ const DEVICE_COLUMNS = `user_code AS userCode, client_name AS clientName, reques
   token_id AS tokenId`;
 
 /** POST /_nap/api/auth/token — { device_code } */
-export async function exchangeDeviceCode(env: AuthEnv, request: Request, url: URL) {
-  if (request.method !== "POST") return json({ error: "Use POST" }, { status: 405 });
-  const params = await readParams(request, url);
+export const exchangeDeviceCode = Effect.fn("exchangeDeviceCode")(function* (
+  request: Request,
+  url: URL,
+) {
+  if (request.method !== "POST") return yield* fail(405, "Use POST");
+  const params = yield* readParams(request, url);
   const deviceCode = params.device_code ?? "";
-  if (!deviceCode) return oauthError("invalid_request", "Send device_code.");
+  if (!deviceCode) return yield* oauthError("invalid_request", "Send device_code.");
 
-  const hash = await sha256Hex(deviceCode);
-  const row = await env.DB.prepare(
+  const db = yield* Database;
+  const hash = yield* sha256Hex(deviceCode);
+  const row = yield* db.first<DeviceRow>(
     `SELECT ${DEVICE_COLUMNS} FROM device_codes WHERE device_code_hash = ?`,
-  )
-    .bind(hash)
-    .first<DeviceRow>();
-  if (!row) return oauthError("invalid_grant", "Unknown device code. Start the sign-in again.");
-  if (row.tokenId) return oauthError("invalid_grant", "This code was already used. Start again.");
-  if (row.deniedAt) return oauthError("access_denied", "The user denied the request.");
+    hash,
+  );
+  if (!row) {
+    return yield* oauthError("invalid_grant", "Unknown device code. Start the sign-in again.");
+  }
+  if (row.tokenId) {
+    return yield* oauthError("invalid_grant", "This code was already used. Start again.");
+  }
+  if (row.deniedAt) return yield* oauthError("access_denied", "The user denied the request.");
   if (Date.parse(row.expiresAt) <= Date.now()) {
-    return oauthError("expired_token", "The code expired. Start the sign-in again.");
+    return yield* oauthError("expired_token", "The code expired. Start the sign-in again.");
   }
 
   if (!row.approvedAt || !row.approvedByEmail) {
     const tooSoon =
       row.lastPolledAt &&
       Date.now() - Date.parse(row.lastPolledAt) < (POLL_INTERVAL_SECONDS - 1) * 1000;
-    await env.DB.prepare(
+    yield* db.run(
       `UPDATE device_codes SET last_polled_at = ${NOW} WHERE device_code_hash = ?`,
-    )
-      .bind(hash)
-      .run();
-    return tooSoon
+      hash,
+    );
+    return yield* tooSoon
       ? oauthError("slow_down", `Poll at most every ${POLL_INTERVAL_SECONDS} seconds.`)
       : oauthError("authorization_pending", "Waiting for the user to approve.");
   }
 
   const token = `nap_${randomString(32)}`;
   const tokenId = randomString(9);
+  const tokenHash = yield* sha256Hex(token);
   // One transaction. The token exists only if this request was the one that used the code.
-  const [taken, inserted] = await env.DB.batch([
-    env.DB.prepare(
+  const [taken, inserted] = yield* db.batch([
+    sql(
       `UPDATE device_codes SET token_id = ?
        WHERE device_code_hash = ? AND token_id IS NULL AND approved_at IS NOT NULL`,
-    ).bind(tokenId, hash),
-    env.DB.prepare(
+      tokenId,
+      hash,
+    ),
+    sql(
       `INSERT INTO agent_tokens (id, token_hash, email, client_name)
        SELECT ?, ?, approved_by_email, client_name FROM device_codes
        WHERE device_code_hash = ? AND token_id = ?`,
-    ).bind(tokenId, await sha256Hex(token), hash, tokenId),
+      tokenId,
+      tokenHash,
+      hash,
+      tokenId,
+    ),
   ]);
-  if (taken.meta.changes !== 1 || inserted.meta.changes !== 1) {
-    return oauthError("invalid_grant", "This code was already used. Start again.");
+  if (taken.changes !== 1 || inserted.changes !== 1) {
+    return yield* oauthError("invalid_grant", "This code was already used. Start again.");
   }
 
   return json(
@@ -226,7 +214,7 @@ export async function exchangeDeviceCode(env: AuthEnv, request: Request, url: UR
     },
     { headers: noStore },
   );
-}
+});
 
 export type DeviceRequest = {
   userCode: string;
@@ -245,15 +233,16 @@ function deviceStatus(row: DeviceRow): DeviceRequest["status"] {
 }
 
 /** GET /api/connect/:code — what the approval page shows. */
-export async function describeDeviceRequest(db: D1Database, code: string) {
+export const describeDeviceRequest = Effect.fn("describeDeviceRequest")(function* (code: string) {
   const userCode = normalizeUserCode(code);
+  const db = yield* Database;
   const row = userCode
-    ? await db
-        .prepare(`SELECT ${DEVICE_COLUMNS} FROM device_codes WHERE user_code = ?`)
-        .bind(userCode)
-        .first<DeviceRow>()
+    ? yield* db.first<DeviceRow>(
+        `SELECT ${DEVICE_COLUMNS} FROM device_codes WHERE user_code = ?`,
+        userCode,
+      )
     : null;
-  if (!row) return json({ error: "Code not found" }, { status: 404, headers: noStore });
+  if (!row) return yield* failNoStore(404, "Code not found");
   const request: DeviceRequest = {
     userCode: row.userCode,
     clientName: row.clientName,
@@ -263,102 +252,96 @@ export async function describeDeviceRequest(db: D1Database, code: string) {
     status: deviceStatus(row),
   };
   return json({ request }, { headers: noStore });
-}
+});
 
 /** POST /api/connect/:code — { action: "approve" | "deny" }. The caller is signed in with Access. */
-export async function decideDeviceRequest(
-  db: D1Database,
+export const decideDeviceRequest = Effect.fn("decideDeviceRequest")(function* (
   identity: Identity,
   code: string,
   action: unknown,
 ) {
   if (action !== "approve" && action !== "deny") {
-    return json({ error: 'action must be "approve" or "deny"' }, { status: 400 });
+    return yield* fail(400, 'action must be "approve" or "deny"');
   }
   const userCode = normalizeUserCode(code);
-  if (!userCode) return json({ error: "Code not found" }, { status: 404 });
+  if (!userCode) return yield* fail(404, "Code not found");
 
+  const db = yield* Database;
   const result =
     action === "approve"
-      ? await db
-          .prepare(
-            `UPDATE device_codes SET approved_by_email = ?, approved_at = ${NOW}
-             WHERE user_code = ? AND approved_at IS NULL AND denied_at IS NULL AND expires_at > ${NOW}`,
-          )
-          .bind(identity.email, userCode)
-          .run()
-      : await db
-          .prepare(
-            `UPDATE device_codes SET denied_at = ${NOW}
-             WHERE user_code = ? AND approved_at IS NULL AND denied_at IS NULL`,
-          )
-          .bind(userCode)
-          .run();
-  if (result.meta.changes !== 1) {
-    return json({ error: "This code expired or was already used" }, { status: 409 });
+      ? yield* db.run(
+          `UPDATE device_codes SET approved_by_email = ?, approved_at = ${NOW}
+           WHERE user_code = ? AND approved_at IS NULL AND denied_at IS NULL AND expires_at > ${NOW}`,
+          identity.email,
+          userCode,
+        )
+      : yield* db.run(
+          `UPDATE device_codes SET denied_at = ${NOW}
+           WHERE user_code = ? AND approved_at IS NULL AND denied_at IS NULL`,
+          userCode,
+        );
+  if (result.changes !== 1) {
+    return yield* fail(409, "This code expired or was already used");
   }
   return json({ ok: true, status: action === "approve" ? "approved" : "denied" });
-}
+});
 
 /**
  * Checks `Authorization: Bearer nap_…`. The agent API is outside Access, so this is the only
  * check. Never use getIdentity() there: its headers come from Access, and Access does not run.
  */
-export async function authenticateAgent(
-  db: D1Database,
-  request: Request,
-): Promise<AgentIdentity | Response> {
+export const authenticateAgent = Effect.fn("authenticateAgent")(function* (request: Request) {
   const header = request.headers.get("authorization") ?? "";
   const token = header.match(/^Bearer\s+(\S+)$/i)?.[1] ?? "";
   const invalid = () =>
-    json(
-      {
-        error: "Missing or unknown token. Sign in again with POST /_nap/api/auth/device.",
-        code: "invalid_token",
-      },
-      { status: 401, headers: { ...noStore, "www-authenticate": 'Bearer realm="nap"' } },
+    fail(
+      401,
+      "Missing or unknown token. Sign in again with POST /_nap/api/auth/device.",
+      { code: "invalid_token" },
+      { ...noStore, "www-authenticate": 'Bearer realm="nap"' },
     );
-  if (!TOKEN_PATTERN.test(token)) return invalid();
+  if (!TOKEN_PATTERN.test(token)) return yield* invalid();
 
-  const row = await db
-    .prepare(
-      `SELECT agent_tokens.id, agent_tokens.email, agent_tokens.client_name AS client,
-              profiles.display_name AS name,
-              profiles.last_seen_at >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-${ACTIVE_DAYS} days') AS active
-       FROM agent_tokens
-       LEFT JOIN profiles ON profiles.email = agent_tokens.email
-       WHERE agent_tokens.token_hash = ? AND agent_tokens.revoked_at IS NULL`,
-    )
-    .bind(await sha256Hex(token))
-    .first<{
-      id: string;
-      email: string;
-      client: string;
-      name: string | null;
-      active: number | null;
-    }>();
-  if (!row) return invalid();
+  const db = yield* Database;
+  const row = yield* db.first<{
+    id: string;
+    email: string;
+    client: string;
+    name: string | null;
+    active: number | null;
+  }>(
+    `SELECT agent_tokens.id, agent_tokens.email, agent_tokens.client_name AS client,
+            profiles.display_name AS name,
+            profiles.last_seen_at >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-${ACTIVE_DAYS} days') AS active
+     FROM agent_tokens
+     LEFT JOIN profiles ON profiles.email = agent_tokens.email
+     WHERE agent_tokens.token_hash = ? AND agent_tokens.revoked_at IS NULL`,
+    yield* sha256Hex(token),
+  );
+  if (!row) return yield* invalid();
   if (!row.active) {
-    return json(
-      {
-        error: `This token is paused because ${row.email} has not opened Nap for ${ACTIVE_DAYS} days. Ask the user to open ${new URL(request.url).origin} in a browser, then try again.`,
-        code: "inactive",
-      },
-      { status: 401, headers: noStore },
+    return yield* failNoStore(
+      401,
+      `This token is paused because ${row.email} has not opened Nap for ${ACTIVE_DAYS} days. Ask the user to open ${new URL(request.url).origin} in a browser, then try again.`,
+      { code: "inactive" },
     );
   }
 
-  await db
-    .prepare(
-      `UPDATE agent_tokens SET last_used_at = ${NOW}
-       WHERE id = ? AND (last_used_at IS NULL
-         OR last_used_at < strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-1 minute'))`,
-    )
-    .bind(row.id)
-    .run();
+  yield* db.run(
+    `UPDATE agent_tokens SET last_used_at = ${NOW}
+     WHERE id = ? AND (last_used_at IS NULL
+       OR last_used_at < strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-1 minute'))`,
+    row.id,
+  );
 
-  return { email: row.email, name: row.name ?? row.email, tokenId: row.id, client: row.client };
-}
+  const identity: AgentIdentity = {
+    email: row.email,
+    name: row.name ?? row.email,
+    tokenId: row.id,
+    client: row.client,
+  };
+  return identity;
+});
 
 export type AgentToken = {
   id: string;
@@ -367,26 +350,27 @@ export type AgentToken = {
   lastUsedAt: string | null;
 };
 
-export async function listAgentTokens(db: D1Database, email: string) {
-  const { results } = await db
-    .prepare(
-      `SELECT id, client_name AS clientName, created_at AS createdAt, last_used_at AS lastUsedAt
-       FROM agent_tokens WHERE email = ? AND revoked_at IS NULL
-       ORDER BY COALESCE(last_used_at, created_at) DESC`,
-    )
-    .bind(email)
-    .all<AgentToken>();
-  return results;
-}
+export const listAgentTokens = Effect.fn("listAgentTokens")(function* (email: string) {
+  const db = yield* Database;
+  return yield* db.all<AgentToken>(
+    `SELECT id, client_name AS clientName, created_at AS createdAt, last_used_at AS lastUsedAt
+     FROM agent_tokens WHERE email = ? AND revoked_at IS NULL
+     ORDER BY COALESCE(last_used_at, created_at) DESC`,
+    email,
+  );
+});
 
-export async function revokeAgentToken(db: D1Database, email: string, id: string) {
-  const result = await db
-    .prepare(
-      `UPDATE agent_tokens SET revoked_at = ${NOW}
-       WHERE id = ? AND email = ? AND revoked_at IS NULL`,
-    )
-    .bind(id, email)
-    .run();
-  if (result.meta.changes !== 1) return json({ error: "Token not found" }, { status: 404 });
+export const revokeAgentToken = Effect.fn("revokeAgentToken")(function* (
+  email: string,
+  id: string,
+) {
+  const db = yield* Database;
+  const result = yield* db.run(
+    `UPDATE agent_tokens SET revoked_at = ${NOW}
+     WHERE id = ? AND email = ? AND revoked_at IS NULL`,
+    id,
+    email,
+  );
+  if (result.changes !== 1) return yield* fail(404, "Token not found");
   return json({ ok: true });
-}
+});

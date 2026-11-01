@@ -1,27 +1,29 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { Effect } from "effect";
 import { claimDraft, describeDraft } from "~/lib/drafts";
-import { ensureProfile, getEnv, getIdentity, json } from "~/lib/nap-server";
-import { isCrossSite } from "~/lib/site-access";
+import { getIdentity, signedIn } from "~/lib/nap-server";
+import { readJsonObject, requireJsonBody, requireSameSite } from "~/server/http";
+import { route } from "~/server/route";
 
 export const Route = createFileRoute("/api/drafts/$id")({
   server: {
     handlers: {
-      GET: async ({ params, request }) => {
-        const { DB } = getEnv();
-        const identity = getIdentity(request);
-        await ensureProfile(DB, identity);
-        return describeDraft(DB, identity, params.id);
-      },
-      POST: async ({ params, request }) => {
-        if (isCrossSite(request)) return json({ error: "Forbidden" }, { status: 403 });
-        if (!request.headers.get("content-type")?.includes("application/json")) {
-          return json({ error: "Expected JSON" }, { status: 415 });
-        }
-        const env = getEnv();
-        const identity = getIdentity(request);
-        const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
-        return claimDraft(env, identity, params.id, body);
-      },
+      GET: ({ params, request }) =>
+        route(
+          Effect.gen(function* () {
+            const identity = yield* signedIn(request);
+            return yield* describeDraft(identity, params.id);
+          }),
+        ),
+      POST: ({ params, request }) =>
+        route(
+          Effect.gen(function* () {
+            yield* requireSameSite(request);
+            yield* requireJsonBody(request);
+            const body = yield* readJsonObject(request);
+            return yield* claimDraft(getIdentity(request), params.id, body);
+          }),
+        ),
     },
   },
 });

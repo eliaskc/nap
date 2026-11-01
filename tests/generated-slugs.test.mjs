@@ -1,12 +1,25 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {
-  generatedSlug,
-  isReservedSlug,
-  pickArtifactId,
-  pickGeneratedSlug,
-  titleSlug,
-} from "../src/lib/uploads.ts";
+import { registerHooks } from "node:module";
+import { Effect } from "effect";
+
+// uploads.ts uses the ~/ alias.
+registerHooks({
+  resolve(specifier, context, next) {
+    if (specifier.startsWith("~/")) {
+      return next(new URL(`../src/${specifier.slice(2)}.ts`, import.meta.url).href, context);
+    }
+    return next(specifier, context);
+  },
+});
+const uploads = await import("../src/lib/uploads.ts");
+const { generatedSlug, isReservedSlug, titleSlug } = uploads;
+
+// The pickers take an Effect predicate; these tests write plain async ones.
+const lift = (isTaken) => (slug) => Effect.promise(() => isTaken(slug));
+const pickGeneratedSlug = (title, isTaken) =>
+  Effect.runPromise(uploads.pickGeneratedSlug(title, lift(isTaken)));
+const pickArtifactId = (isTaken) => Effect.runPromise(uploads.pickArtifactId(lift(isTaken)));
 
 test("title slugs are short, readable DNS labels", () => {
   assert.equal(titleSlug("Sleep report: Q3 (draft)"), "sleep-report-q3-draft");

@@ -1,5 +1,6 @@
+import { Effect } from "effect";
 import { DEFAULT_ACCESS } from "~/lib/deployment-text";
-import { json, objectKey, type Identity } from "~/lib/nap-server";
+import { objectKey, type Identity } from "~/lib/nap-server";
 import { canViewSite, isSameEmail, type Visibility } from "~/lib/site-access";
 import {
   checkFiles,
@@ -14,8 +15,9 @@ import {
 } from "~/lib/uploads";
 import { checkSourceCommit } from "~/lib/sources";
 import { insertVersion, type VersionSource } from "~/lib/versions";
-
-type PublishEnv = { DB: D1Database; SITES: R2Bucket; SOURCES?: unknown };
+import { Database, sql } from "~/server/database";
+import { fail } from "~/server/http";
+import { Storage, tryStorage } from "~/server/storage";
 
 export type PublishInput = PublishTargetInput & {
   files: Array<IncomingFile>;
@@ -49,22 +51,18 @@ export type ExistingNap = {
   visibility: Visibility;
 };
 
-function getNap(db: D1Database, slug: string) {
-  return db
-    .prepare(
-      `SELECT slug, kind, title, current_version AS currentVersion,
-              source_repo AS sourceRepo, created_by_email AS createdByEmail, visibility
-       FROM sites WHERE slug = ?`,
-    )
-    .bind(slug)
-    .first<ExistingNap>();
-}
+const getNap = Effect.fnUntraced(function* (slug: string) {
+  const db = yield* Database;
+  return yield* db.first<ExistingNap>(
+    `SELECT slug, kind, title, current_version AS currentVersion,
+            source_repo AS sourceRepo, created_by_email AS createdByEmail, visibility
+     FROM sites WHERE slug = ?`,
+    slug,
+  );
+});
 
 const changedMeanwhile = () =>
-  json(
-    { error: "It was updated while you were uploading. Reload and try again." },
-    { status: 409 },
-  );
+  fail(409, "It was updated while you were uploading. Reload and try again.");
 
 export type PublishTargetInput = {
   /** Publish a new version of this nap. Without it, create a new nap. */
@@ -95,41 +93,44 @@ export type PublishTarget = {
  * Checks what the person may publish to, and picks the URL for a new nap. `pageTitle` gives the
  * page's own title when no title was sent. `isReserved` reports URLs that another upload holds.
  */
-export async function resolvePublishTarget(
-  db: D1Database,
+export const resolvePublishTarget = Effect.fn("resolvePublishTarget")(function* <
+  E1 = never,
+  R1 = never,
+  E2 = never,
+  R2 = never,
+>(
   identity: Identity,
   input: PublishTargetInput,
-  pageTitle: () => Promise<string> = async () => "",
-  isReserved: (slug: string) => Promise<boolean> = async () => false,
-): Promise<Response | PublishTarget> {
+  pageTitle: Effect.Effect<string, E1, R1> = Effect.succeed("") as Effect.Effect<string, E1, R1>,
+  isReserved: (slug: string) => Effect.Effect<boolean, E2, R2> = () =>
+    Effect.succeed(false) as Effect.Effect<boolean, E2, R2>,
+) {
   let slug: string | null = null;
   let existing: ExistingNap | null = null;
   if (input.targetSlug) {
-    existing = await getNap(db, input.targetSlug);
-    if (!existing || !(await canViewSite(db, existing, identity.email))) {
-      return json({ error: "Not found" }, { status: 404 });
+    existing = yield* getNap(input.targetSlug);
+    if (!existing || !(yield* canViewSite(existing, identity.email))) {
+      return yield* fail(404, "Not found");
     }
     const isOwner = isSameEmail(existing.createdByEmail, identity.email);
     if (input.requireExpectedVersion && !isOwner && !input.expectedCurrentVersion) {
-      return json(
-        {
-          error: `This nap belongs to ${existing.createdByEmail}. Read it first, then send its currentVersion as expectedVersion so you don't overwrite someone else's change.`,
-          code: "expected_version_required",
-        },
-        { status: 409 },
+      return yield* fail(
+        409,
+        `This nap belongs to ${existing.createdByEmail}. Read it first, then send its currentVersion as expectedVersion so you don't overwrite someone else's change.`,
+        { code: "expected_version_required" },
       );
     }
     // Only the owner renames. Others publish under the current name.
     if (!isOwner) input = { ...input, title: "" };
     if (input.expectedCurrentVersion && existing.currentVersion !== input.expectedCurrentVersion) {
-      return changedMeanwhile();
+      return yield* changedMeanwhile();
     }
     slug = existing.slug;
   } else if (input.slug && input.kind !== "artifact") {
-    if (isReservedSlug(input.slug)) return json({ error: "That URL is reserved" }, { status: 409 });
-    const taken = await getNap(db, input.slug);
-    if (taken || (await isReserved(input.slug))) {
-      return json({ error: "That URL is already taken" }, { status: 409 });
+    if (isReservedSlug(input.slug)) return yield* fail(409, "That URL is reserved");
+    const taken = yield* getNap(input.slug);
+    if (taken || (yield* isReserved(input.slug))) {
+      return yield* fail(409, "That URL is already taken");
     }
     slug = input.slug;
   }
@@ -138,40 +139,41 @@ export async function resolvePublishTarget(
   const title =
     input.title?.trim().slice(0, 120) ||
     existing?.title ||
-    (await pageTitle()) ||
+    (yield* pageTitle) ||
     (kind === "artifact" ? "Untitled artifact" : "Untitled site");
   // Artifacts get a random id. Sites without a chosen URL get one made from the title.
-  const isTaken = async (candidate: string) =>
-    Boolean(await getNap(db, candidate)) || (await isReserved(candidate));
+  const isTaken = (candidate: string) =>
+    Effect.gen(function* () {
+      return Boolean(yield* getNap(candidate)) || (yield* isReserved(candidate));
+    });
   slug ??=
-    kind === "artifact" ? await pickArtifactId(isTaken) : await pickGeneratedSlug(title, isTaken);
-  return { slug, kind, title, existing };
-}
+    kind === "artifact" ? yield* pickArtifactId(isTaken) : yield* pickGeneratedSlug(title, isTaken);
+  return { slug, kind, title, existing } satisfies PublishTarget;
+});
 
 /**
  * Stores the files as a new immutable version and makes it live. New naps are unlisted and
  * private unless `access` says otherwise; artifacts get the Nap toolbar. The caller checks who
  * the person is; this checks what they may change.
  */
-export async function publishFiles(
-  env: PublishEnv,
+export const publishFiles = Effect.fn("publishFiles")(function* (
   identity: Identity,
   input: PublishInput,
-): Promise<Response | PublishedNap> {
-  const checked = checkFiles(input.files);
-  if (checked instanceof Response) return checked;
+) {
+  const checked = yield* checkFiles(input.files);
 
-  const target = await resolvePublishTarget(env.DB, identity, input, () =>
+  const target = yield* resolvePublishTarget(
+    identity,
+    input,
     titleFromHtml(input.files.find((file) => file.path === "index.html")?.body),
   );
-  if (target instanceof Response) return target;
-  const sourceProblem = await checkSourceCommit(env, target.existing, input.sourceCommit);
-  if (sourceProblem) return sourceProblem;
+  yield* checkSourceCommit(target.existing, input.sourceCommit);
 
+  const storage = yield* Storage;
   const version = crypto.randomUUID();
   for (const file of input.files) {
     const known = contentTypeForPath(file.path);
-    await env.SITES.put(objectKey(target.slug, version, file.path), file.body.stream(), {
+    yield* storage.put(objectKey(target.slug, version, file.path), file.body.stream(), {
       httpMetadata: {
         contentType:
           known === "application/octet-stream" && file.body.type ? file.body.type : known,
@@ -179,7 +181,7 @@ export async function publishFiles(
     });
   }
 
-  return recordVersion(env.DB, identity, target, {
+  return yield* recordVersion(identity, target, {
     version,
     fileCount: input.files.length,
     totalBytes: checked.totalBytes,
@@ -189,15 +191,14 @@ export async function publishFiles(
     message: input.message,
     sourceCommit: input.sourceCommit,
   });
-}
+});
 
 /**
  * Records a version whose files are already in R2 under objectKey(target.slug, version, ...),
  * and makes it live. Updates move the live pointer only if it has not moved since `target` was
  * read. New naps get the given access, or stay private.
  */
-export async function recordVersion(
-  db: D1Database,
+export const recordVersion = Effect.fn("recordVersion")(function* (
   identity: Identity,
   target: PublishTarget,
   input: {
@@ -212,11 +213,12 @@ export async function recordVersion(
     /** New sites only: the source repo created with the first upload. */
     sourceRepo?: string | null;
   },
-): Promise<Response | PublishedNap> {
+) {
+  const db = yield* Database;
   const { slug, kind, title, existing } = target;
   const { version } = input;
   const sourceRepo = existing ? existing.sourceRepo : (input.sourceRepo ?? null);
-  const versionRow = insertVersion(db, {
+  const versionRow = insertVersion({
     id: version,
     slug,
     email: identity.email,
@@ -231,56 +233,57 @@ export async function recordVersion(
 
   let visibility: Visibility = existing?.visibility ?? DEFAULT_ACCESS;
   if (existing) {
-    const [, updated] = await db.batch([
+    const [, updated] = yield* db.batch([
       versionRow,
-      db
-        .prepare(
-          `UPDATE sites
-           SET title = ?, updated_by_email = ?, current_version = ?,
-               updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-           WHERE slug = ? AND current_version = ? AND management_type = 'direct'`,
-        )
-        .bind(title, identity.email, version, slug, existing.currentVersion),
+      sql(
+        `UPDATE sites
+         SET title = ?, updated_by_email = ?, current_version = ?,
+             updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+         WHERE slug = ? AND current_version = ? AND management_type = 'direct'`,
+        title,
+        identity.email,
+        version,
+        slug,
+        existing.currentVersion,
+      ),
     ]);
-    if (updated.meta.changes !== 1) {
+    if (updated.changes !== 1) {
       // Another upload won. Keep the history true: this version never went live.
-      await db.prepare("DELETE FROM versions WHERE id = ?").bind(version).run();
-      return changedMeanwhile();
+      yield* db.run("DELETE FROM versions WHERE id = ?", version);
+      return yield* changedMeanwhile();
     }
   } else {
     const access = input.access ?? { visibility: DEFAULT_ACCESS, emails: [] };
-    try {
-      await db.batch([
-        db
-          .prepare(
-            `INSERT INTO sites (slug, kind, title, created_by_email, updated_by_email, current_version,
-                                sort_order, theme_json, visibility, listed, toolbar, source_repo)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`,
-          )
-          .bind(
-            slug,
-            kind,
-            title,
-            identity.email,
-            identity.email,
-            version,
-            await nextSortOrder(db),
-            JSON.stringify(randomTheme()),
-            access.visibility,
-            kind === "artifact" ? 1 : 0,
-            sourceRepo,
-          ),
+    const sortOrder = yield* nextSortOrder;
+    yield* db
+      .batch([
+        sql(
+          `INSERT INTO sites (slug, kind, title, created_by_email, updated_by_email, current_version,
+                              sort_order, theme_json, visibility, listed, toolbar, source_repo)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`,
+          slug,
+          kind,
+          title,
+          identity.email,
+          identity.email,
+          version,
+          sortOrder,
+          JSON.stringify(randomTheme()),
+          access.visibility,
+          kind === "artifact" ? 1 : 0,
+          sourceRepo,
+        ),
         versionRow,
         ...(access.visibility === "selected" ? access.emails : []).map((email) =>
-          db.prepare("INSERT INTO site_viewers (site_slug, email) VALUES (?, ?)").bind(slug, email),
+          sql("INSERT INTO site_viewers (site_slug, email) VALUES (?, ?)", slug, email),
         ),
-      ]);
-    } catch (error) {
-      if (/UNIQUE|PRIMARY KEY/i.test(String(error))) {
-        return json({ error: "That URL is already taken" }, { status: 409 });
-      }
-      throw error;
-    }
+      ])
+      .pipe(
+        Effect.catchIf(
+          (error) => error.isConstraint,
+          () => fail(409, "That URL is already taken"),
+        ),
+      );
     visibility = access.visibility;
   }
 
@@ -292,14 +295,14 @@ export async function recordVersion(
     previousVersion: existing?.currentVersion ?? null,
     created: !existing,
     visibility,
-  };
-}
+  } satisfies PublishedNap;
+});
 
 /** The page's <title>, from the first 64 KB of index.html. */
-export async function titleFromHtml(file: Blob | undefined) {
-  if (!file) return "";
-  return titleFromHead(await file.slice(0, 64 * 1024).text());
-}
+export const titleFromHtml = (file: Blob | undefined) =>
+  file
+    ? tryStorage(() => file.slice(0, 64 * 1024).text()).pipe(Effect.map(titleFromHead))
+    : Effect.succeed("");
 
 /** The <title> in the start of an HTML page. */
 export function titleFromHead(head: string) {

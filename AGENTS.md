@@ -40,6 +40,36 @@ Temporary testing may enable them, but revert before deploying.
 - Nap has no Wrangler config. Production deployment and D1 migration history belong to Alchemy; local dev and the HTTP tests run `local*` Alchemy stages. Read the infrastructure section in `README.md` before changes to production resources. Preserve the live database and bucket; review the plan for replacements.
 - Code on Access-bypassed paths (`/_nap/drafts`, `/_nap/api/*`, `/_nap/frame/*`, `/_nap/install/*`, `/_nap/enroll/*`) must never call `getIdentity()` or `ensureProfile()`.
 
+## Server code (Effect)
+
+Server code is written with Effect 4 (`effect@4.1.x`, the version Alchemy uses). Effect's own
+guide ships in `node_modules/effect/AGENTS.md` and `node_modules/effect/ai-docs/`; read it rather
+than older Effect 2/3 docs. The UI, and the scripts Nap serves to sites as source
+(`site-data-client.ts`, `share-widget.ts`, `nap-toolbar.ts`, `src/comments/`), are not Effect code.
+
+- `src/server/` holds the infrastructure: services for the bindings (`Database` for D1, `Storage`
+  for R2, `Settings`, `RateLimiter`, `Background`, and the optional bindings in `bindings.ts`),
+  `http.ts` for responses and errors, and `runtime.ts`, which provides the services and runs
+  handlers. Domain code in `src/lib/` uses these; it never touches `env` or `ctx` itself.
+- Write functions with `Effect.fn("name")(function* (...) { ... })` (`Effect.fnUntraced` for small
+  internal helpers). Pure functions stay plain functions.
+- A handler is an `Effect<Response, ...>`. Anything the client should see as an error fails with
+  `HttpError` (`return yield* fail(404, "Not found")`); the runtime turns it into the JSON
+  response. Never return error `Response`s through success values, and never use `Response |
+T` unions: fail instead. Infrastructure errors (`DatabaseError`, `StorageError`,
+  `SourceRepoError`, `AppleError`) stay typed and become a logged 500 unless caught.
+- SQL stays plain SQL: `db.first<Row>(sql, ...params)`, `db.all`, `db.run` (returns
+  `{ changes }`), and `db.batch([sql(...), ...])` for transactions. Catch unique violations with
+  `Effect.catchIf((e) => e.isConstraint, ...)`.
+- Decode untrusted input with `Schema` (`decodeOr` in `http.ts`), keeping the existing error
+  messages; agents depend on them.
+- Work after the response goes through `inBackground(effect, label)`, never `ctx.waitUntil`.
+- Log with `Effect.logInfo(message).pipe(Effect.annotateLogs({ ... }))`. The runtime writes JSON
+  lines, which Workers Logs indexes. Never log tokens.
+- The Worker (`src/worker.ts`) runs handlers with `respond(env, effect, ctx)`; API routes in
+  `src/routes/api` with `route(effect)` from `src/server/route.ts`; tests with `runNap` or
+  `respond` and fake bindings.
+
 ## Documentation
 
 `README.md` covers architecture, the security model, and operations. `src/content/instructions/` is the contract for agents that publish to Nap (an index plus topics), and `skills/nap/SKILL.md` is the skill that points agents to it. Keep UI details, limits, endpoint lists, and file-by-file layouts out of the README; the code is the reference for those. Update the docs only when a concept, security rule, operation, or command changes.

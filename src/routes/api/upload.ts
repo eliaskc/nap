@@ -1,8 +1,10 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { ensureProfile, getEnv, getIdentity, json, slugify } from "~/lib/nap-server";
+import { Effect } from "effect";
+import { signedIn, slugify } from "~/lib/nap-server";
 import { publishFiles } from "~/lib/publish";
-import { isCrossSite } from "~/lib/site-access";
 import { normalizePath } from "~/lib/uploads";
+import { json, requireSameSite } from "~/server/http";
+import { route } from "~/server/route";
 
 /**
  * POST /api/upload — dashboard uploads.
@@ -15,33 +17,31 @@ import { normalizePath } from "~/lib/uploads";
 export const Route = createFileRoute("/api/upload")({
   server: {
     handlers: {
-      POST: async ({ request }) => {
-        // A multipart form needs no preflight, so check the origin here.
-        if (isCrossSite(request)) return json({ error: "Forbidden" }, { status: 403 });
-        const env = getEnv();
-        const identity = getIdentity(request);
-        await ensureProfile(env.DB, identity);
+      POST: ({ request }) =>
+        route(
+          Effect.gen(function* () {
+            // A multipart form needs no preflight, so check the origin here.
+            yield* requireSameSite(request);
+            const identity = yield* signedIn(request);
 
-        const form = await request.formData();
-        const files = form
-          .getAll("files")
-          .filter((value): value is File => value instanceof File)
-          .map((file) => ({ path: normalizePath(file.name), body: file }));
+            const form = yield* Effect.promise(() => request.formData());
+            const files = form
+              .getAll("files")
+              .filter((value): value is File => value instanceof File)
+              .map((file) => ({ path: normalizePath(file.name), body: file }));
 
-        const published = await publishFiles(env, identity, {
-          files,
-          targetSlug: slugify(String(form.get("targetSlug") ?? "")) || null,
-          expectedCurrentVersion: String(form.get("expectedCurrentVersion") ?? "") || null,
-          kind: form.get("kind") === "artifact" ? "artifact" : "site",
-          slug: slugify(String(form.get("slug") ?? "")),
-          title: String(form.get("title") ?? ""),
-          source: "dashboard",
-        });
-        if (published instanceof Response) return published;
-
-        const { slug, kind, title, currentVersion } = published;
-        return json({ ok: true, site: { slug, kind, title, currentVersion } });
-      },
+            const { slug, kind, title, currentVersion } = yield* publishFiles(identity, {
+              files,
+              targetSlug: slugify(String(form.get("targetSlug") ?? "")) || null,
+              expectedCurrentVersion: String(form.get("expectedCurrentVersion") ?? "") || null,
+              kind: form.get("kind") === "artifact" ? "artifact" : "site",
+              slug: slugify(String(form.get("slug") ?? "")),
+              title: String(form.get("title") ?? ""),
+              source: "dashboard",
+            });
+            return json({ ok: true, site: { slug, kind, title, currentVersion } });
+          }),
+        ),
     },
   },
 });

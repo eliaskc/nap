@@ -1,14 +1,13 @@
+import { Effect } from "effect";
 import { getIdentity, objectKey } from "~/lib/nap-server";
 import { toolbarPage } from "~/lib/nap-toolbar";
 import type { NapKind } from "~/lib/nap-urls";
 import { findRedirect } from "~/lib/rekey";
 import { canViewSite, isSameEmail, type Visibility } from "~/lib/site-access";
 import { siteManifest } from "~/lib/site-manifest";
-
-type SiteServingEnv = {
-  DB: D1Database;
-  SITES: R2Bucket;
-};
+import { Database, type DatabaseError } from "~/server/database";
+import { failText, redirect } from "~/server/http";
+import { Storage } from "~/server/storage";
 
 export type ServedNap = {
   slug: string;
@@ -28,54 +27,51 @@ export type NapAccess =
   | { status: "allowed"; nap: ServedNap; isOwner: boolean };
 
 /** Finds a nap and checks if this person may view it. */
-export async function findViewableNap(
-  db: D1Database,
+export const findViewableNap = Effect.fn("findViewableNap")(function* (
   slug: string,
   email: string,
-): Promise<NapAccess> {
-  const nap = await db
-    .prepare(
-      `SELECT sites.slug, sites.kind, sites.title, sites.current_version AS currentVersion,
-              sites.visibility, sites.created_by_email AS createdByEmail,
-              sites.updated_at AS updatedAt, sites.toolbar, profiles.display_name AS ownerName
-       FROM sites LEFT JOIN profiles ON profiles.email = sites.created_by_email
-       WHERE sites.slug = ?`,
-    )
-    .bind(slug)
-    .first<ServedNap>();
+): Effect.fn.Return<NapAccess, DatabaseError, Database> {
+  const db = yield* Database;
+  const nap = yield* db.first<ServedNap>(
+    `SELECT sites.slug, sites.kind, sites.title, sites.current_version AS currentVersion,
+            sites.visibility, sites.created_by_email AS createdByEmail,
+            sites.updated_at AS updatedAt, sites.toolbar, profiles.display_name AS ownerName
+     FROM sites LEFT JOIN profiles ON profiles.email = sites.created_by_email
+     WHERE sites.slug = ?`,
+    slug,
+  );
   if (!nap) return { status: "missing" };
 
   const isOwner = isSameEmail(nap.createdByEmail, email);
-  const allowed = await canViewSite(db, nap, email);
+  const allowed = yield* canViewSite(nap, email);
   return allowed ? { status: "allowed", nap, isOwner } : { status: "denied", nap };
-}
+});
 
 /**
  * Serves a site at <slug>.<root> (or /s/<slug>/ locally). Artifacts are not served here: a visit
  * redirects to the artifact page, so old links keep working.
  */
-export async function serveUploadedSite(
-  env: SiteServingEnv,
+export const serveUploadedSite = Effect.fn("serveUploadedSite")(function* (
   slug: string,
   path: string,
   request: Request,
   options: { accessPath?: string; dashboardUrl?: string; artifactUrl: (slug: string) => string },
 ) {
   const url = new URL(request.url);
-  const access = await findViewableNap(env.DB, slug, getIdentity(request).email);
+  const access = yield* findViewableNap(slug, getIdentity(request).email);
   const rest = path.replace(/^\/+/, "");
   const toArtifact = (key: string) =>
     redirect(`${options.artifactUrl(key)}${rest ? `/${rest}` : ""}${url.search}`);
   if (access.status === "missing") {
     // A site that moved to Artifacts has a new id. The artifact page sends sites to their host.
-    const moved = await findRedirect(env.DB, slug);
+    const moved = yield* findRedirect(slug);
     if (moved) return toArtifact(moved);
-    return new Response("Site not found", { status: 404 });
+    return yield* failText(404, "Site not found");
   }
 
   if (access.nap.kind === "artifact") return toArtifact(slug);
   if (access.status === "denied") {
-    return new Response("You do not have access to this site", { status: 403 });
+    return yield* failText(403, "You do not have access to this site");
   }
   const { nap, isOwner } = access;
   const normalizedPath = normalizeRequestPath(path);
@@ -92,26 +88,27 @@ export async function serveUploadedSite(
     });
   }
 
-  let object = await getNapFile(env, nap, normalizedPath);
+  let object = yield* getNapFile(nap, normalizedPath);
   // A folder without its slash: /games/connections means /games/connections/.
   if (!object && !/\.[a-z0-9]+$/i.test(normalizedPath)) {
     const folderIndex = `${normalizedPath}/index.html`;
     if (!url.pathname.endsWith("/")) {
-      const exists = await env.SITES.head(objectKey(nap.slug, nap.currentVersion, folderIndex));
+      const storage = yield* Storage;
+      const exists = yield* storage.head(objectKey(nap.slug, nap.currentVersion, folderIndex));
       if (exists) return redirect(`${url.pathname}/${url.search}`);
     } else {
       // Locally the route drops the trailing slash from the path.
-      object = await getNapFile(env, nap, folderIndex);
+      object = yield* getNapFile(nap, folderIndex);
     }
   }
   // A single-page app ("spa": true in nap.json): page paths without a file get the root
   // index.html, and the app's router shows the page. Missing files with an extension stay 404.
   if (!object && isPagePath(normalizedPath, request)) {
-    if ((await siteManifest(env.SITES, nap.slug, nap.currentVersion)).spa) {
-      object = await getNapFile(env, nap, "index.html");
+    if ((yield* siteManifest(nap.slug, nap.currentVersion)).spa) {
+      object = yield* getNapFile(nap, "index.html");
     }
   }
-  if (!object) return new Response("File not found", { status: 404 });
+  if (!object) return yield* failText(404, "File not found");
 
   const headers = fileHeaders(object);
   if (nap.toolbar) {
@@ -120,23 +117,27 @@ export async function serveUploadedSite(
     headers.set("vary", "sec-fetch-dest");
   }
   return new Response(object.body, { headers });
-}
+});
 
 /** Reads a file of the live version. Opening index.html counts as a view. */
-export async function getNapFile(env: SiteServingEnv, nap: ServedNap, normalizedPath: string) {
-  const object = await env.SITES.get(objectKey(nap.slug, nap.currentVersion, normalizedPath));
+export const getNapFile = Effect.fn("getNapFile")(function* (
+  nap: ServedNap,
+  normalizedPath: string,
+) {
+  const storage = yield* Storage;
+  const object = yield* storage.get(objectKey(nap.slug, nap.currentVersion, normalizedPath));
   if (object && normalizedPath.endsWith("index.html")) {
-    await env.DB.prepare(
+    const db = yield* Database;
+    yield* db.run(
       `UPDATE sites
        SET view_count = view_count + 1,
            last_viewed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
        WHERE slug = ?`,
-    )
-      .bind(nap.slug)
-      .run();
+      nap.slug,
+    );
   }
   return object;
-}
+});
 
 export function fileHeaders(object: R2ObjectBody) {
   const headers = new Headers();
@@ -194,8 +195,4 @@ export function normalizeRequestPath(path: string) {
   const clean = path.replace(/^\/+/, "");
   if (!clean || clean.endsWith("/")) return `${clean}index.html`;
   return clean;
-}
-
-function redirect(location: string) {
-  return new Response(null, { status: 302, headers: { location, "cache-control": "no-store" } });
 }

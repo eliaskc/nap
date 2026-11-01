@@ -1,12 +1,16 @@
 import { DurableObject } from "cloudflare:workers";
-import { json, type Identity } from "~/lib/nap-server";
+import { Effect } from "effect";
+import type { Identity } from "~/lib/nap-server";
 import { canViewSite, viewersAmong } from "~/lib/site-data";
+import { LiveBinding } from "~/server/bindings";
+import { Database } from "~/server/database";
+import { fail } from "~/server/http";
+import { inBackground } from "~/server/platform";
 
 const MAX_SOCKETS = 1000;
 
 type LiveEnv = {
   DB: D1Database;
-  LIVE?: DurableObjectNamespace<SiteLive>;
 };
 
 /** expiresAt: for artifact frames, when the frame token expires. */
@@ -48,7 +52,9 @@ export class SiteLive extends DurableObject<LiveEnv> {
     const attachment = (socket: WebSocket) =>
       (socket.deserializeAttachment() as Attachment | null) ?? { email: "" };
     const emails = [...new Set(sockets.map((socket) => attachment(socket).email))];
-    const allowed = await viewersAmong(this.env.DB, slug, emails);
+    const allowed = await Effect.runPromise(
+      viewersAmong(slug, emails).pipe(Effect.provideService(Database, Database.make(this.env.DB))),
+    );
     const now = new Date().toISOString();
     for (const socket of sockets) {
       const { email, expiresAt } = attachment(socket);
@@ -79,42 +85,34 @@ export class SiteLive extends DurableObject<LiveEnv> {
  * GET /_nap/live with a WebSocket upgrade. For artifact frames, `identity` comes from the frame
  * token: Access does not protect that path, so its headers say nothing.
  */
-export async function handleLiveRequest(
-  env: LiveEnv,
+export const handleLiveRequest = Effect.fn("handleLiveRequest")(function* (
   slug: string,
   request: Request,
   identity: Identity,
   expiresAt?: string,
 ) {
   if (request.headers.get("upgrade")?.toLowerCase() !== "websocket") {
-    return json({ error: "Expected a WebSocket upgrade" }, { status: 426 });
+    return yield* fail(426, "Expected a WebSocket upgrade");
   }
-  if (!env.LIVE) return json({ error: "Live updates are unavailable" }, { status: 503 });
-  if (!(await canViewSite(env.DB, slug, identity.email))) {
-    return json({ error: "Site not found" }, { status: 404 });
-  }
+  const live = yield* LiveBinding;
+  if (!live) return yield* fail(503, "Live updates are unavailable");
+  if (!(yield* canViewSite(slug, identity.email))) return yield* fail(404, "Site not found");
   const headers = new Headers({ upgrade: "websocket", "x-nap-email": identity.email });
   if (expiresAt) headers.set("x-nap-expires-at", expiresAt);
-  return env.LIVE.getByName(slug).fetch("https://live/", { headers });
-}
+  return yield* Effect.promise(() => live.getByName(slug).fetch("https://live/", { headers }));
+});
 
 /** Hands a committed change to the site's live object. Pages poll if this ever fails. */
-export function publishChange(
-  env: LiveEnv,
-  waitUntil: ((promise: Promise<unknown>) => void) | undefined,
+export const publishChange = Effect.fnUntraced(function* (
   slug: string,
   collection: string,
   change: unknown,
 ) {
-  if (!env.LIVE || !waitUntil) return;
+  const live = yield* LiveBinding;
+  if (!live) return;
   const message = JSON.stringify({ type: "change", collection, change });
-  waitUntil(
-    env.LIVE.getByName(slug)
-      .broadcast(slug, message)
-      .catch((error: unknown) => {
-        console.error(
-          JSON.stringify({ message: "Live broadcast failed", slug, error: String(error) }),
-        );
-      }),
-  );
-}
+  yield* inBackground(
+    Effect.tryPromise(() => live.getByName(slug).broadcast(slug, message)),
+    "Live broadcast failed",
+  ).pipe(Effect.annotateLogs({ slug }));
+});

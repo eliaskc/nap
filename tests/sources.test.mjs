@@ -8,7 +8,13 @@ import { registerHooks } from "node:module";
 registerHooks({
   resolve(specifier, context, next) {
     if (specifier === "cloudflare:workers") {
-      return { url: "data:text/javascript,export const env = {}", shortCircuit: true };
+      return {
+        url: "data:text/javascript,export const env = {}; export class DurableObject {}",
+        shortCircuit: true,
+      };
+    }
+    if (specifier === "~/nap.config") {
+      return next(new URL("../nap.config.ts", import.meta.url).href, context);
     }
     if (specifier.startsWith("~/")) {
       return next(new URL(`../src/${specifier.slice(2)}.ts`, import.meta.url).href, context);
@@ -20,6 +26,12 @@ const { checkSourceCommit, createSource, describeSource, isAncestor, mintSourceT
   await import("../src/lib/sources.ts");
 const { publishFiles } = await import("../src/lib/publish.ts");
 const { restoreVersion } = await import("../src/lib/versions.ts");
+const { runNap } = await import("../src/server/runtime.ts");
+const { recoverHttpError } = await import("../src/server/http.ts");
+const { Effect } = await import("effect");
+
+/** Runs a Nap effect: its value, or the error response for an HttpError. */
+const call = (env, effect) => runNap(env, recoverHttpError(effect));
 
 const OWNER = "owner@example.com";
 const OTHER = "other@example.com";
@@ -161,17 +173,19 @@ const file = () => ({
 });
 
 function publish(env, { email = OWNER, sourceCommit, expected } = {}) {
-  return publishFiles(
+  return call(
     env,
-    { email, name: "" },
-    {
-      files: [file()],
-      targetSlug: "elo",
-      requireExpectedVersion: true,
-      expectedCurrentVersion: expected ?? null,
-      source: "agent",
-      sourceCommit,
-    },
+    publishFiles(
+      { email, name: "" },
+      {
+        files: [file()],
+        targetSlug: "elo",
+        requireExpectedVersion: true,
+        expectedCurrentVersion: expected ?? null,
+        source: "agent",
+        sourceCommit,
+      },
+    ),
   );
 }
 
@@ -217,16 +231,16 @@ test("isAncestor follows merges, not just the first-parent line", async () => {
   ns.commit("r", sha(4), [sha(3), sha(2)]); // git pull --no-rebase
   ns.commit("r", sha(5), [sha(1)], { main: false }); // a force-push that drops sha(2)
   const repo = await ns.get("r");
-  assert.equal(await isAncestor(repo, sha(2), sha(4)), true);
-  assert.equal(await isAncestor(repo, sha(1), sha(4)), true);
-  assert.equal(await isAncestor(repo, sha(4), sha(4)), true);
-  assert.equal(await isAncestor(repo, sha(2), sha(5)), false);
+  assert.equal(await Effect.runPromise(isAncestor(repo, sha(2), sha(4))), true);
+  assert.equal(await Effect.runPromise(isAncestor(repo, sha(1), sha(4))), true);
+  assert.equal(await Effect.runPromise(isAncestor(repo, sha(4), sha(4))), true);
+  assert.equal(await Effect.runPromise(isAncestor(repo, sha(2), sha(5))), false);
 });
 
 test("createSource names the repo after the site, records it once, and mints a short token", async () => {
   const { env, sqlite, SOURCES } = setup();
   await SOURCES.create("elo"); // an old repo from a deleted site
-  const access = await createSource(env, site(sqlite));
+  const access = await call(env, createSource(site(sqlite)));
   assert.match(access.repo, /^elo-[a-z0-9]{1,6}$/);
   assert.equal(site(sqlite).sourceRepo, access.repo);
   assert.equal(access.scope, "write");
@@ -234,19 +248,19 @@ test("createSource names the repo after the site, records it once, and mints a s
   assert.match(access.remote, /\/nap-sites\/elo-[a-z0-9]+\.git$/);
   assert.equal(SOURCES.tokens.at(-1).ttl, 15 * 60);
 
-  const again = await createSource(env, { ...site(sqlite), slug: "elo" });
+  const again = await call(env, createSource({ ...site(sqlite), slug: "elo" }));
   assert.equal(again.status, 409);
   assert.equal(SOURCES.repos.size, 2, "the losing repo is deleted");
 
-  const read = await mintSourceToken(env, access.repo, "read");
+  const read = await call(env, mintSourceToken(access.repo, "read"));
   assert.equal(read.scope, "read");
-  const missing = await mintSourceToken({ DB: env.DB }, access.repo, "read");
+  const missing = await call({ DB: env.DB }, mintSourceToken(access.repo, "read"));
   assert.equal(missing.status, 503);
 });
 
 test("a site with a source repo only publishes the head of main, containing the live commit", async () => {
   const { env, sqlite, SOURCES, objects } = setup();
-  const { repo } = await createSource(env, site(sqlite));
+  const { repo } = await call(env, createSource(site(sqlite)));
 
   // No commit: dashboard uploads, claims, and agents that forgot it.
   let result = await publish(env);
@@ -293,9 +307,9 @@ test("a site with a source repo only publishes the head of main, containing the 
   assert.equal(result.created, false);
 
   // A restore leaves main ahead; the next publish of main still works.
-  const restored = await restoreVersion(env.DB, OWNER, "elo", { version: v2 });
+  const restored = await call(env, restoreVersion(OWNER, "elo", { version: v2 }));
   assert.equal(restored.status, 200);
-  const described = await describeSource(env, site(sqlite));
+  const described = await call(env, describeSource(site(sqlite)));
   assert.deepEqual(
     { head: described.head, liveCommit: described.liveCommit, inSync: described.inSync },
     { head: sha(3), liveCommit: sha(1), inSync: false },
@@ -310,7 +324,7 @@ test("sites without a source repo publish as before and refuse a commit", async 
   assert.equal(result.created, false);
   const refused = await publish(env, { sourceCommit: sha(1) });
   assert.equal((await refused.json()).code, "no_source_repo");
-  assert.equal(await checkSourceCommit(env, null, ""), null);
+  assert.equal(await call(env, checkSourceCommit(null, "")), undefined);
 });
 
 const { startDirectUpload, commitDirectUpload } = await import("../src/lib/direct-uploads.ts");
@@ -340,22 +354,24 @@ function uploadEnv() {
 }
 
 const startNewSite = (env, input = {}) =>
-  startDirectUpload(
+  call(
     env,
-    { email: OWNER, name: "" },
-    {
-      files: [{ path: "index.html", size: 18 }],
-      targetSlug: null,
-      requireExpectedVersion: true,
-      expectedCurrentVersion: null,
-      kind: "site",
-      slug: "team-map",
-      title: "Team map",
-      source: "agent",
-      createSource: true,
-      sourceCommit: sha(1),
-      ...input,
-    },
+    startDirectUpload(
+      { email: OWNER, name: "" },
+      {
+        files: [{ path: "index.html", size: 18 }],
+        targetSlug: null,
+        requireExpectedVersion: true,
+        expectedCurrentVersion: null,
+        kind: "site",
+        slug: "team-map",
+        title: "Team map",
+        source: "agent",
+        createSource: true,
+        sourceCommit: sha(1),
+        ...input,
+      },
+    ),
   );
 
 test("a new site gets its source repo with its first upload, built from a commit", async () => {
@@ -371,12 +387,15 @@ test("a new site gets its source repo with its first upload, built from a commit
   objects.set(`sites/team-map/versions/${versionId}/index.html`, 18);
 
   // Not pushed yet: the upload and its repo stay, so the agent can push and commit again.
-  const early = await commitDirectUpload(env, { email: OWNER, name: "" }, uploadId, "agent");
+  const early = await call(env, commitDirectUpload({ email: OWNER, name: "" }, uploadId, "agent"));
   assert.equal((await early.json()).code, "source_not_head");
   assert.ok(SOURCES.repos.has("team-map"));
 
   SOURCES.commit("team-map", sha(1));
-  const published = await commitDirectUpload(env, { email: OWNER, name: "" }, uploadId, "agent");
+  const published = await call(
+    env,
+    commitDirectUpload({ email: OWNER, name: "" }, uploadId, "agent"),
+  );
   assert.equal(published.created, true);
   assert.equal(site(sqlite, "team-map").sourceRepo, "team-map");
   assert.equal(

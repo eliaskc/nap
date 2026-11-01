@@ -1,7 +1,9 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { Effect } from "effect";
 import { startDirectUpload } from "~/lib/direct-uploads";
-import { ensureProfile, getEnv, getIdentity, json, slugify } from "~/lib/nap-server";
-import { isCrossSite } from "~/lib/site-access";
+import { signedIn, slugify } from "~/lib/nap-server";
+import { readJsonObject, requireJsonBody, requireSameSite, stringField } from "~/server/http";
+import { route } from "~/server/route";
 
 /**
  * POST /api/uploads — starts a direct dashboard upload. JSON:
@@ -13,26 +15,23 @@ import { isCrossSite } from "~/lib/site-access";
 export const Route = createFileRoute("/api/uploads")({
   server: {
     handlers: {
-      POST: async ({ request }) => {
-        if (isCrossSite(request)) return json({ error: "Forbidden" }, { status: 403 });
-        if (!request.headers.get("content-type")?.includes("application/json")) {
-          return json({ error: "Expected JSON" }, { status: 415 });
-        }
-        const env = getEnv();
-        const identity = getIdentity(request);
-        await ensureProfile(env.DB, identity);
-        const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
-        const text = (name: string) =>
-          typeof body[name] === "string" ? (body[name] as string) : "";
-        return startDirectUpload(env, identity, {
-          files: body.files,
-          targetSlug: slugify(text("targetSlug")) || null,
-          requireExpectedVersion: false,
-          expectedCurrentVersion: text("expectedCurrentVersion") || null,
-          kind: text("kind") === "artifact" ? "artifact" : "site",
-          source: "dashboard",
-        });
-      },
+      POST: ({ request }) =>
+        route(
+          Effect.gen(function* () {
+            yield* requireSameSite(request);
+            yield* requireJsonBody(request);
+            const identity = yield* signedIn(request);
+            const body = yield* readJsonObject(request);
+            return yield* startDirectUpload(identity, {
+              files: body.files,
+              targetSlug: slugify(stringField(body.targetSlug)) || null,
+              requireExpectedVersion: false,
+              expectedCurrentVersion: stringField(body.expectedCurrentVersion) || null,
+              kind: stringField(body.kind) === "artifact" ? "artifact" : "site",
+              source: "dashboard",
+            });
+          }),
+        ),
     },
   },
 });

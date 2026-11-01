@@ -1,6 +1,16 @@
-import { ensureProfile, getIdentity, json } from "~/lib/nap-server";
-import { isCrossSite } from "~/lib/site-access";
+import { Effect, Predicate } from "effect";
+import { ensureProfile, getIdentity } from "~/lib/nap-server";
 import { findViewableNap } from "~/lib/site-serving";
+import { Database } from "~/server/database";
+import {
+  fail,
+  failNoStore,
+  json,
+  noStore,
+  readJson,
+  requireJsonBody,
+  requireSameSite,
+} from "~/server/http";
 
 /**
  * Comments on artifacts. People use them from the Nap bar (`/artifact/<slug>/_nap/comments`);
@@ -20,7 +30,6 @@ const MAX_PATH = 512;
 const MAX_THREADS = 500;
 const ID_PATTERN = /^[0-9a-f-]{36}$/;
 const NOW = "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')";
-const noStore = { "cache-control": "no-store" };
 
 export type CommentAuthor = { email: string; client?: string };
 
@@ -46,27 +55,25 @@ type CommentRow = {
  * the Nap bar calls it. The sandboxed artifact frame cannot: its requests are cross-site, and
  * responses carry no CORS headers.
  */
-export async function handleSiteCommentsRequest(
-  env: { DB: D1Database },
+export const handleSiteCommentsRequest = Effect.fn("handleSiteCommentsRequest")(function* (
   slug: string,
   request: Request,
   rest: string,
 ) {
   const identity = getIdentity(request);
-  const access = await findViewableNap(env.DB, slug, identity.email);
+  const access = yield* findViewableNap(slug, identity.email);
   if (access.status !== "allowed" || access.nap.kind !== "artifact") {
-    return json({ error: "Not found" }, { status: 404, headers: noStore });
+    return yield* failNoStore(404, "Not found");
   }
   if (request.method !== "GET") {
     // Other origins cannot send a JSON body without a preflight, which Nap never answers.
-    if (isCrossSite(request)) return json({ error: "Forbidden" }, { status: 403 });
-    await ensureProfile(env.DB, identity);
+    yield* requireSameSite(request);
+    yield* ensureProfile(identity);
   }
-  return handleComments(env.DB, slug, { email: identity.email }, request, rest);
-}
+  return yield* handleComments(slug, { email: identity.email }, request, rest);
+});
 
-export async function handleComments(
-  db: D1Database,
+export const handleComments = Effect.fn("handleComments")(function* (
   slug: string,
   author: CommentAuthor,
   request: Request,
@@ -75,127 +82,118 @@ export async function handleComments(
   const method = request.method;
   const segments = rest.split("/");
   const [, id, action] = segments;
-  if (segments.length > 3 || (id !== undefined && !ID_PATTERN.test(id))) return notFound();
+  if (segments.length > 3 || (id !== undefined && !ID_PATTERN.test(id))) return yield* notFound();
 
   if (!id && method === "GET") {
     const status = new URL(request.url).searchParams.get("status");
-    return json({ comments: await listThreads(db, slug, status) }, { headers: noStore });
+    return json({ comments: yield* listThreads(slug, status) }, { headers: noStore });
   }
 
-  if (method !== "POST" && method !== "PATCH") {
-    return json({ error: "Method not allowed" }, { status: 405 });
-  }
-  if (!request.headers.get("content-type")?.includes("application/json")) {
-    return json({ error: "Send JSON" }, { status: 415 });
-  }
-  const input = (await request.json().catch(() => null)) as Record<string, unknown> | null;
-  if (!input || typeof input !== "object") return json({ error: "Invalid JSON" }, { status: 400 });
+  if (method !== "POST" && method !== "PATCH") return yield* fail(405, "Method not allowed");
+  yield* requireJsonBody(request, "Send JSON");
+  const input = (yield* readJson(request)) as Record<string, unknown> | null;
+  if (!input || typeof input !== "object") return yield* fail(400, "Invalid JSON");
 
+  const db = yield* Database;
   if (!id && method === "POST") {
     const body = text(input.body, MAX_BODY);
-    if (body === null) return json({ error: "The comment is too long" }, { status: 400 });
-    if (!body) return json({ error: "Write a comment" }, { status: 400 });
+    if (body === null) return yield* fail(400, "The comment is too long");
+    if (!body) return yield* fail(400, "Write a comment");
     const quote = text(input.quote, MAX_QUOTE);
-    if (quote === null) return json({ error: "The quote is too long" }, { status: 400 });
+    if (quote === null) return yield* fail(400, "The quote is too long");
     const path = text(input.path, MAX_PATH) || "/";
-    if (!path.startsWith("/")) return json({ error: "path starts with /" }, { status: 400 });
+    if (!path.startsWith("/")) return yield* fail(400, "path starts with /");
 
     const commentId = crypto.randomUUID();
-    await db
-      .prepare(
-        `INSERT INTO comments (id, site_slug, path, version_id, quote, prefix, suffix, body,
-                               author_email, client)
-         SELECT ?, slug, ?, current_version, ?, ?, ?, ?, ?, ? FROM sites WHERE slug = ?`,
-      )
-      .bind(
-        commentId,
-        path,
-        quote,
-        quote ? context(input.prefix, "end") : "",
-        quote ? context(input.suffix, "start") : "",
-        body,
-        author.email,
-        author.client ?? "",
-        slug,
-      )
-      .run();
-    return json({ comment: await getThread(db, slug, commentId) }, { status: 201 });
+    yield* db.run(
+      `INSERT INTO comments (id, site_slug, path, version_id, quote, prefix, suffix, body,
+                             author_email, client)
+       SELECT ?, slug, ?, current_version, ?, ?, ?, ?, ?, ? FROM sites WHERE slug = ?`,
+      commentId,
+      path,
+      quote,
+      quote ? context(input.prefix, "end") : "",
+      quote ? context(input.suffix, "start") : "",
+      body,
+      author.email,
+      author.client ?? "",
+      slug,
+    );
+    return json({ comment: yield* getThread(slug, commentId) }, { status: 201 });
   }
 
-  const thread = await db
-    .prepare("SELECT id FROM comments WHERE id = ? AND site_slug = ? AND thread_id IS NULL")
-    .bind(id, slug)
-    .first<{ id: string }>();
-  if (!thread) return notFound();
+  const thread = yield* db.first<{ id: string }>(
+    "SELECT id FROM comments WHERE id = ? AND site_slug = ? AND thread_id IS NULL",
+    id,
+    slug,
+  );
+  if (!thread) return yield* notFound();
 
   if (action === "replies" && method === "POST") {
     const body = text(input.body, MAX_BODY);
-    if (body === null) return json({ error: "The reply is too long" }, { status: 400 });
-    if (!body) return json({ error: "Write a reply" }, { status: 400 });
-    await db
-      .prepare(
-        `INSERT INTO comments (id, site_slug, thread_id, body, author_email, client)
-         VALUES (?, ?, ?, ?, ?, ?)`,
-      )
-      .bind(crypto.randomUUID(), slug, id, body, author.email, author.client ?? "")
-      .run();
-    return json({ comment: await getThread(db, slug, id) }, { status: 201 });
+    if (body === null) return yield* fail(400, "The reply is too long");
+    if (!body) return yield* fail(400, "Write a reply");
+    yield* db.run(
+      `INSERT INTO comments (id, site_slug, thread_id, body, author_email, client)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      crypto.randomUUID(),
+      slug,
+      id,
+      body,
+      author.email,
+      author.client ?? "",
+    );
+    return json({ comment: yield* getThread(slug, id) }, { status: 201 });
   }
 
   if (action === undefined && method === "PATCH") {
-    if (typeof input.resolved !== "boolean") {
-      return json({ error: "Send { resolved: true } or { resolved: false }" }, { status: 400 });
+    if (!Predicate.isBoolean(input.resolved)) {
+      return yield* fail(400, "Send { resolved: true } or { resolved: false }");
     }
-    await (
-      input.resolved
-        ? db
-            .prepare(
-              `UPDATE comments SET resolved_at = ${NOW}, resolved_by_email = ?
-               WHERE id = ? AND resolved_at IS NULL`,
-            )
-            .bind(author.email, id)
-        : db
-            .prepare(
-              "UPDATE comments SET resolved_at = NULL, resolved_by_email = NULL WHERE id = ?",
-            )
-            .bind(id)
-    ).run();
-    return json({ comment: await getThread(db, slug, id) });
+    yield* input.resolved
+      ? db.run(
+          `UPDATE comments SET resolved_at = ${NOW}, resolved_by_email = ?
+           WHERE id = ? AND resolved_at IS NULL`,
+          author.email,
+          id,
+        )
+      : db.run("UPDATE comments SET resolved_at = NULL, resolved_by_email = NULL WHERE id = ?", id);
+    return json({ comment: yield* getThread(slug, id) });
   }
 
-  return notFound();
-}
+  return yield* notFound();
+});
 
-async function listThreads(db: D1Database, slug: string, status: string | null) {
+const listThreads = Effect.fnUntraced(function* (slug: string, status: string | null) {
   const filter =
     status === "open"
       ? "AND resolved_at IS NULL"
       : status === "resolved"
         ? "AND resolved_at IS NOT NULL"
         : "";
-  const { results } = await db
-    .prepare(
-      `WITH threads AS (
-         SELECT id FROM comments
-         WHERE site_slug = ? AND thread_id IS NULL ${filter}
-         ORDER BY created_at DESC LIMIT ${MAX_THREADS}
-       )
-       ${selectComments("comments.id IN (SELECT id FROM threads) OR comments.thread_id IN (SELECT id FROM threads)")}`,
-    )
-    .bind(slug)
-    .all<CommentRow>();
-  return toThreads(results);
-}
+  const db = yield* Database;
+  const rows = yield* db.all<CommentRow>(
+    `WITH threads AS (
+       SELECT id FROM comments
+       WHERE site_slug = ? AND thread_id IS NULL ${filter}
+       ORDER BY created_at DESC LIMIT ${MAX_THREADS}
+     )
+     ${selectComments("comments.id IN (SELECT id FROM threads) OR comments.thread_id IN (SELECT id FROM threads)")}`,
+    slug,
+  );
+  return toThreads(rows);
+});
 
-async function getThread(db: D1Database, slug: string, id: string) {
-  const { results } = await db
-    .prepare(
-      selectComments("comments.site_slug = ? AND (comments.id = ? OR comments.thread_id = ?)"),
-    )
-    .bind(slug, id, id)
-    .all<CommentRow>();
-  return toThreads(results)[0] ?? null;
-}
+const getThread = Effect.fnUntraced(function* (slug: string, id: string) {
+  const db = yield* Database;
+  const rows = yield* db.all<CommentRow>(
+    selectComments("comments.site_slug = ? AND (comments.id = ? OR comments.thread_id = ?)"),
+    slug,
+    id,
+    id,
+  );
+  return toThreads(rows)[0] ?? null;
+});
 
 function selectComments(where: string) {
   return `SELECT comments.id, comments.thread_id AS threadId, comments.path,
@@ -237,17 +235,15 @@ function toThreads(rows: Array<CommentRow>) {
 
 /** Trimmed text up to `max` characters. "" when missing, null when too long. */
 function text(value: unknown, max: number) {
-  if (typeof value !== "string") return "";
+  if (!Predicate.isString(value)) return "";
   const trimmed = value.trim();
   return trimmed.length > max ? null : trimmed;
 }
 
 /** The characters next to the quote. Longer context is cut, keeping the side next to it. */
 function context(value: unknown, keep: "start" | "end") {
-  if (typeof value !== "string") return "";
+  if (!Predicate.isString(value)) return "";
   return keep === "start" ? value.slice(0, MAX_CONTEXT) : value.slice(-MAX_CONTEXT);
 }
 
-function notFound() {
-  return json({ error: "Comment not found" }, { status: 404, headers: noStore });
-}
+const notFound = () => failNoStore(404, "Comment not found");

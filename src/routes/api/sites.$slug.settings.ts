@@ -1,8 +1,12 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { ensureProfile, getEnv, getIdentity, json, slugify } from "~/lib/nap-server";
+import { Effect, Predicate } from "effect";
+import { signedIn, slugify } from "~/lib/nap-server";
 import { rekeyNap } from "~/lib/rekey";
-import { getSiteOwner, isCrossSite, isSameEmail } from "~/lib/site-access";
+import { getSiteOwner, isSameEmail } from "~/lib/site-access";
 import { pickArtifactId } from "~/lib/uploads";
+import { Database } from "~/server/database";
+import { fail, json, readJsonObject, requireSameSite } from "~/server/http";
+import { route } from "~/server/route";
 
 /**
  * PATCH /api/sites/:slug/settings — { listed?: boolean, toolbar?: boolean, kind?: "site" | "artifact" }.
@@ -15,66 +19,62 @@ import { pickArtifactId } from "~/lib/uploads";
 export const Route = createFileRoute("/api/sites/$slug/settings")({
   server: {
     handlers: {
-      PATCH: async ({ params, request }) => {
-        if (isCrossSite(request)) return json({ error: "Forbidden" }, { status: 403 });
-        const { DB, SITES } = getEnv();
-        const identity = getIdentity(request);
-        await ensureProfile(DB, identity);
+      PATCH: ({ params, request }) =>
+        route(
+          Effect.gen(function* () {
+            yield* requireSameSite(request);
+            const identity = yield* signedIn(request);
 
-        const slug = slugify(params.slug);
-        const site = slug ? await getSiteOwner(DB, slug) : null;
-        if (!site) return json({ error: "Site not found" }, { status: 404 });
-        if (!isSameEmail(site.createdByEmail, identity.email)) {
-          return json({ error: "Only the owner can change settings" }, { status: 403 });
-        }
+            const slug = slugify(params.slug);
+            const site = slug ? yield* getSiteOwner(slug) : null;
+            if (!site) return yield* fail(404, "Site not found");
+            if (!isSameEmail(site.createdByEmail, identity.email)) {
+              return yield* fail(403, "Only the owner can change settings");
+            }
 
-        const body = (await request.json().catch(() => ({}))) as {
-          listed?: unknown;
-          toolbar?: unknown;
-          kind?: unknown;
-        };
-        const updates: Array<[column: "listed" | "toolbar" | "kind", value: number | string]> = [];
-        if (typeof body.listed === "boolean") updates.push(["listed", body.listed ? 1 : 0]);
-        if (typeof body.toolbar === "boolean") updates.push(["toolbar", body.toolbar ? 1 : 0]);
-        if (body.kind === "site" || body.kind === "artifact") updates.push(["kind", body.kind]);
-        if (updates.length === 0) return json({ error: "Nothing to change" }, { status: 400 });
+            const body = yield* readJsonObject(request);
+            const updates: Array<[column: "listed" | "toolbar" | "kind", value: number | string]> =
+              [];
+            if (Predicate.isBoolean(body.listed)) updates.push(["listed", body.listed ? 1 : 0]);
+            if (Predicate.isBoolean(body.toolbar)) updates.push(["toolbar", body.toolbar ? 1 : 0]);
+            if (body.kind === "site" || body.kind === "artifact") updates.push(["kind", body.kind]);
+            if (updates.length === 0) return yield* fail(400, "Nothing to change");
 
-        // An artifact's key is a random id, never a name. Give the site one and keep its slug as a
-        // redirect, so <slug>.<root> and old links still work.
-        let key = slug;
-        if (body.kind === "artifact" && site.kind === "site") {
-          if (site.sourceRepo) {
-            return json(
-              { error: "A site with a source repo cannot become an artifact" },
-              { status: 409 },
+            // An artifact's key is a random id, never a name. Give the site one and keep its slug
+            // as a redirect, so <slug>.<root> and old links still work.
+            const db = yield* Database;
+            let key = slug;
+            if (body.kind === "artifact" && site.kind === "site") {
+              if (site.sourceRepo) {
+                return yield* fail(409, "A site with a source repo cannot become an artifact");
+              }
+              key = yield* pickArtifactId((id) =>
+                db.first("SELECT 1 FROM sites WHERE slug = ?", id).pipe(Effect.map(Boolean)),
+              );
+              yield* rekeyNap(slug, key, {
+                email: identity.email,
+                kind: "artifact",
+                redirect: true,
+              });
+            }
+
+            const row = yield* db.first<{ listed: number; toolbar: number; kind: string }>(
+              `UPDATE sites SET ${updates.map(([column]) => `${column} = ?`).join(", ")}
+               WHERE slug = ? RETURNING listed, toolbar, kind`,
+              ...updates.map(([, value]) => value),
+              key,
             );
-          }
-          key = await pickArtifactId(async (id) =>
-            Boolean(await DB.prepare("SELECT 1 FROM sites WHERE slug = ?").bind(id).first()),
-          );
-          await rekeyNap({ DB, SITES }, slug, key, {
-            email: identity.email,
-            kind: "artifact",
-            redirect: true,
-          });
-        }
+            if (!row) return yield* fail(404, "Site not found");
 
-        const row = await DB.prepare(
-          `UPDATE sites SET ${updates.map(([column]) => `${column} = ?`).join(", ")}
-           WHERE slug = ? RETURNING listed, toolbar, kind`,
-        )
-          .bind(...updates.map(([, value]) => value), key)
-          .first<{ listed: number; toolbar: number; kind: string }>();
-        if (!row) return json({ error: "Site not found" }, { status: 404 });
-
-        return json({
-          ok: true,
-          slug: key,
-          listed: Boolean(row.listed),
-          toolbar: Boolean(row.toolbar),
-          kind: row.kind,
-        });
-      },
+            return json({
+              ok: true,
+              slug: key,
+              listed: Boolean(row.listed),
+              toolbar: Boolean(row.toolbar),
+              kind: row.kind,
+            });
+          }),
+        ),
     },
   },
 });

@@ -1,3 +1,7 @@
+import { Effect } from "effect";
+import { Database } from "~/server/database";
+import { HttpError } from "~/server/http";
+
 /** Artifacts: quick pages, shared by link, only in the owner's Artifacts list. Sites: everything else. */
 export type SiteKind = "site" | "artifact";
 
@@ -31,13 +35,15 @@ const ARTIFACT_ID_LENGTH = 12;
  * [a-z0-9], so the id is still a valid host label if the owner moves the artifact to Sites.
  * 12 characters is about 62 bits: collisions are not a concern, and links are hard to guess.
  */
-export async function pickArtifactId(isTaken: (id: string) => Promise<boolean>) {
+export const pickArtifactId = Effect.fnUntraced(function* <E, R>(
+  isTaken: (id: string) => Effect.Effect<boolean, E, R>,
+) {
   let id = newNapId(ARTIFACT_ID_LENGTH);
-  for (let attempt = 0; attempt < 5 && (isReservedSlug(id) || (await isTaken(id))); attempt++) {
+  for (let attempt = 0; attempt < 5 && (isReservedSlug(id) || (yield* isTaken(id))); attempt++) {
     id = newNapId(ARTIFACT_ID_LENGTH);
   }
   return id;
-}
+});
 
 const TITLE_SLUG_MAX = 24;
 const DEFAULT_TITLES = new Set(["untitled", "untitled-artifact", "untitled-site"]);
@@ -75,18 +81,18 @@ export function generatedSlug(title: string | null | undefined) {
  * taken or reserved, the title with a random suffix. Generated slugs share the host namespace
  * with chosen slugs. Never take one in use.
  */
-export async function pickGeneratedSlug(
+export const pickGeneratedSlug = Effect.fnUntraced(function* <E, R>(
   title: string | null | undefined,
-  isTaken: (slug: string) => Promise<boolean>,
+  isTaken: (slug: string) => Effect.Effect<boolean, E, R>,
 ) {
   const base = titleSlug(title);
-  if (base && !isReservedSlug(base) && !(await isTaken(base))) return base;
+  if (base && !isReservedSlug(base) && !(yield* isTaken(base))) return base;
   let slug = generatedSlug(title);
-  for (let attempt = 0; attempt < 5 && (await isTaken(slug)); attempt++) {
+  for (let attempt = 0; attempt < 5 && (yield* isTaken(slug)); attempt++) {
     slug = generatedSlug(title);
   }
   return slug;
-}
+});
 
 export function normalizePath(path: string) {
   return path.replace(/\\/g, "/").replace(/^\/+/, "").replace(/^\.\//, "");
@@ -122,34 +128,28 @@ export function contentTypeForPath(path: string) {
 
 export type IncomingFile = { path: string; body: Blob };
 
-const UPLOAD_ERROR_HEADERS = { "content-type": "application/json; charset=utf-8" };
-
-function uploadError(error: string, status: number) {
-  return new Response(JSON.stringify({ error }), { status, headers: UPLOAD_ERROR_HEADERS });
-}
+const uploadError = (error: string, status: number) => new HttpError({ status, body: { error } });
 
 /** Refuses a request body that says it is too large, before Nap reads it. */
-export function rejectLargeBody(request: Request) {
+export const rejectLargeBody = (request: Request) => {
   const declaredLength = Number(request.headers.get("content-length") ?? "0");
-  if (declaredLength > MAX_UPLOAD_BYTES + 64 * 1024) {
-    return uploadError(
-      `Upload is larger than ${formatLimit(MAX_UPLOAD_BYTES)}. ${DIRECT_HINT}`,
-      413,
-    );
-  }
-  return null;
-}
+  return declaredLength > MAX_UPLOAD_BYTES + 64 * 1024
+    ? Effect.fail(
+        uploadError(`Upload is larger than ${formatLimit(MAX_UPLOAD_BYTES)}. ${DIRECT_HINT}`, 413),
+      )
+    : Effect.void;
+};
 
 /**
  * Reads an upload from agents: one HTML file sent as text/html, or multipart form data with
  * `file` or `files` fields. Text fields come from the query string, and form fields override
  * them. A single HTML file becomes index.html.
  */
-export async function readUpload<Name extends string>(
+export const readUpload = Effect.fnUntraced(function* <Name extends string>(
   request: Request,
   url: URL,
   names: ReadonlyArray<Name>,
-): Promise<Response | { files: Array<IncomingFile>; fields: Record<Name, string> }> {
+) {
   const contentType = request.headers.get("content-type") ?? "";
   const fields = Object.fromEntries(
     names.map((name) => [name, url.searchParams.get(name) ?? ""]),
@@ -157,8 +157,8 @@ export async function readUpload<Name extends string>(
   let files: Array<IncomingFile> = [];
 
   if (contentType.includes("multipart/form-data")) {
-    const form = await request.formData().catch(() => null);
-    if (!form) return uploadError("Could not read form data", 400);
+    const form = yield* Effect.promise(() => request.formData().catch(() => null));
+    if (!form) return yield* Effect.fail(uploadError("Could not read form data", 400));
     for (const name of names) {
       const value = form.get(name);
       if (typeof value === "string") fields[name] = value;
@@ -169,40 +169,51 @@ export async function readUpload<Name extends string>(
     files = uploaded.map((file) => ({ path: normalizePath(file.name), body: file }));
     if (files.length === 1 && /\.html?$/i.test(files[0].path)) files[0].path = "index.html";
   } else if (contentType.includes("text/html")) {
-    files = [{ path: "index.html", body: await request.blob() }];
+    const body = yield* Effect.tryPromise({
+      try: () => request.blob(),
+      catch: () => uploadError("Could not read the upload", 400),
+    });
+    files = [{ path: "index.html", body }];
   } else {
-    return uploadError(
-      "Send one HTML file with content-type text/html, or multipart/form-data with file fields",
-      415,
+    return yield* Effect.fail(
+      uploadError(
+        "Send one HTML file with content-type text/html, or multipart/form-data with file fields",
+        415,
+      ),
     );
   }
 
   for (const name of names) fields[name] = fields[name].trim();
   return { files, fields };
-}
+});
 
-/** The same checks for every upload path. Returns an error response, or the total size. */
-export function checkFiles(files: Array<IncomingFile>): Response | { totalBytes: number } {
-  const checked = checkManifest(
+/** The same checks for every upload path. Succeeds with the total size. */
+export const checkFiles = (files: Array<IncomingFile>) =>
+  checkManifest(
     files.map((file) => ({ path: file.path, size: file.body.size })),
     MAX_UPLOAD_BYTES,
+  ).pipe(
+    Effect.mapError((error) =>
+      error.status === 413
+        ? uploadError(`Upload is larger than ${formatLimit(MAX_UPLOAD_BYTES)}. ${DIRECT_HINT}`, 413)
+        : error,
+    ),
   );
-  if (checked instanceof Response && checked.status === 413) {
-    return uploadError(
-      `Upload is larger than ${formatLimit(MAX_UPLOAD_BYTES)}. ${DIRECT_HINT}`,
-      413,
-    );
-  }
-  return checked;
-}
 
 const DIRECT_HINT = `Direct uploads take up to ${formatLimit(MAX_DIRECT_UPLOAD_BYTES)}; see "Direct uploads" in GET /_nap/api/instructions/api.`;
 
 /** Checks a list of paths and sizes, before or without the file contents. */
-export function checkManifest(
+export const checkManifest = (
   files: Array<{ path: string; size: number }>,
   maxBytes: number,
-): Response | { totalBytes: number } {
+): Effect.Effect<{ totalBytes: number }, HttpError> => {
+  const problem = manifestProblem(files, maxBytes);
+  return problem
+    ? Effect.fail(problem)
+    : Effect.succeed({ totalBytes: files.reduce((sum, file) => sum + file.size, 0) });
+};
+
+function manifestProblem(files: Array<{ path: string; size: number }>, maxBytes: number) {
   if (files.length === 0) return uploadError("No files uploaded", 400);
   if (files.length > MAX_UPLOAD_FILES) {
     return uploadError(`Too many files (max ${MAX_UPLOAD_FILES})`, 400);
@@ -221,7 +232,7 @@ export function checkManifest(
   if (totalBytes > maxBytes) {
     return uploadError(`Upload is larger than ${formatLimit(maxBytes)}`, 413);
   }
-  return { totalBytes };
+  return null;
 }
 
 function formatLimit(bytes: number) {
@@ -234,9 +245,10 @@ export function randomTheme() {
   return { hue: Math.floor(Math.random() * 360) };
 }
 
-export async function nextSortOrder(db: D1Database) {
-  const maxSort = await db
-    .prepare("SELECT COALESCE(MAX(sort_order), 0) AS maxSort FROM sites")
-    .first<{ maxSort: number }>();
+export const nextSortOrder = Effect.gen(function* () {
+  const db = yield* Database;
+  const maxSort = yield* db.first<{ maxSort: number }>(
+    "SELECT COALESCE(MAX(sort_order), 0) AS maxSort FROM sites",
+  );
   return (maxSort?.maxSort ?? 0) + 1000;
-}
+});

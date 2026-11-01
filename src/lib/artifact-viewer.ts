@@ -1,18 +1,33 @@
-import { randomString, sha256Hex } from "~/lib/agent-auth";
+import { Effect } from "effect";
 import { handleSiteCommentsRequest } from "~/lib/comments";
-import { ensureProfile, getIdentity, json, objectKey, type Identity } from "~/lib/nap-server";
+import { ensureProfile, getIdentity, objectKey, type Identity } from "~/lib/nap-server";
 import { toolbarPage } from "~/lib/nap-toolbar";
 import { findRedirect } from "~/lib/rekey";
 import { ARTIFACT_PATH, napUrl, type NapPlace } from "~/lib/nap-urls";
-import { handleSiteAccessRequest, isCrossSite } from "~/lib/site-access";
+import { handleSiteAccessRequest } from "~/lib/site-access";
 import { handleSiteDataRequest } from "~/lib/site-data";
 import { serveSiteDataClient } from "~/lib/site-data-client";
-import { handleLiveRequest, publishChange, type SiteLive } from "~/lib/site-live";
-import { handleChannelRequest, type SiteChannel } from "~/lib/site-channel";
-import { handleRtcRequest, type RtcEnv } from "~/lib/site-rtc";
+import { handleLiveRequest, publishChange } from "~/lib/site-live";
+import { handleChannelRequest } from "~/lib/site-channel";
+import { handleRtcRequest } from "~/lib/site-rtc";
 import { fileHeaders, findViewableNap, getNapFile, normalizeRequestPath } from "~/lib/site-serving";
 import { serveShareWidget } from "~/lib/share-widget";
 import { findVersion, listVersions, restoreVersion } from "~/lib/versions";
+import { Database } from "~/server/database";
+import {
+  fail,
+  failText,
+  json,
+  noStore,
+  readJsonObject,
+  recoverHttpError,
+  redirect,
+  requireJsonBody,
+  requireSameSite,
+} from "~/server/http";
+import { inBackground } from "~/server/platform";
+import { Storage } from "~/server/storage";
+import { randomString, sha256Hex } from "~/server/tokens";
 import COMMENTS_FRAME_SOURCE from "virtual:nap-comments-frame";
 
 /**
@@ -39,13 +54,6 @@ import COMMENTS_FRAME_SOURCE from "virtual:nap-comments-frame";
  *                                       an earlier version's files, for the history preview
  */
 
-type ViewerEnv = RtcEnv & {
-  DB: D1Database;
-  SITES: R2Bucket;
-  LIVE?: DurableObjectNamespace<SiteLive>;
-  CHANNELS?: DurableObjectNamespace<SiteChannel>;
-};
-
 export const FRAME_PREFIX = "/_nap/frame/";
 const FRAME_TOKEN_HOURS = 12;
 /** No allow-same-origin and no allow-top-navigation. */
@@ -65,11 +73,9 @@ export function isFramePath(pathname: string) {
 }
 
 /** <root>/artifact/<slug>[/<path>]. Access protects this path. */
-export async function handleArtifactPage(
-  env: ViewerEnv,
+export const handleArtifactPage = Effect.fn("handleArtifactPage")(function* (
   request: Request,
   place: NapPlace,
-  ctx?: ExecutionContext,
 ) {
   const url = new URL(request.url);
   const match = url.pathname.match(ARTIFACT_ROUTE);
@@ -77,21 +83,21 @@ export async function handleArtifactPage(
   const slug = match[1];
   const rest = match[2] ?? "";
 
-  if (rest === "/_nap/access") return handleSiteAccessRequest(env, slug, request);
+  if (rest === "/_nap/access") return yield* handleSiteAccessRequest(slug, request);
   if (rest === "/_nap/comments" || rest.startsWith("/_nap/comments/")) {
-    return handleSiteCommentsRequest(env, slug, request, rest.slice("/_nap/comments".length));
+    return yield* handleSiteCommentsRequest(slug, request, rest.slice("/_nap/comments".length));
   }
-  if (rest === "/_nap/versions") return handleArtifactVersionsRequest(env, slug, request);
-  if (rest.startsWith("/_nap/")) return new Response("Not found", { status: 404 });
+  if (rest === "/_nap/versions") return yield* handleArtifactVersionsRequest(slug, request);
+  if (rest.startsWith("/_nap/")) return yield* failText(404, "Not found");
   if (request.method !== "GET" && request.method !== "HEAD") {
-    return new Response("Method not allowed", { status: 405, headers: { allow: "GET, HEAD" } });
+    return yield* failText(405, "Method not allowed", { allow: "GET, HEAD" });
   }
 
   const identity = getIdentity(request);
-  const access = await findViewableNap(env.DB, slug, identity.email);
+  const access = yield* findViewableNap(slug, identity.email);
   if (access.status === "missing") {
     // An old URL of a nap that has a new key now, such as a site that moved to Artifacts.
-    const moved = await findRedirect(env.DB, slug);
+    const moved = yield* findRedirect(slug);
     if (moved) return redirect(`${ARTIFACT_PATH}/${moved}${rest}${url.search}`);
     return statusPage(404, "Artifact not found", "The link is wrong, or it was deleted.", place);
   }
@@ -110,21 +116,22 @@ export async function handleArtifactPage(
   }
 
   // The frame token is written with this person's email, which must have a profile.
-  await ensureProfile(env.DB, identity);
+  yield* ensureProfile(identity);
   const token = randomString(32);
-  await env.DB.prepare(
+  const db = yield* Database;
+  yield* db.run(
     `INSERT INTO artifact_frames (token_hash, site_slug, email, expires_at)
      VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '+${FRAME_TOKEN_HOURS} hours'))`,
-  )
-    .bind(await sha256Hex(token), slug, identity.email)
-    .run();
-  const cleanup = env.DB.prepare(
-    "DELETE FROM artifact_frames WHERE expires_at < strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
-  )
-    .run()
-    .catch(() => undefined);
-  if (ctx) ctx.waitUntil(cleanup);
-  else await cleanup;
+    yield* sha256Hex(token),
+    slug,
+    identity.email,
+  );
+  yield* inBackground(
+    db
+      .run("DELETE FROM artifact_frames WHERE expires_at < strftime('%Y-%m-%dT%H:%M:%fZ', 'now')")
+      .pipe(Effect.asVoid),
+    "Artifact frame cleanup failed",
+  );
 
   const { nap, isOwner } = access;
   return toolbarPage({
@@ -142,10 +149,13 @@ export async function handleArtifactPage(
       versionsPath: `${ARTIFACT_PATH}/${slug}/_nap/versions`,
     },
   });
-}
+});
 
-/** <root>/_nap/frame/<token>/<path>. Access bypasses this path: never use getIdentity() here. */
-export async function handleFrameRequest(env: ViewerEnv, request: Request, ctx?: ExecutionContext) {
+/**
+ * <root>/_nap/frame/<token>/<path>. Access bypasses this path: never use getIdentity() here.
+ * Every response but a WebSocket's gets the CORS header, errors included.
+ */
+export const handleFrameRequest = Effect.fn("handleFrameRequest")(function* (request: Request) {
   const url = new URL(request.url);
   const match = url.pathname.match(FRAME_ROUTE);
   if (!match) return withCors(new Response("Not found", { status: 404 }));
@@ -176,15 +186,20 @@ export async function handleFrameRequest(env: ViewerEnv, request: Request, ctx?:
     );
   }
 
-  const frame = await env.DB.prepare(
+  const db = yield* Database;
+  const frame = yield* db.first<{
+    slug: string;
+    email: string;
+    name: string | null;
+    expiresAt: string;
+  }>(
     `SELECT artifact_frames.site_slug AS slug, artifact_frames.email,
             profiles.display_name AS name, artifact_frames.expires_at AS expiresAt
      FROM artifact_frames LEFT JOIN profiles ON profiles.email = artifact_frames.email
      WHERE artifact_frames.token_hash = ?
        AND artifact_frames.expires_at > strftime('%Y-%m-%dT%H:%M:%fZ', 'now')`,
-  )
-    .bind(await sha256Hex(token))
-    .first<{ slug: string; email: string; name: string | null; expiresAt: string }>();
+    yield* sha256Hex(token),
+  );
   if (!frame) {
     return withCors(
       new Response("This artifact view has expired. Reload the page.", {
@@ -211,29 +226,31 @@ export async function handleFrameRequest(env: ViewerEnv, request: Request, ctx?:
     );
   }
   if (rest === "/_nap/me" && request.method === "GET") {
-    return withCors(json(identity, { headers: { "cache-control": "no-store" } }));
+    return withCors(json(identity, { headers: noStore }));
   }
   if (rest.startsWith("/_nap/data/")) {
     const path = rest.slice("/_nap/data/".length);
+    const slug = frame.slug;
     return withCors(
-      await handleSiteDataRequest(env, frame.slug, request, path, {
-        frameIdentity: identity,
-        onChange: (collection, change) =>
-          publishChange(env, ctx && ((p) => ctx.waitUntil(p)), frame.slug, collection, change),
-      }),
+      yield* recoverHttpError(
+        handleSiteDataRequest(slug, request, path, {
+          frameIdentity: identity,
+          onChange: (collection, change) => publishChange(slug, collection, change),
+        }),
+      ),
     );
   }
   // A WebSocket response cannot get new headers, and WebSockets do not use CORS.
   // The socket closes when the frame token expires.
   if (rest === "/_nap/live") {
-    return handleLiveRequest(env, frame.slug, request, identity, frame.expiresAt);
+    return yield* handleLiveRequest(frame.slug, request, identity, frame.expiresAt);
   }
   if (rest.startsWith("/_nap/channel/")) {
     const name = rest.slice("/_nap/channel/".length);
-    return handleChannelRequest(env, frame.slug, name, request, identity, frame.expiresAt);
+    return yield* handleChannelRequest(frame.slug, name, request, identity, frame.expiresAt);
   }
   if (rest === "/_nap/rtc") {
-    return withCors(await handleRtcRequest(env, frame.slug, request, identity));
+    return withCors(yield* recoverHttpError(handleRtcRequest(frame.slug, request, identity)));
   }
   if (rest.startsWith("/_nap/")) return withCors(new Response("Not found", { status: 404 }));
 
@@ -242,7 +259,7 @@ export async function handleFrameRequest(env: ViewerEnv, request: Request, ctx?:
   }
 
   // Access can change while a page is open. Check it on every request.
-  const access = await findViewableNap(env.DB, frame.slug, frame.email);
+  const access = yield* findViewableNap(frame.slug, frame.email);
   if (access.status !== "allowed" || access.nap.kind !== "artifact") {
     return withCors(new Response("Not found", { status: 404 }));
   }
@@ -251,12 +268,13 @@ export async function handleFrameRequest(env: ViewerEnv, request: Request, ctx?:
   let object: R2ObjectBody | null;
   if (previewVersion) {
     // Previews do not count as views.
-    if (!(await findVersion(env.DB, frame.slug, previewVersion))) {
+    if (!(yield* findVersion(frame.slug, previewVersion))) {
       return withCors(new Response("Version not found", { status: 404 }));
     }
-    object = await env.SITES.get(objectKey(frame.slug, previewVersion, normalizedPath));
+    const storage = yield* Storage;
+    object = yield* storage.get(objectKey(frame.slug, previewVersion, normalizedPath));
   } else {
-    object = await getNapFile(env, access.nap, normalizedPath);
+    object = yield* getNapFile(access.nap, normalizedPath);
   }
   if (!object) return withCors(new Response("File not found", { status: 404 }));
 
@@ -274,7 +292,7 @@ export async function handleFrameRequest(env: ViewerEnv, request: Request, ctx?:
     response.headers.set("content-type", "text/html; charset=utf-8");
   }
   return rewriteArtifactHtml(response, prefix, url.origin);
-}
+});
 
 /**
  * Root paths such as `/app.js` would leave the frame's folder. Point src, href, action, and poster
@@ -343,37 +361,31 @@ post();})();`;
  * /artifact/<slug>/_nap/versions, for the history button in the Nap bar (Access).
  * GET lists the versions, newest first. POST { version, expectedCurrentVersion } makes one live.
  */
-async function handleArtifactVersionsRequest(
-  env: { DB: D1Database },
-  slug: string,
-  request: Request,
-) {
+const handleArtifactVersionsRequest = Effect.fnUntraced(function* (slug: string, request: Request) {
   const identity = getIdentity(request);
-  const access = await findViewableNap(env.DB, slug, identity.email);
-  if (access.status !== "allowed") return json({ error: "Not found" }, { status: 404 });
+  const access = yield* findViewableNap(slug, identity.email);
+  if (access.status !== "allowed") return yield* fail(404, "Not found");
 
   if (request.method === "GET") {
-    const site = await env.DB.prepare(
+    const db = yield* Database;
+    const site = yield* db.first<{ hasSource: number }>(
       "SELECT source_repo IS NOT NULL AS hasSource FROM sites WHERE slug = ?",
-    )
-      .bind(slug)
-      .first<{ hasSource: number }>();
+      slug,
+    );
     return json(
-      { versions: await listVersions(env.DB, slug), hasSource: Boolean(site?.hasSource) },
-      { headers: { "cache-control": "no-store" } },
+      { versions: yield* listVersions(slug), hasSource: Boolean(site?.hasSource) },
+      { headers: noStore },
     );
   }
   if (request.method === "POST") {
-    if (isCrossSite(request)) return json({ error: "Forbidden" }, { status: 403 });
-    if (!request.headers.get("content-type")?.includes("application/json")) {
-      return json({ error: "Expected JSON" }, { status: 415 });
-    }
-    await ensureProfile(env.DB, identity);
-    const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
-    return restoreVersion(env.DB, identity.email, slug, body);
+    yield* requireSameSite(request);
+    yield* requireJsonBody(request);
+    yield* ensureProfile(identity);
+    const body = yield* readJsonObject(request);
+    return yield* restoreVersion(identity.email, slug, body);
   }
-  return json({ error: "Method not allowed" }, { status: 405 });
-}
+  return yield* fail(405, "Method not allowed");
+});
 
 function withCors(response: Response) {
   // The frame's origin is opaque ("null"), so its own fetches and module scripts are
@@ -389,10 +401,6 @@ function safeDecode(path: string) {
   } catch {
     return path;
   }
-}
-
-function redirect(location: string) {
-  return new Response(null, { status: 302, headers: { location, "cache-control": "no-store" } });
 }
 
 function statusPage(status: number, title: string, message: string, place: NapPlace) {

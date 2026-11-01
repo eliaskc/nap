@@ -1,8 +1,10 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { Effect } from "effect";
 import { appsEnabled } from "~/lib/apps";
 import { addDevice, listDevices } from "~/lib/devices";
-import { isCrossSite } from "~/lib/site-access";
-import { ensureProfile, getEnv, getIdentity, json } from "~/lib/nap-server";
+import { signedIn } from "~/lib/nap-server";
+import { fail, json, noStore, readJsonObject, requireSameSite, stringField } from "~/server/http";
+import { route } from "~/server/route";
 
 /**
  * GET /api/devices — every registered iPhone.
@@ -11,29 +13,23 @@ import { ensureProfile, getEnv, getIdentity, json } from "~/lib/nap-server";
 export const Route = createFileRoute("/api/devices")({
   server: {
     handlers: {
-      GET: async ({ request }) => {
-        const { DB } = getEnv();
-        const identity = getIdentity(request);
-        await ensureProfile(DB, identity);
-        return json(
-          { devices: await listDevices(DB) },
-          { headers: { "cache-control": "no-store" } },
-        );
-      },
-      POST: async ({ request }) => {
-        if (isCrossSite(request)) return json({ error: "Forbidden" }, { status: 403 });
-        if (!appsEnabled()) return json({ error: "Not found" }, { status: 404 });
-        const env = getEnv();
-        const identity = getIdentity(request);
-        await ensureProfile(env.DB, identity);
-        const body = (await request.json().catch(() => ({}))) as { udid?: unknown; name?: unknown };
-        return addDevice(
-          env,
-          identity.email,
-          typeof body.udid === "string" ? body.udid : "",
-          typeof body.name === "string" ? body.name : "",
-        );
-      },
+      GET: ({ request }) =>
+        route(
+          Effect.gen(function* () {
+            yield* signedIn(request);
+            return json({ devices: yield* listDevices() }, { headers: noStore });
+          }),
+        ),
+      POST: ({ request }) =>
+        route(
+          Effect.gen(function* () {
+            yield* requireSameSite(request);
+            if (!appsEnabled()) return yield* fail(404, "Not found");
+            const identity = yield* signedIn(request);
+            const body = yield* readJsonObject(request);
+            return yield* addDevice(identity.email, stringField(body.udid), stringField(body.name));
+          }),
+        ),
     },
   },
 });

@@ -1,19 +1,22 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { Effect } from "effect";
 import { revokeAgentToken } from "~/lib/agent-auth";
-import { ensureProfile, getEnv, getIdentity, json } from "~/lib/nap-server";
-import { isCrossSite } from "~/lib/site-access";
+import { signedIn } from "~/lib/nap-server";
+import { requireSameSite } from "~/server/http";
+import { route } from "~/server/route";
 
 /** DELETE /api/tokens/:id — disconnects one of the caller's agents. */
 export const Route = createFileRoute("/api/tokens/$id")({
   server: {
     handlers: {
-      DELETE: async ({ params, request }) => {
-        if (isCrossSite(request)) return json({ error: "Forbidden" }, { status: 403 });
-        const { DB } = getEnv();
-        const identity = getIdentity(request);
-        await ensureProfile(DB, identity);
-        return revokeAgentToken(DB, identity.email, params.id);
-      },
+      DELETE: ({ params, request }) =>
+        route(
+          Effect.gen(function* () {
+            yield* requireSameSite(request);
+            const identity = yield* signedIn(request);
+            return yield* revokeAgentToken(identity.email, params.id);
+          }),
+        ),
     },
   },
 });

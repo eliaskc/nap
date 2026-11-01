@@ -1,78 +1,100 @@
-import { json } from "~/lib/nap-server";
+import { Effect, Schema } from "effect";
 import { canViewSite } from "~/lib/site-data";
-import { isCrossSite } from "~/lib/site-access";
 import { MANIFEST_PATH, siteManifest } from "~/lib/site-manifest";
-
-type SiteFetchEnv = {
-  DB: D1Database;
-  SITES: R2Bucket;
-};
+import { Database } from "~/server/database";
+import { failNoStore, isCrossSite } from "~/server/http";
+import { Settings } from "~/server/platform";
 
 const MAX_REDIRECTS = 3;
 const MAX_BYTES = 5 * 1024 * 1024;
 const CACHE_SECONDS = 300;
+
+/** The upstream fetch failed (DNS, connection, TLS). It becomes a 500, as before. */
+export class UpstreamFetchError extends Schema.TaggedError<UpstreamFetchError>()(
+  "UpstreamFetchError",
+  { message: Schema.String, cause: Schema.Defect() },
+) {}
 
 /**
  * Fetches a public URL for a page, so pages can read APIs that do not allow other origins. Only
  * GET, only HTTPS, only hosts the site lists in nap.json, and only for people who can view the
  * site. Nothing of the viewer's is sent on: no cookies, no Access headers, no referrer.
  */
-export async function handleSiteFetch(
-  env: SiteFetchEnv,
+export const handleSiteFetch = Effect.fn("handleSiteFetch")(function* (
   slug: string,
   request: Request,
   email: string,
-  rootDomain: string,
 ) {
   if (request.method !== "GET" && request.method !== "HEAD") {
-    return napError("Only GET requests can be fetched", 405);
+    return yield* failNoStore(405, "Only GET requests can be fetched");
   }
-  if (isCrossSite(request)) return napError("Forbidden", 403);
+  if (isCrossSite(request)) return yield* failNoStore(403, "Forbidden");
 
-  const site = await env.DB.prepare(
+  const db = yield* Database;
+  const site = yield* db.first<{ currentVersion: string | null; kind: string }>(
     `SELECT current_version AS currentVersion, kind FROM sites WHERE slug = ?`,
-  )
-    .bind(slug)
-    .first<{ currentVersion: string | null; kind: string }>();
-  if (!site?.currentVersion || site.kind !== "site") return napError("Site not found", 404);
-  if (!(await canViewSite(env.DB, slug, email))) return napError("Forbidden", 403);
-
-  let target: URL;
-  try {
-    target = new URL(new URL(request.url).searchParams.get("url") ?? "");
-  } catch {
-    return napError("Pass an absolute URL as ?url=", 400);
+    slug,
+  );
+  if (!site?.currentVersion || site.kind !== "site") {
+    return yield* failNoStore(404, "Site not found");
   }
+  if (!(yield* canViewSite(slug, email))) return yield* failNoStore(403, "Forbidden");
 
-  const hosts = (await siteManifest(env.SITES, slug, site.currentVersion)).fetch;
+  const requested = parseUrl(new URL(request.url).searchParams.get("url") ?? "");
+  if (!requested) return yield* failNoStore(400, "Pass an absolute URL as ?url=");
+  let target: URL = requested;
+
+  const { rootDomain } = yield* Settings;
+  const hosts = (yield* siteManifest(slug, site.currentVersion)).fetch;
   for (let redirects = 0; ; redirects++) {
     const problem = checkTarget(target, hosts, rootDomain);
-    if (problem) return napError(problem, 403);
+    if (problem) return yield* failNoStore(403, problem);
 
-    const upstream = await fetch(target.toString(), {
-      method: request.method,
-      redirect: "manual",
-      headers: {
-        accept: request.headers.get("accept") ?? "*/*",
-        "accept-language": request.headers.get("accept-language") ?? "en-US,en;q=0.9",
-        "user-agent": "Mozilla/5.0 (compatible; Nap/1.0)",
-      },
-      cf: { cacheEverything: true, cacheTtlByStatus: { "200-299": CACHE_SECONDS, "300-599": 0 } },
-    });
+    const upstream = yield* fetchUpstream(target, request);
 
     const location = upstream.headers.get("location");
     if (upstream.status >= 300 && upstream.status < 400 && location) {
-      if (redirects >= MAX_REDIRECTS) return napError("Too many redirects", 502);
+      if (redirects >= MAX_REDIRECTS) return yield* failNoStore(502, "Too many redirects");
       target = new URL(location, target);
       continue;
     }
 
     const length = Number(upstream.headers.get("content-length") ?? 0);
-    if (length > MAX_BYTES) return napError("The response is too large", 502);
+    if (length > MAX_BYTES) return yield* failNoStore(502, "The response is too large");
     return new Response(upstream.body ? limit(upstream.body, MAX_BYTES) : null, {
       status: upstream.status,
       headers: proxiedHeaders(upstream.headers, target),
     });
+  }
+});
+
+/** Nothing of the viewer's is sent on. Responses are cached at the edge for a few minutes. */
+function fetchUpstream(target: URL, request: Request) {
+  return Effect.tryPromise({
+    try: () =>
+      fetch(target.toString(), {
+        method: request.method,
+        redirect: "manual",
+        headers: {
+          accept: request.headers.get("accept") ?? "*/*",
+          "accept-language": request.headers.get("accept-language") ?? "en-US,en;q=0.9",
+          "user-agent": "Mozilla/5.0 (compatible; Nap/1.0)",
+        },
+        cf: { cacheEverything: true, cacheTtlByStatus: { "200-299": CACHE_SECONDS, "300-599": 0 } },
+      }),
+    catch: (cause) =>
+      new UpstreamFetchError({
+        message: cause instanceof Error ? cause.message : String(cause),
+        cause,
+      }),
+  });
+}
+
+function parseUrl(value: string) {
+  try {
+    return new URL(value);
+  } catch {
+    return null;
   }
 }
 
@@ -127,8 +149,4 @@ function limit(body: ReadableStream<Uint8Array>, maxBytes: number) {
       },
     }),
   );
-}
-
-function napError(error: string, status: number) {
-  return json({ error }, { status, headers: { "cache-control": "no-store" } });
 }

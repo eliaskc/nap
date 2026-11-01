@@ -1,8 +1,11 @@
-import { liveBuilds, ensureCurrentSignature, type AppsEnv } from "~/lib/apps";
+import { Cause, Effect } from "effect";
 import { AppleError, regenerateProfile, registerDevice } from "~/lib/apple";
-import { randomString, sha256Hex } from "~/lib/agent-auth";
-import { json } from "~/lib/nap-server";
+import { ensureCurrentSignature, liveBuilds } from "~/lib/apps";
 import { napConfig } from "~/nap.config";
+import { Database } from "~/server/database";
+import { fail, failText, json } from "~/server/http";
+import { inBackground } from "~/server/platform";
+import { randomString, sha256Hex } from "~/server/tokens";
 
 /**
  * iPhones that may install apps. Ad hoc builds only install on iPhones listed in the signing
@@ -29,63 +32,77 @@ export function normalizeUdid(value: string) {
   return "";
 }
 
-export async function addDevice(env: AppsEnv, addedBy: string, rawUdid: string, rawName: string) {
+export const addDevice = Effect.fn("addDevice")(function* (
+  addedBy: string,
+  rawUdid: string,
+  rawName: string,
+) {
   const udid = normalizeUdid(rawUdid);
   if (!UDID.test(udid)) {
-    return json(
-      { error: "That is not an iPhone UDID. It looks like 00008120-001E31091E52201E." },
-      { status: 400 },
-    );
+    return yield* fail(400, "That is not an iPhone UDID. It looks like 00008120-001E31091E52201E.");
   }
   const name = rawName.trim().slice(0, 40) || "iPhone";
-  const added = await registerAndSign(env, addedBy, udid, name, { resign: true });
+  const added = yield* registerAndSign(addedBy, udid, name, { resign: true });
   if (added.ok) return json({ ok: true, name, resigned: added.resigned });
-  return json(
-    {
-      error: added.apple
-        ? `Apple did not accept it: ${added.error}`
-        : "Adding the iPhone failed. Try again.",
-    },
-    { status: 502 },
+  return yield* fail(
+    502,
+    added.apple
+      ? `Apple did not accept it: ${added.error}`
+      : "Adding the iPhone failed. Try again.",
   );
-}
+});
+
+type Added = { ok: true; resigned: number } | { ok: false; apple: boolean; error: string };
 
 /**
  * Registers an iPhone with Apple, records it, and makes a new profile. With resign, signs every
  * live build again now; otherwise each build is signed again when someone installs it.
  */
-async function registerAndSign(
-  env: AppsEnv,
-  addedBy: string,
-  udid: string,
-  name: string,
-  options: { product?: string; version?: string; resign?: boolean },
-): Promise<{ ok: true; resigned: number } | { ok: false; apple: boolean; error: string }> {
-  try {
-    const deviceId = await registerDevice(env, udid, name);
-    await env.DB.prepare(
+const registerAndSign = Effect.fnUntraced(
+  function* (
+    addedBy: string,
+    udid: string,
+    name: string,
+    options: { product?: string; version?: string; resign?: boolean },
+  ) {
+    const deviceId = yield* registerDevice(udid, name);
+    const db = yield* Database;
+    yield* db.run(
       `INSERT INTO devices (udid, email, name, product, os_version, asc_device_id)
        VALUES (?, ?, ?, ?, ?, ?)
        ON CONFLICT (udid) DO UPDATE SET email = excluded.email, name = excluded.name,
          product = excluded.product, os_version = excluded.os_version,
          asc_device_id = excluded.asc_device_id,
          updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')`,
-    )
-      .bind(udid, addedBy, name, options.product ?? "", options.version ?? "", deviceId)
-      .run();
-    await regenerateProfile(env);
-    const resigned = options.resign ? await resignLiveBuilds(env) : 0;
-    console.log(JSON.stringify({ message: "Device added", by: addedBy, name, deviceId }));
-    return { ok: true, resigned };
-  } catch (error) {
-    console.error(JSON.stringify({ message: "Adding a device failed", error: String(error) }));
-    return {
+      udid,
+      addedBy,
+      name,
+      options.product ?? "",
+      options.version ?? "",
+      deviceId,
+    );
+    yield* regenerateProfile();
+    const resigned = options.resign ? yield* resignLiveBuilds : 0;
+    yield* Effect.logInfo("Device added").pipe(
+      Effect.annotateLogs({ by: addedBy, name, deviceId }),
+    );
+    const added: Added = { ok: true, resigned };
+    return added;
+  },
+  // Any failure, expected or not, becomes a result: Apple's errors are shown to the person.
+  Effect.catchCause((cause) => {
+    const error = Cause.squash(cause);
+    const failed: Added = {
       ok: false,
       apple: error instanceof AppleError,
       error: error instanceof Error ? error.message : String(error),
     };
-  }
-}
+    return Effect.logError("Adding a device failed").pipe(
+      Effect.annotateLogs({ error: String(error) }),
+      Effect.as(failed),
+    );
+  }),
+);
 
 export const ENROLL_PREFIX = "/_nap/enroll/";
 /** A day: iOS may hold a profile install for an hour away from familiar places. */
@@ -99,16 +116,22 @@ const xml = (value: string) =>
   );
 
 /** A profile-service .mobileconfig for the signed-in person, valid for 30 minutes. */
-export async function enrollmentProfile(db: D1Database, email: string, origin: string) {
+export const enrollmentProfile = Effect.fn("enrollmentProfile")(function* (
+  email: string,
+  origin: string,
+) {
+  const db = yield* Database;
   const token = randomString(32);
-  await db
-    .prepare("INSERT INTO device_enrollments (token_hash, email, expires_at) VALUES (?, ?, ?)")
-    .bind(await sha256Hex(token), email, new Date(Date.now() + ENROLL_SECONDS * 1000).toISOString())
-    .run();
-  await db
-    .prepare("DELETE FROM device_enrollments WHERE expires_at < ?")
-    .bind(new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
-    .run();
+  yield* db.run(
+    "INSERT INTO device_enrollments (token_hash, email, expires_at) VALUES (?, ?, ?)",
+    yield* sha256Hex(token),
+    email,
+    new Date(Date.now() + ENROLL_SECONDS * 1000).toISOString(),
+  );
+  yield* db.run(
+    "DELETE FROM device_enrollments WHERE expires_at < ?",
+    new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
+  );
   const name = napConfig.orgName;
   const prefix = napConfig.apps?.bundleIdPrefix ?? "nap";
   return `<?xml version="1.0" encoding="UTF-8"?>
@@ -143,7 +166,7 @@ export async function enrollmentProfile(db: D1Database, email: string, origin: s
 </dict>
 </plist>
 `;
-}
+});
 
 export const isEnrollPath = (pathname: string) => pathname.startsWith(ENROLL_PREFIX);
 
@@ -163,52 +186,58 @@ function readAttributes(body: Uint8Array) {
  * POST /_nap/enroll/<token>, from iOS. Never uses getIdentity(): Access bypasses this path.
  * Answers with a redirect, which iOS opens in Safari.
  */
-export async function handleEnrollRequest(env: AppsEnv, request: Request, ctx?: ExecutionContext) {
+export const handleEnrollRequest = Effect.fn("handleEnrollRequest")(function* (request: Request) {
   const url = new URL(request.url);
   const back = (query: string) =>
     new Response(null, { status: 301, headers: { location: `${url.origin}/apps?${query}` } });
   const token = url.pathname.slice(ENROLL_PREFIX.length);
   if (request.method !== "POST" || !/^[A-Za-z0-9_-]{43}$/.test(token)) {
-    return new Response("Not found", { status: 404 });
+    return yield* failText(404, "Not found");
   }
   const length = Number(request.headers.get("content-length") ?? "0");
-  if (length > 64 * 1024) return new Response("Too large", { status: 413 });
+  if (length > 64 * 1024) return yield* failText(413, "Too large");
 
-  const claimed = await env.DB.prepare(
+  const db = yield* Database;
+  const claimed = yield* db.first<{ email: string }>(
     `UPDATE device_enrollments SET used_at = ?1
      WHERE token_hash = ?2 AND used_at IS NULL AND expires_at > ?1
      RETURNING email`,
-  )
-    .bind(now(), await sha256Hex(token))
-    .first<{ email: string }>();
+    now(),
+    yield* sha256Hex(token),
+  );
   if (!claimed) return back("enroll_error=expired");
 
-  const attributes = readAttributes(new Uint8Array(await request.arrayBuffer()));
+  const attributes = readAttributes(
+    new Uint8Array(yield* Effect.promise(() => request.arrayBuffer())),
+  );
   const udid = normalizeUdid(attributes?.udid ?? "");
   if (!attributes || !udid) return back("enroll_error=unreadable");
   const { product, version } = attributes;
   const name = `${claimed.email.split("@")[0]}'s ${product || "iPhone"}`;
-  const added = await registerAndSign(env, claimed.email, udid, name, { product, version });
+  const added = yield* registerAndSign(claimed.email, udid, name, { product, version });
   // Sign the live builds for the new profile after answering, so Install is quick. Whatever is not
   // done by then is signed when someone installs it.
-  if (added.ok) ctx?.waitUntil(resignLiveBuilds(env).catch(() => undefined));
+  if (added.ok) {
+    yield* inBackground(
+      Effect.asVoid(resignLiveBuilds),
+      "Signing live builds after enrollment failed",
+    );
+  }
   return back(added.ok ? "enrolled=1" : `enroll_error=${added.apple ? "apple" : "failed"}`);
-}
+});
 
 /** Signs every live build for the current profile. Returns how many builds there are. */
-async function resignLiveBuilds(env: AppsEnv) {
-  const builds = await liveBuilds(env.DB);
-  for (const build of builds) await ensureCurrentSignature(env, build);
+const resignLiveBuilds = Effect.gen(function* () {
+  const builds = yield* liveBuilds;
+  for (const build of builds) yield* ensureCurrentSignature(build);
   return builds.length;
-}
+});
 
 /** Every registered iPhone, with who added it. The UDID is not shown. */
-export async function listDevices(db: D1Database) {
-  const { results } = await db
-    .prepare(
-      `SELECT name, product, email AS addedBy, created_at AS createdAt FROM devices
-       ORDER BY created_at`,
-    )
-    .all<{ name: string; product: string; addedBy: string; createdAt: string }>();
-  return results;
-}
+export const listDevices = Effect.fn("listDevices")(function* () {
+  const db = yield* Database;
+  return yield* db.all<{ name: string; product: string; addedBy: string; createdAt: string }>(
+    `SELECT name, product, email AS addedBy, created_at AS createdAt FROM devices
+     ORDER BY created_at`,
+  );
+});

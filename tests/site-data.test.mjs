@@ -8,7 +8,13 @@ import { registerHooks } from "node:module";
 registerHooks({
   resolve(specifier, context, next) {
     if (specifier === "cloudflare:workers") {
-      return { url: "data:text/javascript,export const env = {}", shortCircuit: true };
+      return {
+        url: "data:text/javascript,export const env = {}; export class DurableObject {}",
+        shortCircuit: true,
+      };
+    }
+    if (specifier === "~/nap.config") {
+      return next(new URL("../nap.config.ts", import.meta.url).href, context);
     }
     if (specifier.startsWith("~/")) {
       return next(new URL(`../src/${specifier.slice(2)}.ts`, import.meta.url).href, context);
@@ -16,7 +22,10 @@ registerHooks({
     return next(specifier, context);
   },
 });
-const { handleSiteDataRequest, viewersAmong } = await import("../src/lib/site-data.ts");
+const { handleSiteDataRequest, viewersAmong: viewersAmongEffect } =
+  await import("../src/lib/site-data.ts");
+const { respond, runNap } = await import("../src/server/runtime.ts");
+const viewersAmong = (env, slug, emails) => runNap(env, viewersAmongEffect(slug, emails));
 
 const OWNER = "owner@example.com";
 const OTHER = "other@example.com";
@@ -69,7 +78,7 @@ function client(env, { slug = "elo", email = OWNER } = {}) {
       body: body ? JSON.stringify(body) : undefined,
     });
     // The Worker passes the path without the query string.
-    const response = await handleSiteDataRequest(env, slug, request, path.split("?")[0]);
+    const response = await respond(env, handleSiteDataRequest(slug, request, path.split("?")[0]));
     const text = await response.text();
     return { status: response.status, json: text ? JSON.parse(text) : null };
   };
@@ -290,7 +299,10 @@ async function page(env, email = OWNER, WebSocket = undefined) {
       ...options,
       headers: { ...options.headers, "cf-access-authenticated-user-email": email },
     });
-    return handleSiteDataRequest(env, "elo", request, url.pathname.slice("/_nap/data/".length));
+    return respond(
+      env,
+      handleSiteDataRequest("elo", request, url.pathname.slice("/_nap/data/".length)),
+    );
   };
   new Function("window", "document", "location", "fetch", "WebSocket", source)(
     window,
@@ -394,17 +406,17 @@ test("the client: changes pushed over the live socket reach subscribers", async 
 test("viewersAmong follows the same access rule as reads", async () => {
   const { sqlite, env } = database();
   const all = [OWNER.toUpperCase(), OTHER, "x@example.com"];
-  assert.deepEqual([...(await viewersAmong(env.DB, "elo", all))].sort(), [
+  assert.deepEqual([...(await viewersAmong(env, "elo", all))].sort(), [
     OTHER,
     OWNER,
     "x@example.com",
   ]);
   sqlite.exec(`UPDATE sites SET visibility = 'selected' WHERE slug = 'elo';
     INSERT INTO site_viewers (site_slug, email) VALUES ('elo', '${OTHER}')`);
-  assert.deepEqual([...(await viewersAmong(env.DB, "elo", all))].sort(), [OTHER, OWNER]);
+  assert.deepEqual([...(await viewersAmong(env, "elo", all))].sort(), [OTHER, OWNER]);
   sqlite.exec(`UPDATE sites SET visibility = 'private' WHERE slug = 'elo'`);
-  assert.deepEqual([...(await viewersAmong(env.DB, "elo", all))], [OWNER]);
-  assert.deepEqual([...(await viewersAmong(env.DB, "gone", all))], []);
+  assert.deepEqual([...(await viewersAmong(env, "elo", all))], [OWNER]);
+  assert.deepEqual([...(await viewersAmong(env, "gone", all))], []);
 });
 
 test("the client: channels track peers, presence, messages, and the host", async () => {

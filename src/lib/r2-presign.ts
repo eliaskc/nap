@@ -1,4 +1,6 @@
 import { AwsV4Signer } from "aws4fetch";
+import { Effect } from "effect";
+import type { R2Credentials } from "~/server/platform";
 
 /**
  * Presigned R2 uploads. A presigned URL lets a client PUT one object straight to R2's S3 API
@@ -10,14 +12,7 @@ import { AwsV4Signer } from "aws4fetch";
  * on the Nap bucket only. Its access key id is the token id; the secret access key is the SHA-256
  * of the token value.
  */
-export type R2Credentials = {
-  accountId: string;
-  bucket: string;
-  accessKeyId: string;
-  secretAccessKey: string;
-};
-
-export async function presignPut(
+export const presignPut = Effect.fnUntraced(function* (
   credentials: R2Credentials,
   key: string,
   options: { contentType: string; contentLength: number; expiresInSeconds: number },
@@ -51,6 +46,9 @@ export async function presignPut(
     // Sign content-type and content-length too, so the client cannot change the type or size.
     allHeaders: true,
   });
-  const signed = await signer.sign();
-  return { url: signed.url.toString(), headers: { "content-type": options.contentType } };
-}
+  const signed = yield* Effect.promise(() => signer.sign());
+  return {
+    url: signed.url.toString(),
+    headers: { "content-type": options.contentType } as Record<string, string>,
+  };
+});

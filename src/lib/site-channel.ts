@@ -1,6 +1,10 @@
 import { DurableObject } from "cloudflare:workers";
-import { json, type Identity } from "~/lib/nap-server";
+import { Effect } from "effect";
+import type { Identity } from "~/lib/nap-server";
 import { canViewSite, viewersAmong } from "~/lib/site-data";
+import { ChannelsBinding } from "~/server/bindings";
+import { Database } from "~/server/database";
+import { fail } from "~/server/http";
 
 export const CHANNEL_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 const MAX_PEERS = 200;
@@ -11,7 +15,6 @@ const ACCESS_CHECK_MS = 60_000;
 
 type ChannelEnv = {
   DB: D1Database;
-  CHANNELS?: DurableObjectNamespace<SiteChannel>;
 };
 
 /**
@@ -173,7 +176,9 @@ export class SiteChannel extends DurableObject<ChannelEnv> {
     const slug = peers.find(Boolean)?.slug;
     if (!slug) return true;
     const emails = [...new Set(peers.map((peer) => peer?.email ?? ""))];
-    const allowed = await viewersAmong(this.env.DB, slug, emails);
+    const allowed = await Effect.runPromise(
+      viewersAmong(slug, emails).pipe(Effect.provideService(Database, Database.make(this.env.DB))),
+    );
     const iso = new Date(now).toISOString();
     let currentAllowed = true;
     sockets.forEach((socket, index) => {
@@ -230,8 +235,7 @@ function safeDecode(value: string) {
  * GET /_nap/channel/<name> with a WebSocket upgrade. For artifact frames, `identity` comes from
  * the frame token: Access does not protect that path, so its headers say nothing.
  */
-export async function handleChannelRequest(
-  env: ChannelEnv,
+export const handleChannelRequest = Effect.fn("handleChannelRequest")(function* (
   slug: string,
   name: string,
   request: Request,
@@ -239,21 +243,17 @@ export async function handleChannelRequest(
   expiresAt?: string,
 ) {
   if (request.headers.get("upgrade")?.toLowerCase() !== "websocket") {
-    return json({ error: "Expected a WebSocket upgrade" }, { status: 426 });
+    return yield* fail(426, "Expected a WebSocket upgrade");
   }
   if (!CHANNEL_PATTERN.test(name)) {
-    return json(
-      {
-        error:
-          "Channel names are up to 64 letters, numbers, _ or -, starting with a letter or number",
-      },
-      { status: 400 },
+    return yield* fail(
+      400,
+      "Channel names are up to 64 letters, numbers, _ or -, starting with a letter or number",
     );
   }
-  if (!env.CHANNELS) return json({ error: "Channels are unavailable" }, { status: 503 });
-  if (!(await canViewSite(env.DB, slug, identity.email))) {
-    return json({ error: "Site not found" }, { status: 404 });
-  }
+  const channels = yield* ChannelsBinding;
+  if (!channels) return yield* fail(503, "Channels are unavailable");
+  if (!(yield* canViewSite(slug, identity.email))) return yield* fail(404, "Site not found");
   const headers = new Headers({
     upgrade: "websocket",
     "x-nap-email": identity.email,
@@ -261,5 +261,7 @@ export async function handleChannelRequest(
     "x-nap-slug": slug,
   });
   if (expiresAt) headers.set("x-nap-expires-at", expiresAt);
-  return env.CHANNELS.getByName(`${slug}/${name}`).fetch("https://channel/", { headers });
-}
+  return yield* Effect.promise(() =>
+    channels.getByName(`${slug}/${name}`).fetch("https://channel/", { headers }),
+  );
+});

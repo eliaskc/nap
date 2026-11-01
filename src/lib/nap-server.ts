@@ -1,6 +1,5 @@
-import { env } from "cloudflare:workers";
-
-export type NapEnv = Pick<Cloudflare.Env, "DB" | "SITES">;
+import { Effect } from "effect";
+import { Database } from "~/server/database";
 
 export type Identity = {
   email: string;
@@ -35,10 +34,6 @@ export type SiteRecord = {
   invited: boolean;
 };
 
-export function getEnv() {
-  return env;
-}
-
 export function getIdentity(request?: Request): Identity {
   const email =
     request?.headers.get("cf-access-authenticated-user-email") ??
@@ -54,18 +49,29 @@ export function getIdentity(request?: Request): Identity {
  * tokens stop working when their owner has not been seen for 30 days. Call this only for
  * requests that Access protects, never from the agent API or draft uploads.
  */
-export async function ensureProfile(db: D1Database, identity: Identity) {
-  await db
-    .prepare(
-      `INSERT INTO profiles (email, display_name, avatar_color, last_seen_at)
-       VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-       ON CONFLICT(email) DO UPDATE SET last_seen_at = excluded.last_seen_at
-       WHERE profiles.last_seen_at IS NULL
-          OR profiles.last_seen_at < strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-1 hour')`,
-    )
-    .bind(identity.email, identity.name, colorFromEmail(identity.email))
-    .run();
-}
+export const ensureProfile = Effect.fn("ensureProfile")(function* (identity: Identity) {
+  const db = yield* Database;
+  yield* db.run(
+    `INSERT INTO profiles (email, display_name, avatar_color, last_seen_at)
+     VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+     ON CONFLICT(email) DO UPDATE SET last_seen_at = excluded.last_seen_at
+     WHERE profiles.last_seen_at IS NULL
+        OR profiles.last_seen_at < strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-1 hour')`,
+    identity.email,
+    identity.name,
+    colorFromEmail(identity.email),
+  );
+});
+
+/**
+ * The person behind an Access-protected request, with their profile created or touched. Never
+ * for paths that Access bypasses.
+ */
+export const signedIn = Effect.fn("signedIn")(function* (request: Request) {
+  const identity = getIdentity(request);
+  yield* ensureProfile(identity);
+  return identity;
+});
 
 /**
  * What the caller may see on the dashboard:
@@ -74,10 +80,31 @@ export async function ensureProfile(db: D1Database, identity: Identity) {
  * - sites that invite them.
  * Other people's artifacts are never listed. They are shared by link.
  */
-export async function listSites(db: D1Database, identity: Identity): Promise<Array<SiteRecord>> {
-  const { results } = await db
-    .prepare(
-      `WITH mine AS (
+export const listSites = Effect.fn("listSites")(function* (identity: Identity) {
+  const db = yield* Database;
+  const results = yield* db.all<{
+    slug: string;
+    kind: "site" | "artifact";
+    hasSource: number;
+    title: string;
+    createdByEmail: string;
+    updatedByEmail: string;
+    currentVersion: string;
+    sortOrder: number;
+    themeJson: string;
+    createdAt: string;
+    updatedAt: string;
+    viewCount: number;
+    lastViewedAt: string | null;
+    authorDisplayName: string | null;
+    authorUsername: string | null;
+    visibility: "everyone" | "private" | "selected";
+    listed: number;
+    toolbar: number;
+    invited: number;
+    viewerEmails: string | null;
+  }>(
+    `WITH mine AS (
          SELECT site_slug FROM site_viewers WHERE lower(email) = lower(?1)
        )
        SELECT
@@ -111,54 +138,34 @@ export async function listSites(db: D1Database, identity: Identity): Promise<Arr
             OR (sites.visibility = 'selected' AND sites.slug IN (SELECT site_slug FROM mine))
          ))
       ORDER BY sites.sort_order ASC, sites.created_at ASC`,
-    )
-    .bind(identity.email)
-    .all<{
-      slug: string;
-      kind: "site" | "artifact";
-      hasSource: number;
-      title: string;
-      createdByEmail: string;
-      updatedByEmail: string;
-      currentVersion: string;
-      sortOrder: number;
-      themeJson: string;
-      createdAt: string;
-      updatedAt: string;
-      viewCount: number;
-      lastViewedAt: string | null;
-      authorDisplayName: string | null;
-      authorUsername: string | null;
-      visibility: "everyone" | "private" | "selected";
-      listed: number;
-      toolbar: number;
-      invited: number;
-      viewerEmails: string | null;
-    }>();
+    identity.email,
+  );
 
-  return results.map((row) => ({
-    slug: row.slug,
-    kind: row.kind,
-    hasSource: Boolean(row.hasSource),
-    title: row.title,
-    createdByEmail: row.createdByEmail,
-    updatedByEmail: row.updatedByEmail,
-    currentVersion: row.currentVersion,
-    sortOrder: row.sortOrder,
-    theme: safeJson(row.themeJson),
-    createdAt: row.createdAt,
-    updatedAt: row.updatedAt,
-    viewCount: row.viewCount,
-    lastViewedAt: row.lastViewedAt,
-    authorDisplayName: row.authorDisplayName,
-    authorUsername: row.authorUsername,
-    visibility: row.visibility,
-    viewerEmails: row.viewerEmails ? row.viewerEmails.split(",") : [],
-    listed: Boolean(row.listed),
-    toolbar: Boolean(row.toolbar),
-    invited: Boolean(row.invited),
-  }));
-}
+  return results.map(
+    (row): SiteRecord => ({
+      slug: row.slug,
+      kind: row.kind,
+      hasSource: Boolean(row.hasSource),
+      title: row.title,
+      createdByEmail: row.createdByEmail,
+      updatedByEmail: row.updatedByEmail,
+      currentVersion: row.currentVersion,
+      sortOrder: row.sortOrder,
+      theme: safeJson(row.themeJson),
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+      viewCount: row.viewCount,
+      lastViewedAt: row.lastViewedAt,
+      authorDisplayName: row.authorDisplayName,
+      authorUsername: row.authorUsername,
+      visibility: row.visibility,
+      viewerEmails: row.viewerEmails ? row.viewerEmails.split(",") : [],
+      listed: Boolean(row.listed),
+      toolbar: Boolean(row.toolbar),
+      invited: Boolean(row.invited),
+    }),
+  );
+});
 
 export function slugify(value: string) {
   return value
@@ -167,16 +174,6 @@ export function slugify(value: string) {
     .replace(/^-+|-+$/g, "")
     .replace(/-{2,}/g, "-")
     .slice(0, 32);
-}
-
-export function json(data: unknown, init?: ResponseInit) {
-  return new Response(JSON.stringify(data), {
-    ...init,
-    headers: {
-      "content-type": "application/json; charset=utf-8",
-      ...init?.headers,
-    },
-  });
 }
 
 export function objectKey(slug: string, version: string, path: string) {

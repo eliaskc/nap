@@ -1,3 +1,8 @@
+import { Effect, Predicate, Schema } from "effect";
+import { SourceNamespaceBinding, type SourceNamespace, type SourceRepo } from "~/server/bindings";
+import { Database } from "~/server/database";
+import { failNoStore } from "~/server/http";
+
 /**
  * Source repos: a site's source in a Cloudflare Artifacts repo, one repo per site.
  *
@@ -16,32 +21,7 @@ export const SOURCE_TOKEN_TTL_SECONDS = 15 * 60;
 const MAX_ANCESTRY_COMMITS = 2000;
 const COMMIT = /^[0-9a-f]{40}$/;
 
-/**
- * The parts of the Artifacts binding Nap uses. workers-types lags behind the runtime here: a repo
- * handle has no metadata properties at runtime, only info().
- */
-export type SourceCommit = { hash: string; parents: Array<string>; message?: string };
-export type SourceRepo = {
-  info(): Promise<{ name: string; remote: string; defaultBranch: string }>;
-  createToken(
-    scope?: "read" | "write",
-    ttl?: number,
-  ): Promise<{ plaintext: string; expiresAt: string }>;
-  revokeToken(tokenOrId: string): Promise<boolean>;
-  log(options?: { ref?: string; limit?: number; offset?: number }): Promise<Array<SourceCommit>>;
-  readCommit(hash: string): Promise<SourceCommit | null>;
-  [Symbol.dispose]?: () => void;
-};
-export type SourceNamespace = {
-  create(
-    name: string,
-    options?: { description?: string; setDefaultBranch?: string },
-  ): Promise<{ name: string; remote: string; token: string }>;
-  get(name: string): Promise<SourceRepo>;
-  delete(name: string): Promise<boolean>;
-};
-
-export type SourceEnv = { DB: D1Database; SOURCES?: unknown };
+export type { SourceCommit, SourceNamespace, SourceRepo } from "~/server/bindings";
 
 export type SourceAccess = {
   repo: string;
@@ -52,45 +32,68 @@ export type SourceAccess = {
   expiresAt: string;
 };
 
-const noStore = { "cache-control": "no-store" };
-const fail = (status: number, error: string, extra: Record<string, unknown> = {}) =>
-  Response.json({ error, ...extra }, { status, headers: noStore });
+/** A call to the Artifacts binding failed. `code` is the binding's error code, if any. */
+export class SourceRepoError extends Schema.TaggedError<SourceRepoError>()("SourceRepoError", {
+  message: Schema.String,
+  code: Schema.optional(Schema.String),
+  cause: Schema.Defect(),
+}) {}
 
-function namespace(env: SourceEnv): SourceNamespace | null {
-  return (env.SOURCES as SourceNamespace | undefined) ?? null;
-}
+const toRepoError = (cause: unknown) =>
+  new SourceRepoError({
+    message: cause instanceof Error ? cause.message : String(cause),
+    code:
+      Predicate.hasProperty(cause, "code") && Predicate.isString(cause.code)
+        ? cause.code
+        : undefined,
+    cause,
+  });
 
-const unavailable = () =>
-  fail(503, "Source repos are not set up on this Nap", { code: "sources_unavailable" });
+const tryRepo = <A>(evaluate: () => Promise<A>) =>
+  Effect.tryPromise({ try: evaluate, catch: toRepoError });
+
+/** The namespace, or 503 when this Nap has no SOURCES binding. */
+const namespace = Effect.gen(function* () {
+  const ns = yield* SourceNamespaceBinding;
+  if (!ns) {
+    return yield* failNoStore(503, "Source repos are not set up on this Nap", {
+      code: "sources_unavailable",
+    });
+  }
+  return ns;
+});
 
 export const isCommitHash = (value: string) => COMMIT.test(value);
 
-async function withRepo<T>(
+/** Opens a repo handle for `use`, and disposes of it afterwards. */
+const withRepo = <A, E, R>(
   ns: SourceNamespace,
   name: string,
-  use: (repo: SourceRepo) => Promise<T>,
-) {
-  const repo = await ns.get(name);
-  try {
-    return await use(repo);
-  } finally {
-    repo[Symbol.dispose]?.();
-  }
-}
+  use: (repo: SourceRepo) => Effect.Effect<A, E, R>,
+) =>
+  Effect.acquireUseRelease(
+    tryRepo(() => ns.get(name)),
+    use,
+    (repo) => Effect.sync(() => repo[Symbol.dispose]?.()),
+  );
 
 /** The head commit of main, or null for a repo nobody has pushed to. */
-export async function headCommit(repo: SourceRepo) {
-  const [head] = await repo.log({ ref: SOURCE_BRANCH, limit: 1 });
-  return head?.hash ?? null;
-}
+export const headCommit = (repo: SourceRepo) =>
+  tryRepo(() => repo.log({ ref: SOURCE_BRANCH, limit: 1 })).pipe(
+    Effect.map(([head]) => head?.hash ?? null),
+  );
 
 /**
  * Whether `ancestor` is in the history of `head` (or is `head`). Checks the first-parent line in
  * one call, then walks every parent, so merges count too.
  */
-export async function isAncestor(repo: SourceRepo, ancestor: string, head: string) {
+export const isAncestor = Effect.fnUntraced(function* (
+  repo: SourceRepo,
+  ancestor: string,
+  head: string,
+) {
   if (ancestor === head) return true;
-  const line = await repo.log({ ref: head, limit: 1000 });
+  const line = yield* tryRepo(() => repo.log({ ref: head, limit: 1000 }));
   if (line.some((commit) => commit.hash === ancestor)) return true;
   const seen = new Set<string>();
   const queue = [head];
@@ -99,242 +102,245 @@ export async function isAncestor(repo: SourceRepo, ancestor: string, head: strin
     if (seen.has(hash)) continue;
     seen.add(hash);
     if (hash === ancestor) return true;
-    const commit = await repo.readCommit(hash);
+    const commit = yield* tryRepo(() => repo.readCommit(hash));
     if (commit) queue.push(...commit.parents.filter((parent) => !seen.has(parent)));
   }
   return false;
-}
+});
+
+const liveCommitOf = Effect.fnUntraced(function* (versionId: string) {
+  const db = yield* Database;
+  const live = yield* db.first<{ commitHash: string | null }>(
+    "SELECT source_commit AS commitHash FROM versions WHERE id = ?",
+    versionId,
+  );
+  return live?.commitHash ?? null;
+});
 
 /**
  * Checks the commit a new version says it was built from.
  * - A site without a source repo takes no commit.
  * - A site with one needs the head of main, and that commit must contain the live one.
- * Returns null when the version may go live, or the error response.
+ * Succeeds when the version may go live.
  */
-export async function checkSourceCommit(
-  env: SourceEnv,
+export const checkSourceCommit = Effect.fn("checkSourceCommit")(function* (
   /** currentVersion is null for a new site whose repo was created with its first upload. */
   site: { slug: string; sourceRepo: string | null; currentVersion: string | null } | null,
   sourceCommit: string | null | undefined,
-): Promise<Response | null> {
+) {
   const commit = (sourceCommit ?? "").trim().toLowerCase();
   if (!site?.sourceRepo) {
-    if (!commit) return null;
-    return fail(400, "sourceCommit only works for a site with a source repo", {
+    if (!commit) return;
+    return yield* failNoStore(400, "sourceCommit only works for a site with a source repo", {
       code: "no_source_repo",
     });
   }
   if (!commit) {
-    return fail(
+    return yield* failNoStore(
       409,
       `This site's source is in a Nap source repo. Push your change to its ${SOURCE_BRANCH} branch, build that commit, and publish with sourceCommit set to it. Upload in the dashboard is off for this site.`,
       { code: "source_commit_required" },
     );
   }
-  const live = site.currentVersion
-    ? await env.DB.prepare("SELECT source_commit AS commitHash FROM versions WHERE id = ?")
-        .bind(site.currentVersion)
-        .first<{ commitHash: string | null }>()
-    : null;
-  return checkRepoCommit(env, site.sourceRepo, commit, live?.commitHash ?? null);
-}
+  const liveCommit = site.currentVersion ? yield* liveCommitOf(site.currentVersion) : null;
+  yield* checkRepoCommit(site.sourceRepo, commit, liveCommit);
+});
 
 /**
  * The commit rules, for any repo: `commit` must be the head of main and contain `liveCommit`, the
  * commit of whatever is live now. Sites pass their live version's commit; apps pass the live
- * build's commit of the target being published. Returns null when the commit may go live.
+ * build's commit of the target being published. Succeeds when the commit may go live.
  */
-export async function checkRepoCommit(
-  env: SourceEnv,
+export const checkRepoCommit = Effect.fn("checkRepoCommit")(function* (
   repoName: string,
   commit: string,
   liveCommit: string | null,
-): Promise<Response | null> {
+) {
   if (!isCommitHash(commit)) {
-    return fail(400, "sourceCommit must be a full 40-character commit hash", {
+    return yield* failNoStore(400, "sourceCommit must be a full 40-character commit hash", {
       code: "invalid_source_commit",
     });
   }
-  const ns = namespace(env);
-  if (!ns) return unavailable();
-  return withRepo(ns, repoName, async (repo) => {
-    const head = await headCommit(repo);
-    if (head !== commit) {
-      return fail(
-        409,
-        head
-          ? `${commit.slice(0, 7)} is not the head of ${SOURCE_BRANCH} (${head.slice(0, 7)}). Push it first. If someone else pushed, pull, merge, build again, and publish the new head.`
-          : `Nothing is pushed to ${SOURCE_BRANCH} yet. Push first.`,
-        { code: "source_not_head", head },
-      );
-    }
-    if (liveCommit && !(await isAncestor(repo, liveCommit, commit))) {
-      return fail(
-        409,
-        `The live version was built from ${liveCommit.slice(0, 7)}, which is not in the history of ${commit.slice(0, 7)}. A force-push dropped published work. Get it back into ${SOURCE_BRANCH} (fetch that commit and merge it), then publish again.`,
-        { code: "source_not_descendant", liveCommit },
-      );
-    }
-    return null;
-  });
-}
+  const ns = yield* namespace;
+  yield* withRepo(ns, repoName, (repo) =>
+    Effect.gen(function* () {
+      const head = yield* headCommit(repo);
+      if (head !== commit) {
+        return yield* failNoStore(
+          409,
+          head
+            ? `${commit.slice(0, 7)} is not the head of ${SOURCE_BRANCH} (${head.slice(0, 7)}). Push it first. If someone else pushed, pull, merge, build again, and publish the new head.`
+            : `Nothing is pushed to ${SOURCE_BRANCH} yet. Push first.`,
+          { code: "source_not_head", head },
+        );
+      }
+      if (liveCommit && !(yield* isAncestor(repo, liveCommit, commit))) {
+        return yield* failNoStore(
+          409,
+          `The live version was built from ${liveCommit.slice(0, 7)}, which is not in the history of ${commit.slice(0, 7)}. A force-push dropped published work. Get it back into ${SOURCE_BRANCH} (fetch that commit and merge it), then publish again.`,
+          { code: "source_not_descendant", liveCommit },
+        );
+      }
+    }),
+  );
+});
 
 /** Whether a repo's main contains `liveCommit`: for a build that went live while another signed. */
-export async function containsCommit(
-  env: SourceEnv,
+export const containsCommit = Effect.fn("containsCommit")(function* (
   repoName: string,
   commit: string,
   liveCommit: string,
 ) {
-  const ns = namespace(env);
+  const ns = yield* SourceNamespaceBinding;
   if (!ns) return false;
-  return withRepo(ns, repoName, (repo) => isAncestor(repo, liveCommit, commit));
-}
+  return yield* withRepo(ns, repoName, (repo) => isAncestor(repo, liveCommit, commit));
+});
 
 /** A repo's remote and the head of main. */
-export async function repoHead(env: SourceEnv, repoName: string) {
-  const ns = namespace(env);
-  if (!ns) return unavailable();
-  return withRepo(ns, repoName, async (repo) => ({
-    repo: repoName,
-    remote: (await repo.info()).remote,
-    branch: SOURCE_BRANCH,
-    head: await headCommit(repo),
-  }));
-}
+export const repoHead = Effect.fn("repoHead")(function* (repoName: string) {
+  const ns = yield* namespace;
+  return yield* withRepo(ns, repoName, (repo) =>
+    Effect.all({
+      remote: tryRepo(() => repo.info()).pipe(Effect.map((info) => info.remote)),
+      head: headCommit(repo),
+    }).pipe(
+      Effect.map(({ remote, head }) => ({ repo: repoName, remote, branch: SOURCE_BRANCH, head })),
+    ),
+  );
+});
 
 /** The repo, its main head, and the commit of the live version. */
-export async function describeSource(
-  env: SourceEnv,
-  site: { sourceRepo: string | null; currentVersion: string },
-) {
-  if (!site.sourceRepo) return fail(404, "This nap has no source repo", { code: "no_source_repo" });
-  const ns = namespace(env);
-  if (!ns) return unavailable();
-  const live = await env.DB.prepare("SELECT source_commit AS commitHash FROM versions WHERE id = ?")
-    .bind(site.currentVersion)
-    .first<{ commitHash: string | null }>();
+export const describeSource = Effect.fn("describeSource")(function* (site: {
+  sourceRepo: string | null;
+  currentVersion: string;
+}) {
+  if (!site.sourceRepo) {
+    return yield* failNoStore(404, "This nap has no source repo", { code: "no_source_repo" });
+  }
+  const ns = yield* namespace;
+  const liveCommit = yield* liveCommitOf(site.currentVersion);
   const repoName = site.sourceRepo;
-  const { remote, head } = await withRepo(ns, repoName, async (repo) => ({
-    remote: (await repo.info()).remote,
-    head: await headCommit(repo),
-  }));
+  const { remote, head } = yield* withRepo(ns, repoName, (repo) =>
+    Effect.all({
+      remote: tryRepo(() => repo.info()).pipe(Effect.map((info) => info.remote)),
+      head: headCommit(repo),
+    }),
+  );
   return {
     repo: repoName,
     remote,
     branch: SOURCE_BRANCH,
     head,
-    liveCommit: live?.commitHash ?? null,
-    inSync: head !== null && head === (live?.commitHash ?? null),
+    liveCommit,
+    inSync: head !== null && head === liveCommit,
   };
-}
+});
 
 /** A short-lived token for one repo. Read clones and fetches; write also pushes. */
-export async function mintSourceToken(
-  env: SourceEnv,
+export const mintSourceToken = Effect.fn("mintSourceToken")(function* (
   repoName: string,
   scope: "read" | "write",
-): Promise<Response | SourceAccess> {
-  const ns = namespace(env);
-  if (!ns) return unavailable();
-  return withRepo(ns, repoName, async (repo) => {
-    const [info, token] = await Promise.all([
-      repo.info(),
-      repo.createToken(scope, SOURCE_TOKEN_TTL_SECONDS),
-    ]);
-    return {
-      repo: repoName,
-      remote: info.remote,
-      branch: SOURCE_BRANCH,
-      scope,
-      token: token.plaintext,
-      expiresAt: token.expiresAt,
-    };
-  });
-}
+) {
+  const ns = yield* namespace;
+  return yield* withRepo(ns, repoName, (repo) =>
+    Effect.all(
+      [
+        tryRepo(() => repo.info()),
+        tryRepo(() => repo.createToken(scope, SOURCE_TOKEN_TTL_SECONDS)),
+      ],
+      { concurrency: "unbounded" },
+    ).pipe(
+      Effect.map(
+        ([info, token]): SourceAccess => ({
+          repo: repoName,
+          remote: info.remote,
+          branch: SOURCE_BRANCH,
+          scope,
+          token: token.plaintext,
+          expiresAt: token.expiresAt,
+        }),
+      ),
+    ),
+  );
+});
 
 /**
  * Creates the source repo for a site and returns a write token for the first push. The repo is
  * named after the site; a suffix is added when an old repo has that name.
  */
-export async function createSource(
-  env: SourceEnv,
-  site: { slug: string; title: string },
-): Promise<Response | SourceAccess> {
-  const ns = namespace(env);
-  if (!ns) return unavailable();
-  const created = await createRepo(ns, site);
-  if (created instanceof Response) return created;
-  const stored = await env.DB.prepare(
+export const createSource = Effect.fn("createSource")(function* (site: {
+  slug: string;
+  title: string;
+}) {
+  const ns = yield* namespace;
+  const created = yield* createRepo(ns, site);
+  const db = yield* Database;
+  const stored = yield* db.run(
     "UPDATE sites SET source_repo = ? WHERE slug = ? AND source_repo IS NULL",
-  )
-    .bind(created, site.slug)
-    .run();
-  if (stored.meta.changes !== 1) {
+    created,
+    site.slug,
+  );
+  if (stored.changes !== 1) {
     // Another request added a repo first. Drop this empty one.
-    await ns.delete(created).catch(() => false);
-    return fail(409, "This nap already has a source repo", { code: "source_exists" });
+    yield* deleteSourceRepo(created);
+    return yield* failNoStore(409, "This nap already has a source repo", { code: "source_exists" });
   }
-  return mintSourceToken(env, created, "write");
-}
+  return yield* mintSourceToken(created, "write");
+});
 
 /**
  * Creates the source repo for a site that does not exist yet: its first upload holds the URL.
  * The upload records the repo, and the site gets it when the upload is committed. Returns a
  * write token for the first push.
  */
-export async function createUploadSource(
-  env: SourceEnv,
-  site: { slug: string; title: string },
-): Promise<Response | SourceAccess> {
-  const ns = namespace(env);
-  if (!ns) return unavailable();
-  const created = await createRepo(ns, site);
-  if (created instanceof Response) return created;
-  return mintSourceToken(env, created, "write");
-}
+export const createUploadSource = Effect.fn("createUploadSource")(function* (site: {
+  slug: string;
+  title: string;
+}) {
+  const ns = yield* namespace;
+  const created = yield* createRepo(ns, site);
+  return yield* mintSourceToken(created, "write");
+});
 
 /** Creates an empty repo for something other than a site (an app). Returns its name. */
-export async function createNamedRepo(
-  env: SourceEnv,
+export const createNamedRepo = Effect.fn("createNamedRepo")(function* (
   name: string,
   description: string,
-): Promise<Response | string> {
-  const ns = namespace(env);
-  if (!ns) return unavailable();
-  return createRepo(ns, { slug: name, title: description });
-}
+) {
+  const ns = yield* namespace;
+  return yield* createRepo(ns, { slug: name, title: description });
+});
 
 /** Deletes a repo that no site uses, such as the repo of an upload that never went live. */
-export async function deleteSourceRepo(env: SourceEnv, name: string) {
-  const ns = namespace(env);
-  if (ns) await ns.delete(name).catch(() => false);
-}
+export const deleteSourceRepo = Effect.fn("deleteSourceRepo")(function* (name: string) {
+  const ns = yield* SourceNamespaceBinding;
+  if (ns) yield* Effect.ignore(tryRepo(() => ns.delete(name)));
+});
 
 /** Creates an empty repo named after the site and returns its name. */
-async function createRepo(
+const createRepo = Effect.fnUntraced(function* (
   ns: SourceNamespace,
   site: { slug: string; title: string },
-): Promise<Response | string> {
+) {
   let created: { name: string; token: string } | null = null;
   for (let attempt = 0; attempt < 4 && !created; attempt++) {
     const name = attempt === 0 ? site.slug : `${site.slug}-${randomSuffix()}`;
-    try {
-      created = await ns.create(name, {
-        description: site.title.slice(0, 200),
-        setDefaultBranch: SOURCE_BRANCH,
-      });
-    } catch (error) {
-      if ((error as { code?: string }).code !== "ALREADY_EXISTS") throw error;
-    }
+    created = yield* tryRepo(() =>
+      ns.create(name, { description: site.title.slice(0, 200), setDefaultBranch: SOURCE_BRANCH }),
+    ).pipe(
+      Effect.catchIf(
+        (error) => error.code === "ALREADY_EXISTS",
+        () => Effect.succeed(null),
+      ),
+    );
   }
-  if (!created) return fail(409, "Could not pick a free repo name. Try again.");
+  if (!created) return yield* failNoStore(409, "Could not pick a free repo name. Try again.");
 
   // The token from create() lasts a day. Hand out a short one instead.
   const { name, token } = created;
-  await withRepo(ns, name, (repo) => repo.revokeToken(token)).catch(() => false);
+  yield* Effect.ignore(withRepo(ns, name, (repo) => tryRepo(() => repo.revokeToken(token))));
   return name;
-}
+});
 
 function randomSuffix() {
   const bytes = crypto.getRandomValues(new Uint8Array(4));
