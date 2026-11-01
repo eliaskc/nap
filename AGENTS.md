@@ -97,7 +97,7 @@ channels, voice, `nap.fetch`, `nap.me`. It runs in visitors' browsers, on every 
 
 ```sh
 pnpm dev
-pnpm dev:local
+pnpm dev:remote
 pnpm run build
 pnpm test
 pnpm test:http

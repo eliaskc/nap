@@ -24,8 +24,8 @@ Use pnpm, Bun for Alchemy, and Node 24+ for the tests.
 ```sh
 pnpm install
 pnpm infra:login     # Configure the local Alchemy profile named nap
-pnpm dev             # Alchemy development runtime
-pnpm dev:local       # Fully local stage: D1, R2, and Durable Objects in workerd, no login
+pnpm dev             # Fully local stage: D1, R2, and Durable Objects in workerd, no login
+pnpm dev:remote      # Personal stage on Cloudflare (needs pnpm infra:login)
 pnpm run build       # Bundle and type-check app and infrastructure
 pnpm test
 pnpm test:http       # HTTP checks against a new local stage, no login
