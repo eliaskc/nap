@@ -4,6 +4,7 @@ import { Avatar } from "~/components/avatar";
 import { captureScreen } from "~/components/welcome/capture";
 import { CARD, canRunDust, cardTheme, runDust } from "~/components/welcome/dust";
 import {
+  COLOR_VALUES,
   COLORS,
   SHAPES,
   firstName,
@@ -110,7 +111,11 @@ function Welcome() {
     };
   }, [saved, next]);
 
-  const taken = React.useMemo(() => new Set(state?.taken.map(lookKey)), [state]);
+  const takenBy = React.useMemo(
+    () => new Map(state?.taken.map((other) => [lookKey(other), other.name] as const)),
+    [state],
+  );
+  const taken = React.useMemo(() => new Set(takenBy.keys()), [takenBy]);
   const editing = Boolean(state?.named);
 
   const save = async (value: string, chosen: Look) => {
@@ -237,7 +242,7 @@ function Welcome() {
                 setName={setName}
                 look={look}
                 setLook={setLook}
-                taken={taken}
+                takenBy={takenBy}
                 picking={picking}
                 setPicking={setPicking}
                 onShuffle={shuffle}
@@ -287,7 +292,7 @@ function AskForm({
   setName,
   look,
   setLook,
-  taken,
+  takenBy,
   picking,
   setPicking,
   onShuffle,
@@ -302,7 +307,7 @@ function AskForm({
   setName: (value: string) => void;
   look: Look;
   setLook: (look: Look) => void;
-  taken: Set<string>;
+  takenBy: Map<string, string>;
   picking: boolean;
   setPicking: (open: boolean) => void;
   onShuffle: () => void;
@@ -370,12 +375,10 @@ function AskForm({
         <LookPicker
           look={look}
           name={name || state.guess.guess}
-          taken={taken}
-          onPick={(chosen) => {
-            setLook(chosen);
-            setPicking(false);
-          }}
+          takenBy={takenBy}
+          onChange={setLook}
           onShuffle={onShuffle}
+          onDone={() => setPicking(false)}
         />
       )}
       {error && <p className="mt-3 text-[13px] text-destructive">{error}</p>}
@@ -399,53 +402,125 @@ function AskForm({
   );
 }
 
-/** Every free shape and colour. Looks other people have are left out. */
+/**
+ * The look, big, with a row of shapes and a row of colours below it. Each pair belongs to one
+ * person: colours someone has in the current shape are crossed out, and picking a shape whose
+ * pair is taken moves to the nearest free colour.
+ */
 function LookPicker({
   look,
   name,
-  taken,
-  onPick,
+  takenBy,
+  onChange,
   onShuffle,
+  onDone,
 }: {
   look: Look;
   name: string;
-  taken: Set<string>;
-  onPick: (look: Look) => void;
+  takenBy: Map<string, string>;
+  onChange: (look: Look) => void;
   onShuffle: () => void;
+  onDone: () => void;
 }) {
+  const freeColor = (shape: Shape) => {
+    const start = COLORS.indexOf(look.color);
+    for (let i = 0; i < COLORS.length; i++) {
+      const color = COLORS[(start + i) % COLORS.length];
+      if (!takenBy.has(lookKey({ shape, color }))) return color;
+    }
+    return null;
+  };
+  const owner = takenBy.get(lookKey(look));
   return (
-    <div className="mt-4 animate-in fade-in slide-in-from-top-1 duration-200">
-      <div className="flex items-baseline justify-between">
-        <p className="text-[13px] font-medium">Pick your look</p>
-        <button type="button" onClick={onShuffle} className="text-[13px] font-medium text-muted-foreground hover:text-foreground">
+    <div className="mt-5 animate-in fade-in slide-in-from-top-1 duration-200">
+      <div className="flex flex-col items-center gap-5 sm:flex-row sm:items-center sm:gap-7">
+        <div className="relative grid size-[132px] shrink-0 place-items-center">
+          <Avatar
+            key={lookKey(look)}
+            look={look}
+            name={name}
+            size={132}
+            className="animate-in zoom-in-75 duration-300"
+          />
+        </div>
+        <div className="grid w-full min-w-0 gap-3">
+          <div className="grid grid-cols-7 gap-1" role="radiogroup" aria-label="Shape">
+            {SHAPES.map((shape) => {
+              const color = shape === look.shape ? look.color : freeColor(shape);
+              const selected = shape === look.shape;
+              return (
+                <button
+                  key={shape}
+                  type="button"
+                  role="radio"
+                  aria-checked={selected}
+                  aria-label={shape}
+                  title={color ? shape : `Every ${shape} is taken`}
+                  disabled={!color}
+                  onClick={() => color && onChange({ shape, color })}
+                  className={cn(
+                    "grid aspect-square place-items-center rounded-lg transition outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-20",
+                    selected && "bg-muted ring-2 ring-foreground",
+                  )}
+                >
+                  <Avatar
+                    look={{ shape, color: look.color }}
+                    name=""
+                    letters={false}
+                    size={28}
+                    className={cn("size-[62%] transition-transform", selected && "scale-110")}
+                  />
+                </button>
+              );
+            })}
+          </div>
+          <div className="grid grid-cols-7 gap-1" role="radiogroup" aria-label="Colour">
+            {COLORS.map((color) => {
+              const takenByName = takenBy.get(lookKey({ shape: look.shape, color }));
+              const selected = color === look.color;
+              return (
+                <button
+                  key={color}
+                  type="button"
+                  role="radio"
+                  aria-checked={selected}
+                  aria-label={takenByName ? `${color}, taken by ${takenByName}` : color}
+                  title={takenByName ? `${takenByName} has the ${color} ${look.shape}` : color}
+                  disabled={Boolean(takenByName)}
+                  onClick={() => onChange({ shape: look.shape, color })}
+                  className={cn(
+                    "grid aspect-square place-items-center rounded-lg transition outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:hover:bg-transparent",
+                    selected && "bg-muted ring-2 ring-foreground",
+                  )}
+                >
+                  <span
+                    className={cn(
+                      "relative block size-[52%] rounded-full transition-transform",
+                      selected && "scale-110",
+                      takenByName && "opacity-25",
+                    )}
+                    style={{ background: COLOR_VALUES[color] }}
+                  >
+                    {takenByName && (
+                      <span className="absolute top-1/2 left-[-15%] h-[2px] w-[130%] -rotate-45 rounded-full bg-foreground" />
+                    )}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+      <div className="mt-3 flex items-center justify-between text-[13px] font-medium text-muted-foreground">
+        <button type="button" onClick={onShuffle} className="h-9 hover:text-foreground">
           🎲 Surprise me
         </button>
-      </div>
-      <p className="text-xs text-muted-foreground">Everyone gets their own. The missing ones are taken.</p>
-      <div className="mt-3 grid max-w-[340px] grid-cols-7 gap-1.5" role="listbox" aria-label="Shapes and colours">
-        {SHAPES.flatMap((shape: Shape) =>
-          COLORS.map((color: Color) => {
-            const option = { shape, color };
-            const key = lookKey(option);
-            if (taken.has(key)) return <div key={key} aria-hidden className="aspect-square" />;
-            const selected = key === lookKey(look);
-            return (
-              <button
-                key={key}
-                type="button"
-                role="option"
-                aria-selected={selected}
-                aria-label={`${color} ${shape}`}
-                onClick={() => onPick(option)}
-                className={cn(
-                  "grid aspect-square place-items-center rounded-md transition-transform outline-none hover:scale-110 focus-visible:ring-2 focus-visible:ring-ring",
-                  selected && "bg-muted ring-2 ring-foreground",
-                )}
-              >
-                <Avatar look={option} name={name} size={30} letters={false} className="size-[70%]" />
-              </button>
-            );
-          }),
+        {owner ? (
+          <span className="text-destructive">{owner} has this one</span>
+        ) : (
+          <button type="button" onClick={onDone} className="h-9 hover:text-foreground">
+            Done
+          </button>
         )}
       </div>
     </div>
