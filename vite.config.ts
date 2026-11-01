@@ -5,7 +5,7 @@ import { tanstackStart } from "@tanstack/react-start/plugin/vite";
 import viteReact from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import { napConfig } from "./nap.config.ts";
-import { bundleClientScript } from "./scripts/lib/client-bundle.ts";
+import { bundleClient } from "./scripts/lib/client-bundle.ts";
 
 /**
  * Builds part of the artifact comments (src/comments) as one self-contained file. They load
@@ -87,7 +87,8 @@ function commentsFrameModule(): Plugin {
 
 /**
  * `virtual:nap-client`: window.nap (src/client), the script every site loads from
- * /_nap/client.js, bundled into one classic script and served by the Worker as a string.
+ * /_nap/client.js, and its voice engine (/_nap/client-voice.js), bundled and served by the
+ * Worker as strings.
  */
 function napClientModule(): Plugin {
   const id = "virtual:nap-client";
@@ -97,7 +98,12 @@ function napClientModule(): Plugin {
     async load(resolved) {
       if (resolved !== `\0${id}`) return;
       for (const file of readdirSync("src/client")) this.addWatchFile(`src/client/${file}`);
-      return `export default ${JSON.stringify(await bundleClientScript("src/client/index.ts"))};`;
+      const { client, voice, voiceVersion } = await bundleClient();
+      return [
+        `export const client = ${JSON.stringify(client)};`,
+        `export const voice = ${JSON.stringify(voice)};`,
+        `export const voiceVersion = ${JSON.stringify(voiceVersion)};`,
+      ].join("\n");
     },
   };
 }

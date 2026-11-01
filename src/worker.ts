@@ -15,7 +15,7 @@ import { serveToolbarScript, serveViewerScript } from "~/lib/nap-toolbar";
 import { ARTIFACT_PATH, type NapPlace } from "~/lib/nap-urls";
 import { handleSiteAccessRequest } from "~/lib/site-access";
 import { handleSiteDataRequest } from "~/lib/site-data";
-import { serveClientTypes, serveSiteDataClient } from "~/lib/site-data-client";
+import { serveClientTypes, serveSiteDataClient, serveVoiceEngine } from "~/lib/site-data-client";
 import { handleLiveRequest, publishChange } from "~/lib/site-live";
 import { handleChannelRequest } from "~/lib/site-channel";
 import { handleRtcRequest } from "~/lib/site-rtc";
@@ -58,6 +58,9 @@ const routeRequest = Effect.fn("routeRequest")(function* (
 
   if (url.pathname === "/_nap/client.js" && request.method === "GET") {
     return serveSiteDataClient();
+  }
+  if (url.pathname === "/_nap/client-voice.js" && request.method === "GET") {
+    return serveVoiceEngine(request);
   }
   if (url.pathname === "/_nap/client.d.ts" && request.method === "GET") {
     return serveClientTypes();

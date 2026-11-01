@@ -289,9 +289,9 @@ test("the migration keeps documents and numbers them per site", async () => {
 /** /_nap/client.js, built once, as the Worker serves it. */
 let built;
 function clientSource() {
-  built ??= import("../scripts/lib/client-bundle.ts").then(({ bundleClientScript }) =>
-    bundleClientScript("src/client/index.ts"),
-  );
+  built ??= import("../scripts/lib/client-bundle.ts").then(async ({ bundleClient }) => {
+    return (await bundleClient()).client;
+  });
   return built;
 }
 

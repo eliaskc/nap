@@ -6,7 +6,7 @@ import { findRedirect } from "~/lib/rekey";
 import { ARTIFACT_PATH, napUrl, type NapPlace } from "~/lib/nap-urls";
 import { handleSiteAccessRequest } from "~/lib/site-access";
 import { handleSiteDataRequest } from "~/lib/site-data";
-import { serveSiteDataClient } from "~/lib/site-data-client";
+import { serveSiteDataClient, serveVoiceEngine } from "~/lib/site-data-client";
 import { handleLiveRequest, publishChange } from "~/lib/site-live";
 import { handleChannelRequest } from "~/lib/site-channel";
 import { handleRtcRequest } from "~/lib/site-rtc";
@@ -211,6 +211,7 @@ export const handleFrameRequest = Effect.fn("handleFrameRequest")(function* (req
   const identity: Identity = { email: frame.email, name: frame.name || frame.email };
 
   if (rest === "/_nap/client.js") return withCors(serveSiteDataClient());
+  if (rest === "/_nap/client-voice.js") return serveVoiceEngine(request);
   // The share button shows nothing inside a frame. Serve it so pages that include it still load.
   if (rest === "/_nap/share.js") return withCors(serveShareWidget());
   // The comments script for inside the frame (src/comments/frame.ts), built into the Worker.

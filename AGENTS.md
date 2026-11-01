@@ -81,7 +81,13 @@ channels, voice, `nap.fetch`, `nap.me`. It runs in visitors' browsers, on every 
 - `src/client/api.d.ts` is its public API. The client is typed against it, and Nap serves it as
   `/_nap/client.d.ts` and `/_nap/api/client.d.ts`. Change it with the instructions in
   `src/content/instructions/`.
-- `tests/client.test.mjs` runs the built script against fake browser globals.
+- Voice is in two parts. `voice.ts` (in client.js) is the object pages get; it loads
+  `voice-engine.ts`, served as `/_nap/client-voice.js?v=<hash>`, the first time a page calls
+  `nap.voice()`, so pages without voice stay small. The engine is written with Effect, like the
+  server: a call is one scoped fiber, and what it opens is released when the scope closes.
+- `tests/client.test.mjs` runs the built script against fake browser globals,
+  `tests/voice-engine.test.mjs` the engine against fake media, and `pnpm test:voice` two Chrome
+  pages in a real call against a local stage.
 
 ## Documentation
 

@@ -29,6 +29,7 @@ pnpm dev:local       # Fully local stage: D1, R2, and Durable Objects in workerd
 pnpm run build       # Bundle and type-check app and infrastructure
 pnpm test
 pnpm test:http       # HTTP checks against a new local stage, no login
+pnpm test:voice      # Two Chrome pages in a voice call on a new local stage
 pnpm test:sources    # Source repos against real Artifacts (test namespace; nap profile)
 ```
 

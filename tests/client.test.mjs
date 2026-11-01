@@ -1,9 +1,19 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { bundleClientScript } from "../scripts/lib/client-bundle.ts";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
+import { bundleClient } from "../scripts/lib/client-bundle.ts";
 
-// The client as the Worker serves it (/_nap/client.js), run against fake browser globals.
-const source = await bundleClientScript("src/client/index.ts");
+// The client as the Worker serves it (/_nap/client.js), run against fake browser globals. The
+// voice engine sits next to it, where client.js imports it from.
+const built = await bundleClient();
+const source = built.client;
+const folder = mkdtempSync(join(tmpdir(), "nap-client-"));
+writeFileSync(join(folder, "client.js"), source);
+writeFileSync(join(folder, "client-voice.js"), built.voice);
+const scriptUrl = pathToFileURL(join(folder, "client.js")).href;
 
 /** A WebSocket the test drives: it records what the page sends and plays server messages. */
 class FakeSocket {
@@ -41,7 +51,12 @@ class FakeSocket {
 function page({ href = "https://game.nap.test/", navigator = {} } = {}) {
   FakeSocket.all = [];
   const window = {};
-  const document = { hidden: false, addEventListener() {}, removeEventListener() {} };
+  const document = {
+    hidden: false,
+    currentScript: { src: scriptUrl },
+    addEventListener() {},
+    removeEventListener() {},
+  };
   new Function(
     "window",
     "document",
@@ -183,6 +198,11 @@ test("voice: participants come from the channel before joining", async () => {
   assert.equal(call.canSelectInput, false);
   const [socket] = FakeSocket.all;
   assert.equal(socket.url, "wss://game.nap.test/_nap/channel/voice");
+  assert.deepEqual(call.participants, [], "nothing until the engine is there");
+  call.setMuted(true);
+  await new Promise((resolve) => call.on("change", resolve));
+  assert.equal(call.muted, true, "choices made before the engine carry over");
+  call.setMuted(false);
   socket.open();
   socket.receive({
     t: "welcome",
