@@ -6,7 +6,7 @@ Load `<script src="/_nap/client.js"></script>`, then:
 
 - `const room = nap.channel("lobby")`. Names are up to 64 letters, numbers, `_`, `-`; each name is its own room. The same name returns the same object until `room.leave()`.
 - Presence: `room.setPresence({ x, y })` sets this page's state (up to 1 KB) for everyone. Late joiners get everyone's current presence. Nap sends it at most 20 times a second, so call it as often as you like.
-- `room.on("presence", (peers) => draw(peers))` runs on every join, leave, or change. A peer is `{ id, email, name, joinedAt, state, self }`. `room.peers` is the same list and `room.id` is this page's id. Two tabs are two peers.
+- `room.on("presence", (peers) => draw(peers))` runs on every join, leave, or change. A peer is `{ id, email, name, shape, color, joinedAt, state, self }`; draw people with their look (see People in the `sites` topic). `room.peers` is the same list and `room.id` is this page's id. Two tabs are two peers.
 - Messages: `room.send(data)` to every other page, `room.send(data, { to: peerId })` to one. `room.on("message", ({ from, data }) => ...)`. Up to 16 KB, not stored; pages that are not connected miss them. send returns false when not connected.
 - Nap sets `from`, email, and name itself, so pages cannot pretend to be someone else.
 - Also `room.on("join" | "leave", (peer) => ...)`, `room.on("status", (s) => ...)` ("connecting", "open", "closed"), and `room.on("error", ...)`. It reconnects by itself.

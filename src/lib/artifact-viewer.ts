@@ -1,3 +1,4 @@
+import { meResponse, peopleResponse } from "~/lib/welcome";
 import { Effect } from "effect";
 import { handleSiteCommentsRequest } from "~/lib/comments";
 import { ensureProfile, getIdentity, objectKey, type Identity } from "~/lib/nap-server";
@@ -227,7 +228,10 @@ export const handleFrameRequest = Effect.fn("handleFrameRequest")(function* (req
     );
   }
   if (rest === "/_nap/me" && request.method === "GET") {
-    return withCors(json(identity, { headers: noStore }));
+    return withCors(yield* meResponse(identity));
+  }
+  if (rest === "/_nap/people" && request.method === "GET") {
+    return withCors(yield* peopleResponse(request));
   }
   if (rest.startsWith("/_nap/data/")) {
     const path = rest.slice("/_nap/data/".length);

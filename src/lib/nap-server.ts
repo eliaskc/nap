@@ -45,20 +45,20 @@ export function getIdentity(request?: Request): Identity {
 }
 
 /**
- * Creates the profile on first use and records that the person used Nap through Access. Agent
+ * Creates the profile on first use and records that the person used Nap through Access. A new
+ * profile has no name: the welcome page asks for it (src/lib/profiles.ts). Agent
  * tokens stop working when their owner has not been seen for 30 days. Call this only for
  * requests that Access protects, never from the agent API or draft uploads.
  */
 export const ensureProfile = Effect.fn("ensureProfile")(function* (identity: Identity) {
   const db = yield* Database;
   yield* db.run(
-    `INSERT INTO profiles (email, display_name, avatar_color, last_seen_at)
-     VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+    `INSERT INTO profiles (email, avatar_color, last_seen_at)
+     VALUES (?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
      ON CONFLICT(email) DO UPDATE SET last_seen_at = excluded.last_seen_at
      WHERE profiles.last_seen_at IS NULL
         OR profiles.last_seen_at < strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-1 hour')`,
     identity.email,
-    identity.name,
     colorFromEmail(identity.email),
   );
 });

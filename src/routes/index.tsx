@@ -1,3 +1,5 @@
+import { Avatar } from "~/components/avatar";
+import type { Color, Shape } from "~/lib/looks";
 import { createFileRoute } from "@tanstack/react-router";
 import { agentInstructionsFor } from "~/lib/agent-instructions";
 import { EVERYONE_LABEL } from "~/lib/deployment-text";
@@ -109,6 +111,8 @@ type Profile = {
   displayName: string | null;
   username: string | null;
   avatarColor: string | null;
+  shape?: Shape;
+  color?: Color;
 };
 
 type UploadFile = { file: File; path: string };
@@ -434,14 +438,27 @@ function Home() {
 
       {profile && (
         <div className="fixed right-5 top-5 z-30 flex items-center gap-3">
-          <div className="grid justify-items-end text-right leading-tight">
-            <span className="block max-w-56 truncate text-sm font-medium">
-              {profile.displayName ?? profile.email}
-            </span>
-            <span className="block max-w-56 truncate text-xs text-muted-foreground">
-              {profile.email}
-            </span>
-          </div>
+          <a
+            href="/welcome?next=/"
+            className="group flex items-center gap-2.5 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            title="Change your name and look"
+          >
+            <div className="grid justify-items-end text-right leading-tight">
+              <span className="block max-w-56 truncate text-sm font-medium group-hover:underline">
+                {profile.displayName ?? profile.email}
+              </span>
+              <span className="block max-w-56 truncate text-xs text-muted-foreground">
+                {profile.email}
+              </span>
+            </div>
+            {profile.shape && profile.color && (
+              <Avatar
+                look={{ shape: profile.shape, color: profile.color }}
+                name={profile.displayName ?? profile.email}
+                size={30}
+              />
+            )}
+          </a>
           {napConfig.apps && (
             <a
               href="/apps"

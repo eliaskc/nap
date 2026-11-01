@@ -9,6 +9,7 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as WelcomeRouteImport } from './routes/welcome'
 import { Route as ConnectRouteImport } from './routes/connect'
 import { Route as AppsRouteImport } from './routes/apps'
 import { Route as IndexRouteImport } from './routes/index'
@@ -18,6 +19,7 @@ import { Route as ApiUploadsRouteImport } from './routes/api/uploads'
 import { Route as ApiUploadRouteImport } from './routes/api/upload'
 import { Route as ApiTokensRouteImport } from './routes/api/tokens'
 import { Route as ApiSitesRouteImport } from './routes/api/sites'
+import { Route as ApiProfileRouteImport } from './routes/api/profile'
 import { Route as ApiPeopleRouteImport } from './routes/api/people'
 import { Route as ApiMeRouteImport } from './routes/api/me'
 import { Route as ApiDevicesRouteImport } from './routes/api/devices'
@@ -36,6 +38,11 @@ import { Route as ApiSitesSlugAccessRouteImport } from './routes/api/sites.$slug
 import { Route as ApiDraftsIdPreviewSplatRouteImport } from './routes/api/drafts.$id.preview.$'
 import { Route as ApiAppsAppTargetInstallRouteImport } from './routes/api/apps.$app.$target.install'
 
+const WelcomeRoute = WelcomeRouteImport.update({
+  id: '/welcome',
+  path: '/welcome',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ConnectRoute = ConnectRouteImport.update({
   id: '/connect',
   path: '/connect',
@@ -79,6 +86,11 @@ const ApiTokensRoute = ApiTokensRouteImport.update({
 const ApiSitesRoute = ApiSitesRouteImport.update({
   id: '/api/sites',
   path: '/api/sites',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiProfileRoute = ApiProfileRouteImport.update({
+  id: '/api/profile',
+  path: '/api/profile',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiPeopleRoute = ApiPeopleRouteImport.update({
@@ -171,10 +183,12 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/apps': typeof AppsRoute
   '/connect': typeof ConnectRoute
+  '/welcome': typeof WelcomeRoute
   '/api/apps': typeof ApiAppsRouteWithChildren
   '/api/devices': typeof ApiDevicesRouteWithChildren
   '/api/me': typeof ApiMeRoute
   '/api/people': typeof ApiPeopleRoute
+  '/api/profile': typeof ApiProfileRoute
   '/api/sites': typeof ApiSitesRouteWithChildren
   '/api/tokens': typeof ApiTokensRouteWithChildren
   '/api/upload': typeof ApiUploadRoute
@@ -199,10 +213,12 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/apps': typeof AppsRoute
   '/connect': typeof ConnectRoute
+  '/welcome': typeof WelcomeRoute
   '/api/apps': typeof ApiAppsRouteWithChildren
   '/api/devices': typeof ApiDevicesRouteWithChildren
   '/api/me': typeof ApiMeRoute
   '/api/people': typeof ApiPeopleRoute
+  '/api/profile': typeof ApiProfileRoute
   '/api/sites': typeof ApiSitesRouteWithChildren
   '/api/tokens': typeof ApiTokensRouteWithChildren
   '/api/upload': typeof ApiUploadRoute
@@ -228,10 +244,12 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/apps': typeof AppsRoute
   '/connect': typeof ConnectRoute
+  '/welcome': typeof WelcomeRoute
   '/api/apps': typeof ApiAppsRouteWithChildren
   '/api/devices': typeof ApiDevicesRouteWithChildren
   '/api/me': typeof ApiMeRoute
   '/api/people': typeof ApiPeopleRoute
+  '/api/profile': typeof ApiProfileRoute
   '/api/sites': typeof ApiSitesRouteWithChildren
   '/api/tokens': typeof ApiTokensRouteWithChildren
   '/api/upload': typeof ApiUploadRoute
@@ -258,10 +276,12 @@ export interface FileRouteTypes {
     | '/'
     | '/apps'
     | '/connect'
+    | '/welcome'
     | '/api/apps'
     | '/api/devices'
     | '/api/me'
     | '/api/people'
+    | '/api/profile'
     | '/api/sites'
     | '/api/tokens'
     | '/api/upload'
@@ -286,10 +306,12 @@ export interface FileRouteTypes {
     | '/'
     | '/apps'
     | '/connect'
+    | '/welcome'
     | '/api/apps'
     | '/api/devices'
     | '/api/me'
     | '/api/people'
+    | '/api/profile'
     | '/api/sites'
     | '/api/tokens'
     | '/api/upload'
@@ -314,10 +336,12 @@ export interface FileRouteTypes {
     | '/'
     | '/apps'
     | '/connect'
+    | '/welcome'
     | '/api/apps'
     | '/api/devices'
     | '/api/me'
     | '/api/people'
+    | '/api/profile'
     | '/api/sites'
     | '/api/tokens'
     | '/api/upload'
@@ -343,10 +367,12 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AppsRoute: typeof AppsRoute
   ConnectRoute: typeof ConnectRoute
+  WelcomeRoute: typeof WelcomeRoute
   ApiAppsRoute: typeof ApiAppsRouteWithChildren
   ApiDevicesRoute: typeof ApiDevicesRouteWithChildren
   ApiMeRoute: typeof ApiMeRoute
   ApiPeopleRoute: typeof ApiPeopleRoute
+  ApiProfileRoute: typeof ApiProfileRoute
   ApiSitesRoute: typeof ApiSitesRouteWithChildren
   ApiTokensRoute: typeof ApiTokensRouteWithChildren
   ApiUploadRoute: typeof ApiUploadRoute
@@ -360,6 +386,13 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/welcome': {
+      id: '/welcome'
+      path: '/welcome'
+      fullPath: '/welcome'
+      preLoaderRoute: typeof WelcomeRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/connect': {
       id: '/connect'
       path: '/connect'
@@ -421,6 +454,13 @@ declare module '@tanstack/react-router' {
       path: '/api/sites'
       fullPath: '/api/sites'
       preLoaderRoute: typeof ApiSitesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/profile': {
+      id: '/api/profile'
+      path: '/api/profile'
+      fullPath: '/api/profile'
+      preLoaderRoute: typeof ApiProfileRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/people': {
@@ -638,10 +678,12 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AppsRoute: AppsRoute,
   ConnectRoute: ConnectRoute,
+  WelcomeRoute: WelcomeRoute,
   ApiAppsRoute: ApiAppsRouteWithChildren,
   ApiDevicesRoute: ApiDevicesRouteWithChildren,
   ApiMeRoute: ApiMeRoute,
   ApiPeopleRoute: ApiPeopleRoute,
+  ApiProfileRoute: ApiProfileRoute,
   ApiSitesRoute: ApiSitesRouteWithChildren,
   ApiTokensRoute: ApiTokensRouteWithChildren,
   ApiUploadRoute: ApiUploadRoute,

@@ -16,10 +16,36 @@ export interface NapErrorConstructor {
   readonly prototype: NapError;
 }
 
-/** The person viewing the page. */
-export interface NapIdentity {
+export type NapShape = "circle" | "triangle" | "cloud" | "pill" | "drop" | "clover" | "diamond";
+export type NapColor = "red" | "orange" | "green" | "violet" | "pink" | "brown" | "blue";
+
+/**
+ * A person on Nap: the name they chose and their look. Each shape and colour pair belongs to one
+ * person on this Nap, so it tells people apart at a glance.
+ */
+export interface NapPerson {
   email: string;
   name: string;
+  shape: NapShape;
+  color: NapColor;
+}
+
+/** The person viewing the page. */
+export type NapIdentity = NapPerson;
+
+/** Nap's shapes (SVG paths in a 100 × 100 box) and colours, for pages that draw people themselves. */
+export interface NapLooks {
+  shapes: Array<NapShape>;
+  colors: Array<NapColor>;
+  shapePaths: Record<NapShape, string>;
+  colorValues: Record<NapColor, string>;
+}
+
+export interface NapAvatarOptions {
+  /** Width and height in CSS pixels. Default 32. */
+  size?: number;
+  /** Draw the initials inside. Default true. */
+  initials?: boolean;
 }
 
 // Collections (nap.db)
@@ -83,6 +109,8 @@ export interface NapPeer<S = unknown> {
   id: string;
   email: string;
   name: string;
+  shape: NapShape;
+  color: NapColor;
   joinedAt: number;
   state: S | null;
   /** This page. */
@@ -193,7 +221,13 @@ export interface Nap {
   voice<M = unknown>(name?: string): NapVoiceCall<M>;
   /** Reads a public URL through Nap. The site lists the hosts in nap.json ("fetch"). */
   fetch(url: string | URL, options?: NapFetchOptions): Promise<Response>;
+  /** The person viewing the page, with their name and look. */
   me(): Promise<NapIdentity>;
+  /** Everyone on this Nap, or only these emails, with their names and looks. */
+  people(emails?: Array<string>): Promise<Array<NapPerson>>;
+  /** A person's avatar as an <svg> element. Plain HTML can use <nap-avatar> instead. */
+  avatar(person: Pick<NapPerson, "name" | "shape" | "color">, options?: NapAvatarOptions): SVGSVGElement;
+  looks: NapLooks;
   NapError: NapErrorConstructor;
 }
 

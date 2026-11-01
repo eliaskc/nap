@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { Effect } from "effect";
 import { signedIn } from "~/lib/nap-server";
+import { findPerson } from "~/lib/profiles";
 import { Database } from "~/server/database";
 import { json } from "~/server/http";
 import { route } from "~/server/route";
@@ -18,7 +19,10 @@ export const Route = createFileRoute("/api/me")({
                FROM profiles WHERE email = ?`,
               identity.email,
             );
-            return json({ profile });
+            const person = yield* findPerson(identity.email);
+            return json({
+              profile: profile && { ...profile, shape: person.shape, color: person.color },
+            });
           }),
         ),
       PATCH: ({ request }) =>

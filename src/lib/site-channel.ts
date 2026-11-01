@@ -1,3 +1,4 @@
+import { findPerson } from "~/lib/profiles";
 import { DurableObject } from "cloudflare:workers";
 import { Effect } from "effect";
 import type { Identity } from "~/lib/nap-server";
@@ -25,6 +26,8 @@ type Peer = {
   id: string;
   email: string;
   name: string;
+  shape: string;
+  color: string;
   slug: string;
   joinedAt: number;
   state: unknown;
@@ -62,6 +65,8 @@ export class SiteChannel extends DurableObject<ChannelEnv> {
       id: crypto.randomUUID().replaceAll("-", "").slice(0, 12),
       email,
       name: safeDecode(request.headers.get("x-nap-name") ?? email).slice(0, 80),
+      shape: request.headers.get("x-nap-shape") ?? "",
+      color: request.headers.get("x-nap-color") ?? "",
       slug,
       joinedAt: Date.now(),
       state: null,
@@ -106,7 +111,7 @@ export class SiteChannel extends DurableObject<ChannelEnv> {
     if (parsed?.t === "send") {
       const out = {
         t: "message",
-        from: { id: peer.id, email: peer.email, name: peer.name },
+        from: { id: peer.id, email: peer.email, name: peer.name, shape: peer.shape, color: peer.color },
         data: parsed.data ?? null,
       };
       if (typeof parsed.to === "string") {
@@ -206,6 +211,8 @@ function publicPeer(peer: Peer) {
     id: peer.id,
     email: peer.email,
     name: peer.name,
+    shape: peer.shape,
+    color: peer.color,
     joinedAt: peer.joinedAt,
     state: peer.state,
   };
@@ -254,10 +261,13 @@ export const handleChannelRequest = Effect.fn("handleChannelRequest")(function* 
   const channels = yield* ChannelsBinding;
   if (!channels) return yield* fail(503, "Channels are unavailable");
   if (!(yield* canViewSite(slug, identity.email))) return yield* fail(404, "Site not found");
+  const person = yield* findPerson(identity.email, identity.name);
   const headers = new Headers({
     upgrade: "websocket",
     "x-nap-email": identity.email,
-    "x-nap-name": encodeURIComponent(identity.name || identity.email),
+    "x-nap-name": encodeURIComponent(person.name || identity.email),
+    "x-nap-shape": person.shape,
+    "x-nap-color": person.color,
     "x-nap-slug": slug,
   });
   if (expiresAt) headers.set("x-nap-expires-at", expiresAt);

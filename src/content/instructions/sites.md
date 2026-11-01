@@ -20,6 +20,15 @@ One rule: a slug gives a page its own host, and that makes it a site. Without a 
 - Add the Share button before `</body>`: `<script src="/_nap/share.js" defer></script>`. Only the owner sees it. `data-position="bottom-left"`, `"top-right"`, or `"top-left"` moves it (default bottom-right). Inside a frame it shows nothing, so it is safe to keep.
 - A site with a build step keeps its source in a repo on Nap (`source` topic).
 
+## People
+
+Everyone on Nap picks a name and a look: one of 7 shapes in one of 7 colours, a pair that is only theirs on this Nap. Show people with them instead of inventing names, colours, or avatars. With `<script src="/_nap/client.js"></script>`:
+
+- `await nap.me()` is the person viewing the page: `{ email, name, shape, color }`.
+- `await nap.people()` is everyone on this Nap; `nap.people(["a@x.com"])` only those people. Same fields.
+- `<nap-avatar shape="clover" color="green" name="Anna Lindqvist" size="32"></nap-avatar>` draws someone's avatar; `nap.avatar(person, { size: 32 })` returns the same as an `<svg>`. `initials="false"` leaves out the letters.
+- `nap.looks` has the shapes and colours (`shapePaths` are SVG paths in a 100 × 100 box, `colorValues` hex colours) for pages that draw people themselves, such as on a canvas. A page may restyle the looks to fit its design, as long as every shape and colour still maps to a different one.
+
 ## Both
 
 - Anyone who can view a page can publish new versions and restore old ones. Only the owner changes who can view it, renames, moves, transfers, or deletes it. The owner can move an artifact to Sites or back; the old URL redirects.

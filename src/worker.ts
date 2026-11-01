@@ -22,14 +22,9 @@ import { handleRtcRequest } from "~/lib/site-rtc";
 import { handleSiteFetch } from "~/lib/site-fetch";
 import { resolveHost, serveUploadedSite } from "~/lib/site-serving";
 import { serveShareWidget } from "~/lib/share-widget";
+import { meResponse, peopleResponse, welcomeRedirect } from "~/lib/welcome";
 import { inBackground, Settings } from "~/server/platform";
 import { respond, type NapEnv } from "~/server/runtime";
-
-function identityResponse(request: Request) {
-  return new Response(JSON.stringify(getIdentity(request)), {
-    headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" },
-  });
-}
 
 type Env = Cloudflare.Env;
 
@@ -55,6 +50,9 @@ const routeRequest = Effect.fn("routeRequest")(function* (
   const target = resolveHost(request.headers.get("host") ?? "", rootDomain);
   const isLocal = ["localhost", "127.0.0.1"].includes(url.hostname);
   const place: NapPlace = { rootDomain, localOrigin: isLocal ? url.origin : null };
+  const dashboardOrigin = isLocal ? url.origin : `https://${rootDomain}`;
+  /** People without a name go to the welcome page first. */
+  const welcome = () => welcomeRedirect(request, dashboardOrigin, isLocal);
 
   if (url.pathname === "/_nap/client.js" && request.method === "GET") {
     return serveSiteDataClient();
@@ -111,6 +109,8 @@ const routeRequest = Effect.fn("routeRequest")(function* (
 
   // Artifacts: <root>/artifact/<slug>, a sandboxed frame below the Nap bar.
   if (target.type === "dashboard" && isArtifactPath(url.pathname)) {
+    const toWelcome = yield* welcome();
+    if (toWelcome) return toWelcome;
     return yield* handleArtifactPage(request, place);
   }
 
@@ -137,7 +137,10 @@ const routeRequest = Effect.fn("routeRequest")(function* (
       return yield* handleSiteFetch(localFetchMatch[1], request, getIdentity(request).email);
     }
     if (/^\/s\/[^/]+\/_nap\/me$/.test(url.pathname) && request.method === "GET") {
-      return identityResponse(request);
+      return yield* meResponse(getIdentity(request));
+    }
+    if (/^\/s\/[^/]+\/_nap\/people$/.test(url.pathname) && request.method === "GET") {
+      return yield* peopleResponse(request);
     }
     const localAccessMatch = url.pathname.match(/^\/s\/([^/]+)\/_nap\/access$/);
     if (localAccessMatch) {
@@ -162,7 +165,10 @@ const routeRequest = Effect.fn("routeRequest")(function* (
       yield* inBackground(ensureProfile(getIdentity(request)), "Recording a visit failed");
     }
     if (url.pathname === "/_nap/me" && request.method === "GET") {
-      return identityResponse(request);
+      return yield* meResponse(getIdentity(request));
+    }
+    if (url.pathname === "/_nap/people" && request.method === "GET") {
+      return yield* peopleResponse(request);
     }
     if (url.pathname === "/_nap/access") {
       return yield* handleSiteAccessRequest(slug, request);
@@ -187,6 +193,8 @@ const routeRequest = Effect.fn("routeRequest")(function* (
     if (url.pathname === "/_nap/fetch") {
       return yield* handleSiteFetch(slug, request, getIdentity(request).email);
     }
+    const toWelcome = yield* welcome();
+    if (toWelcome) return toWelcome;
     return yield* serveUploadedSite(slug, url.pathname, request, {
       dashboardUrl: `https://${rootDomain}/`,
       artifactUrl: (key) => `https://${rootDomain}${ARTIFACT_PATH}/${key}`,
@@ -203,6 +211,12 @@ const routeRequest = Effect.fn("routeRequest")(function* (
   }
 
   if (target.type === "unknown") return new Response("Not found", { status: 404 });
+
+  // Dashboard pages, except the welcome page itself and the API.
+  if (!url.pathname.startsWith("/_nap/") && !url.pathname.startsWith("/api/")) {
+    const toWelcome = yield* welcome();
+    if (toWelcome) return toWelcome;
+  }
 
   // Worker-first routing keeps uploaded hosts out of the dashboard asset namespace.
   // Serve dashboard assets only after the hosted-site branch above.
