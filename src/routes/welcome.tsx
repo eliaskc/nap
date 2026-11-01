@@ -1,4 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { LoaderCircle } from "lucide-react";
 import * as React from "react";
 import { Avatar } from "~/components/avatar";
 import { captureScreen } from "~/components/welcome/capture";
@@ -318,7 +319,7 @@ function AskForm({
   inputRef: React.RefObject<HTMLInputElement | null>;
 }) {
   const edited = name.trim() !== state.guess.guess.trim();
-  const emoji = editing ? "👋" : edited ? "✍️" : state.guess.confident ? "😏" : "😬";
+  const emoji = editing ? "👋" : edited ? "✍️" : state.guess.confident ? "😄" : "😬";
   return (
     <form
       onSubmit={(event) => {
@@ -385,9 +386,20 @@ function AskForm({
       <button
         type="submit"
         disabled={!name.trim() || saving}
-        className="mt-6 h-12 w-full rounded-md bg-primary text-[15px] font-semibold text-primary-foreground transition-opacity disabled:opacity-40"
+        aria-busy={saving}
+        className={cn(
+          "relative mt-6 h-12 w-full rounded-md bg-primary text-[15px] font-semibold text-primary-foreground transition-opacity disabled:opacity-40",
+          saving && "disabled:opacity-100",
+        )}
       >
-        {editing ? "Save" : edited ? "Save" : state.guess.confident ? "That's me" : "Sure, whatever"}
+        <span className={cn("transition-opacity", saving && "opacity-0")}>
+          {editing ? "Save" : edited ? "Save" : state.guess.confident ? "That's me" : "Sure, whatever"}
+        </span>
+        {saving && (
+          <span className="absolute inset-0 grid place-items-center">
+            <LoaderCircle className="size-5 animate-spin" aria-label="Saving" />
+          </span>
+        )}
       </button>
       {!picking && (
         <button
