@@ -41,6 +41,7 @@ import {
   PANEL_CLASS,
   PanelHeading,
   VariantSwitch,
+  VARIANTS,
   type Mode,
   type Variant,
 } from "~/dashboard/variant-switch";
@@ -99,7 +100,8 @@ export function TopBar({
         />
       </div>
       <div className="flex justify-end">
-        <Group floating>
+        {/* Flat in Tidy, where the page is plain; a surface in Playful, over the layout. */}
+        <Group floating flat={VARIANTS[variant].mode === "tidy"}>
           <UploadButton />
           <ConnectedAgents />
           {profile && (
@@ -196,7 +198,8 @@ export function FilterBar({
         ))}
       </GroupTabs>
       {!compact && <span className="flex-1" />}
-      <Group floating={floating}>
+      {/* Over the page (playful) everything is a surface; on a plain page these stay flat. */}
+      <Group floating={floating} flat={!floating}>
         <SortMenu view={view} compact={compact} />
       </Group>
       {showLook && (
@@ -205,6 +208,7 @@ export function FilterBar({
           onValueChange={view.setLook}
           label="Show as"
           floating={floating}
+          flat={!floating}
         >
           <GroupTab icon value="list" aria-label="List" title="List">
             <ListIcon />
