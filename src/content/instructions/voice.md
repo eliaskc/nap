@@ -10,6 +10,7 @@ Load `<script src="/_nap/client.js"></script>`, then:
 - `call.leave()`, `call.setMuted(true | false)`, `call.muted`, `call.status` ("idle", "joining", "joined"), and `call.joined`.
 - `call.on("change", (call) => render(call))` runs on every join, leave, mute, speaking, or connection change. `call.on("error", (error) => ...)`. Both return a function that removes the listener.
 - Two tabs of one person are two participants. Closing the tab leaves the call.
+- Loading another page leaves the call. On a site with several pages, remember in `sessionStorage` that the person was in the call, and call `call.join()` on load of the next page. Once the person has allowed the microphone, that works without a click; if the browser holds back sound until a click, it starts at the first click or key press.
 
 Show who is in the call and who is speaking, a Join button, and Mute and Leave buttons once joined.
 

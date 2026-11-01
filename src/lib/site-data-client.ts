@@ -502,6 +502,7 @@ const CLIENT_SOURCE = String.raw`(() => {
     let audioContext = null;
     let joining = null;
     let closed = false;
+    let gestureArmed = false;
 
     function emit(event, value) {
       for (const listener of listeners.get(event)) {
@@ -565,6 +566,24 @@ const CLIENT_SOURCE = String.raw`(() => {
           // Closed.
         }
       }
+    }
+
+    // Browsers only start sound after a click on the page. A page that joins without one (such
+    // as on load, to stay in the call across pages) starts its sound at the first click or key.
+    function resumeOnGesture() {
+      if (gestureArmed) return;
+      gestureArmed = true;
+      const resume = () => {
+        gestureArmed = false;
+        removeEventListener("pointerdown", resume, true);
+        removeEventListener("keydown", resume, true);
+        if (audioContext && audioContext.state === "suspended") audioContext.resume().catch(() => undefined);
+        for (const entry of links.values()) {
+          if (entry.audio.srcObject && entry.audio.paused) entry.audio.play().catch(() => undefined);
+        }
+      };
+      addEventListener("pointerdown", resume, true);
+      addEventListener("keydown", resume, true);
     }
 
     // Speaking: the loudness of each stream, checked ten times a second.
@@ -639,7 +658,7 @@ const CLIENT_SOURCE = String.raw`(() => {
         const stream = streams[0] || new MediaStream([track]);
         if (audio.srcObject === stream) return;
         audio.srcObject = stream;
-        audio.play().catch(() => undefined);
+        audio.play().catch(resumeOnGesture);
         unwatchLevel(peerId);
         watchLevel(peerId, stream);
       };
@@ -735,7 +754,10 @@ const CLIENT_SOURCE = String.raw`(() => {
           }
           mic = stream;
           for (const track of mic.getAudioTracks()) track.enabled = !muted;
-          if (audioContext && audioContext.state === "suspended") audioContext.resume().catch(() => undefined);
+          if (audioContext && audioContext.state === "suspended") {
+            audioContext.resume().catch(() => undefined);
+            if (audioContext.state !== "running") resumeOnGesture();
+          }
           watchLevel("self", mic);
           status = "joined";
           room.setPresence({ inCall: true, muted });
