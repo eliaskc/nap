@@ -25,4 +25,5 @@ One rule: a slug gives a page its own host, and that makes it a site. Without a 
 - Anyone who can view a page can publish new versions and restore old ones. Only the owner changes who can view it, renames, moves, transfers, or deletes it. The owner can move an artifact to Sites or back; the old URL redirects.
 - Links that leave Nap should open in a new tab (`target="_blank"`); many sites refuse to load in a frame.
 - If you bundle to one HTML file, add the `/_nap/` script tags after bundling. Bundlers fail on `/_nap/client.js` and `/_nap/share.js`, because those files only exist on Nap.
+- In TypeScript, use Nap's own types for `window.nap` instead of declaring them: `curl -fsSL https://{{rootDomain}}/_nap/api/client.d.ts -o src/nap.d.ts`.
 - A page that needs its own backend: publish only the static frontend, host the backend elsewhere, and point the frontend at its public URL.

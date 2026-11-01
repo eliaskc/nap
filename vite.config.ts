@@ -1,9 +1,11 @@
+import { readdirSync } from "node:fs";
 import { build, defineConfig, type Plugin, type Rolldown } from "vite";
 import cloudflare from "@alchemy.run/cloudflare-runtime/vite";
 import { tanstackStart } from "@tanstack/react-start/plugin/vite";
 import viteReact from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import { napConfig } from "./nap.config.ts";
+import { bundleClientScript } from "./scripts/lib/client-bundle.ts";
 
 /**
  * Builds part of the artifact comments (src/comments) as one self-contained file. They load
@@ -83,6 +85,23 @@ function commentsFrameModule(): Plugin {
   };
 }
 
+/**
+ * `virtual:nap-client`: window.nap (src/client), the script every site loads from
+ * /_nap/client.js, bundled into one classic script and served by the Worker as a string.
+ */
+function napClientModule(): Plugin {
+  const id = "virtual:nap-client";
+  return {
+    name: "nap-client",
+    resolveId: (source) => (source === id ? `\0${id}` : undefined),
+    async load(resolved) {
+      if (resolved !== `\0${id}`) return;
+      for (const file of readdirSync("src/client")) this.addWatchFile(`src/client/${file}`);
+      return `export default ${JSON.stringify(await bundleClientScript("src/client/index.ts"))};`;
+    },
+  };
+}
+
 export default defineConfig({
   server: {
     port: 3000,
@@ -108,5 +127,6 @@ export default defineConfig({
     commentsBundle(),
     commentsDev(),
     commentsFrameModule(),
+    napClientModule(),
   ],
 });

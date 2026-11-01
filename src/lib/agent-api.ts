@@ -3,6 +3,7 @@ import skill from "../../skills/nap/SKILL.md?raw";
 import { Effect, Predicate } from "effect";
 import { napConfig } from "~/nap.config";
 import { agentInstructionsFor } from "~/lib/agent-instructions";
+import { serveClientTypes } from "~/lib/site-data-client";
 import { DEFAULT_ACCESS, EVERYONE_LABEL, fillDeploymentText } from "~/lib/deployment-text";
 import {
   authenticateAgent,
@@ -98,6 +99,8 @@ export const handleAgentApi = Effect.fn("handleAgentApi")(function* (request: Re
       headers: { "content-type": "text/javascript; charset=utf-8", ...noStore },
     });
   }
+  // The types of window.nap (/_nap/client.js), for sites written in TypeScript.
+  if (path === "/client.d.ts" && method === "GET") return serveClientTypes();
   if (path === "/auth/device") return yield* startDeviceLogin(request, url);
   if (path === "/auth/token") return yield* exchangeDeviceCode(request, url);
 

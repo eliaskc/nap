@@ -44,8 +44,8 @@ Temporary testing may enable them, but revert before deploying.
 
 Server code is written with Effect 4 (`effect@4.1.x`, the version Alchemy uses). Effect's own
 guide ships in `node_modules/effect/AGENTS.md` and `node_modules/effect/ai-docs/`; read it rather
-than older Effect 2/3 docs. The UI, and the scripts Nap serves to sites as source
-(`site-data-client.ts`, `share-widget.ts`, `nap-toolbar.ts`, `src/comments/`), are not Effect code.
+than older Effect 2/3 docs. The UI and the small scripts Nap serves to sites as source
+(`share-widget.ts`, `nap-toolbar.ts`, `src/comments/`) are not Effect code.
 
 - `src/server/` holds the infrastructure: services for the bindings (`Database` for D1, `Storage`
   for R2, `Settings`, `RateLimiter`, `Background`, and the optional bindings in `bindings.ts`),
@@ -69,6 +69,19 @@ T` unions: fail instead. Infrastructure errors (`DatabaseError`, `StorageError`,
 - The Worker (`src/worker.ts`) runs handlers with `respond(env, effect, ctx)`; API routes in
   `src/routes/api` with `route(effect)` from `src/server/route.ts`; tests with `runNap` or
   `respond` and fake bindings.
+
+## The site client (src/client)
+
+`src/client/` is `window.nap`, the script every site loads from `/_nap/client.js`: collections,
+channels, voice, `nap.fetch`, `nap.me`. It runs in visitors' browsers, on every site.
+
+- It is TypeScript, bundled by `scripts/lib/client-bundle.ts` into one classic script that the
+  Worker serves (the `virtual:nap-client` module in `vite.config.ts`). Pages call it as plain
+  JavaScript, so its API stays plain Promises and callbacks.
+- `src/client/api.d.ts` is its public API. The client is typed against it, and Nap serves it as
+  `/_nap/client.d.ts` and `/_nap/api/client.d.ts`. Change it with the instructions in
+  `src/content/instructions/`.
+- `tests/client.test.mjs` runs the built script against fake browser globals.
 
 ## Documentation
 

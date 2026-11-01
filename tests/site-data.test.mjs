@@ -286,10 +286,18 @@ test("the migration keeps documents and numbers them per site", async () => {
   ]);
 });
 
+/** /_nap/client.js, built once, as the Worker serves it. */
+let built;
+function clientSource() {
+  built ??= import("../scripts/lib/client-bundle.ts").then(({ bundleClientScript }) =>
+    bundleClientScript("src/client/index.ts"),
+  );
+  return built;
+}
+
 /** Runs the served client.js against the handler, as one page of the elo site. */
 async function page(env, email = OWNER, WebSocket = undefined) {
-  const { serveSiteDataClient } = await import("../src/lib/site-data-client.ts");
-  const source = await serveSiteDataClient().text();
+  const source = await clientSource();
   const window = {};
   const document = { hidden: false, addEventListener() {}, removeEventListener() {} };
   const location = new URL("https://elo.nap.test/");

@@ -3,3 +3,9 @@ declare module "virtual:nap-comments-frame" {
   const source: string;
   export default source;
 }
+
+declare module "virtual:nap-client" {
+  /** window.nap, bundled from src/client/index.ts. */
+  const source: string;
+  export default source;
+}
