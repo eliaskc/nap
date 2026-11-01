@@ -3,6 +3,7 @@ import { toolbarPage } from "~/lib/nap-toolbar";
 import type { NapKind } from "~/lib/nap-urls";
 import { findRedirect } from "~/lib/rekey";
 import { canViewSite, isSameEmail, type Visibility } from "~/lib/site-access";
+import { siteManifest } from "~/lib/site-manifest";
 
 type SiteServingEnv = {
   DB: D1Database;
@@ -103,6 +104,13 @@ export async function serveUploadedSite(
       object = await getNapFile(env, nap, folderIndex);
     }
   }
+  // A single-page app ("spa": true in nap.json): page paths without a file get the root
+  // index.html, and the app's router shows the page. Missing files with an extension stay 404.
+  if (!object && isPagePath(normalizedPath, request)) {
+    if ((await siteManifest(env.SITES, nap.slug, nap.currentVersion)).spa) {
+      object = await getNapFile(env, nap, "index.html");
+    }
+  }
   if (!object) return new Response("File not found", { status: 404 });
 
   const headers = fileHeaders(object);
@@ -136,6 +144,14 @@ export function fileHeaders(object: R2ObjectBody) {
   headers.set("etag", object.httpEtag);
   headers.set("cache-control", "no-store");
   return headers;
+}
+
+/** A GET for a page: the last segment has no extension (index.html is what Nap adds itself). */
+function isPagePath(normalizedPath: string, request: Request) {
+  if (request.method !== "GET" && request.method !== "HEAD") return false;
+  const segments = normalizedPath.split("/");
+  const name = segments.at(-1) === "index.html" ? (segments.at(-2) ?? "") : (segments.at(-1) ?? "");
+  return !name.includes(".");
 }
 
 /**

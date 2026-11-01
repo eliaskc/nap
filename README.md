@@ -222,6 +222,10 @@ checks that the person can view the site, fetches only GET over https from those
 never Nap's own), checks every redirect against the list, and sends nothing of the viewer's:
 no cookies, no Access headers. Responses are cached at the edge for a few minutes, are size
 limited, and carry a sandbox CSP, because they are served from the site's own origin.
+
+The same `nap.json` (`src/lib/site-manifest.ts`, cached per immutable version) can mark a site
+as a single-page app: with `"spa": true`, a page path that has no file gets the root
+`index.html`, so client-side routers work on reloads and deep links.
 Artifacts cannot use it.
 
 ### The artifact viewer

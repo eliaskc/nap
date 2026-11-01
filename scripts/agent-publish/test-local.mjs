@@ -385,17 +385,26 @@ try {
   });
   assert.match(siteDocument.text, /map/, "new sites have no toolbar by default");
 
+  // nap.json: "spa" serves the root index.html for page paths without a file. Manifests are
+  // cached per version, so this writes it before anything reads it.
+  const teamMapPage = (path) => call(path, { host: `team-map.${ROOT}`, headers: signedIn(OWNER) });
+  await nap.put(
+    `sites/team-map/versions/${siteClaim.json.site.currentVersion}/nap.json`,
+    JSON.stringify({ spa: true, fetch: ["api.example.com", `*.${ROOT}`] }),
+  );
+  const spaPage = await teamMapPage("/games/mini?date=2026-01-01");
+  assert.equal(spaPage.status, 200, spaPage.text);
+  assert.match(spaPage.text, /map/, "a page path gets index.html");
+  assert.match((await teamMapPage("/games/mini/")).text, /map/, "with a slash too");
+  assert.equal((await teamMapPage("/assets/missing.js")).status, 404, "files stay 404");
+
   // Fetches: only GET over https, to the hosts the live version's nap.json lists.
   const siteFetch = (target, email = OWNER, extra = {}) =>
     call(`/_nap/fetch?url=${encodeURIComponent(target)}`, {
       host: `team-map.${ROOT}`,
       headers: { ...signedIn(email), ...extra },
     });
-  assert.equal((await siteFetch("https://example.com/")).status, 403, "no nap.json, no hosts");
-  await nap.put(
-    `sites/team-map/versions/${siteClaim.json.site.currentVersion}/nap.json`,
-    JSON.stringify({ fetch: ["api.example.com", `*.${ROOT}`] }),
-  );
+  assert.equal((await siteFetch("https://example.com/")).status, 403, "unlisted host");
   assert.match((await siteFetch("https://example.com/")).json.error, /not in this site/);
   assert.equal((await siteFetch("http://api.example.com/")).status, 403, "https only");
   assert.equal((await siteFetch(`https://x.${ROOT}/`)).status, 403, "never Nap's own hosts");

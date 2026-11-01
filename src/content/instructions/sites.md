@@ -16,6 +16,7 @@ One rule: a slug gives a page its own host, and that makes it a site. Without a 
 
 - URL `https://<slug>.{{rootDomain}}`. Slugs are lowercase letters, numbers, and hyphens, up to 32 characters. `--site` without `--slug` makes one from the title; the owner can rename it later.
 - Use a site for client-side routing, root-absolute URLs, service workers, storage that lasts, `nap.fetch`, or anything people come back to.
+- Client-side routing (React Router, TanStack Router): put `{ "spa": true }` in `nap.json` at the root of the upload. Then a page path without a file, such as `/games/mini`, gets the root `index.html` and your router shows the page; missing files with an extension (`/assets/x.js`) stay 404. Use root-absolute asset paths (Vite's default `base: "/"`), so they also load on deep paths. Navigating inside the app keeps the page, so channels, voice calls, and live data stay connected.
 - Add the Share button before `</body>`: `<script src="/_nap/share.js" defer></script>`. Only the owner sees it. `data-position="bottom-left"`, `"top-right"`, or `"top-left"` moves it (default bottom-right). Inside a frame it shows nothing, so it is safe to keep.
 - A site with a build step keeps its source in a repo on Nap (`source` topic).
 

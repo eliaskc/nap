@@ -1,22 +1,16 @@
-import { json, objectKey } from "~/lib/nap-server";
+import { json } from "~/lib/nap-server";
 import { canViewSite } from "~/lib/site-data";
 import { isCrossSite } from "~/lib/site-access";
+import { MANIFEST_PATH, siteManifest } from "~/lib/site-manifest";
 
 type SiteFetchEnv = {
   DB: D1Database;
   SITES: R2Bucket;
 };
 
-/** The file in a site's live version that lists the hosts its pages may fetch through Nap. */
-export const MANIFEST_PATH = "nap.json";
-const MAX_HOSTS = 20;
 const MAX_REDIRECTS = 3;
 const MAX_BYTES = 5 * 1024 * 1024;
 const CACHE_SECONDS = 300;
-const HOST_PATTERN = /^(?:\*\.)?[a-z0-9-]+(?:\.[a-z0-9-]+)+$/;
-
-/** Allowed hosts per site version. Versions are immutable, so the list never goes stale. */
-const hostsByVersion = new Map<string, string[]>();
 
 /**
  * Fetches a public URL for a page, so pages can read APIs that do not allow other origins. Only
@@ -50,7 +44,7 @@ export async function handleSiteFetch(
     return napError("Pass an absolute URL as ?url=", 400);
   }
 
-  const hosts = await allowedHosts(env, slug, site.currentVersion);
+  const hosts = (await siteManifest(env.SITES, slug, site.currentVersion)).fetch;
   for (let redirects = 0; ; redirects++) {
     const problem = checkTarget(target, hosts, rootDomain);
     if (problem) return napError(problem, 403);
@@ -99,33 +93,6 @@ function checkTarget(target: URL, hosts: string[], rootDomain: string) {
 function hostMatches(host: string, allowed: string) {
   if (allowed.startsWith("*.")) return host.endsWith(allowed.slice(1));
   return host === allowed;
-}
-
-/** Reads "fetch": ["host", "*.host"] from nap.json in the live version. */
-async function allowedHosts(env: SiteFetchEnv, slug: string, version: string) {
-  const key = `${slug}/${version}`;
-  const cached = hostsByVersion.get(key);
-  if (cached) return cached;
-
-  let hosts: string[] = [];
-  const object = await env.SITES.get(objectKey(slug, version, MANIFEST_PATH));
-  if (object) {
-    try {
-      const manifest = (await object.json()) as { fetch?: unknown };
-      if (Array.isArray(manifest.fetch)) {
-        hosts = manifest.fetch
-          .filter((host): host is string => typeof host === "string")
-          .map((host) => host.trim().toLowerCase())
-          .filter((host) => HOST_PATTERN.test(host))
-          .slice(0, MAX_HOSTS);
-      }
-    } catch {
-      hosts = [];
-    }
-  }
-  if (hostsByVersion.size > 500) hostsByVersion.clear();
-  hostsByVersion.set(key, hosts);
-  return hosts;
 }
 
 /**
