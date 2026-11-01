@@ -503,6 +503,17 @@ const CLIENT_SOURCE = String.raw`(() => {
     let joining = null;
     let closed = false;
     let gestureArmed = false;
+    // The microphone: the chosen device id (null: the system default), and the known inputs.
+    let inputId = null;
+    let inputs = [];
+    // The page's own small state for the others in the call ({ captions: true }, ...).
+    let meta = null;
+    const canSelectInput = Boolean(
+      navigator.mediaDevices &&
+        navigator.mediaDevices.enumerateDevices &&
+        typeof RTCRtpSender === "function" &&
+        "replaceTrack" in RTCRtpSender.prototype,
+    );
 
     function emit(event, value) {
       for (const listener of listeners.get(event)) {
@@ -532,12 +543,90 @@ const CLIENT_SOURCE = String.raw`(() => {
           name: peer.name,
           self: peer.self,
           muted: Boolean(peer.state.muted),
+          meta: peer.state.meta === undefined ? null : peer.state.meta,
           speaking: Boolean(level && level.speaking) && !peer.state.muted,
           // This page's connection to the peer: "connecting", "connected", "failed", ...
           // null for this page, or while this page is not in the call.
           connection: peer.self || status !== "joined" ? null : link ? link.state : "connecting",
         };
       });
+    }
+
+    function publishPresence() {
+      if (status === "joined") room.setPresence({ inCall: true, muted, meta });
+    }
+
+    // Microphones. Browsers only give their names once the page may use the microphone.
+    async function loadInputs() {
+      if (!canSelectInput) return;
+      try {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const next = devices
+          .filter((device) => device.kind === "audioinput" && device.deviceId)
+          .map((device, index) => ({
+            deviceId: device.deviceId,
+            label: device.label || "Microphone " + (index + 1),
+          }));
+        if (JSON.stringify(next) === JSON.stringify(inputs)) return;
+        inputs = next;
+        changed();
+      } catch {
+        // No device list in this browser.
+      }
+    }
+    function onDeviceChange() {
+      loadInputs();
+    }
+    if (canSelectInput) {
+      navigator.mediaDevices.addEventListener("devicechange", onDeviceChange);
+      // Lists the microphones now if the person already allowed one on this site.
+      loadInputs();
+    }
+
+    function audioConstraints(deviceId) {
+      const audio = { echoCancellation: true, noiseSuppression: true, autoGainControl: true };
+      if (deviceId) audio.deviceId = { exact: deviceId };
+      return { audio };
+    }
+    // The chosen microphone, or the default one when it is gone.
+    async function openMic() {
+      try {
+        return await navigator.mediaDevices.getUserMedia(audioConstraints(inputId));
+      } catch (error) {
+        if (!inputId || (error.name !== "OverconstrainedError" && error.name !== "NotFoundError")) throw error;
+        inputId = null;
+        return navigator.mediaDevices.getUserMedia(audioConstraints(null));
+      }
+    }
+    function useMic(stream) {
+      mic = stream;
+      for (const track of mic.getAudioTracks()) {
+        track.enabled = !muted;
+        // Unplugged: carry on with the default microphone.
+        track.addEventListener("ended", () => {
+          if (status === "joined" && mic === stream) switchInput(null).catch(fail);
+        });
+      }
+      unwatchLevel("self");
+      watchLevel("self", mic);
+    }
+    async function switchInput(deviceId) {
+      inputId = deviceId || null;
+      if (status !== "joined") return changed();
+      const previous = mic;
+      const stream = await openMic();
+      if (status !== "joined") {
+        for (const track of stream.getTracks()) track.stop();
+        return;
+      }
+      useMic(stream);
+      const track = stream.getAudioTracks()[0];
+      await Promise.all(
+        [...links.values()].map((entry) => entry.sender && entry.sender.replaceTrack(track)),
+      );
+      if (previous) for (const old of previous.getTracks()) old.stop();
+      loadInputs();
+      changed();
     }
 
     async function loadIceServers() {
@@ -667,7 +756,7 @@ const CLIENT_SOURCE = String.raw`(() => {
         if (pc.connectionState === "failed") pc.restartIce();
         changed();
       };
-      for (const track of mic.getTracks()) pc.addTrack(track, mic);
+      for (const track of mic.getTracks()) entry.sender = pc.addTrack(track, mic);
       return entry;
     }
     function unlink(peerId) {
@@ -742,25 +831,19 @@ const CLIENT_SOURCE = String.raw`(() => {
           const AudioContextClass = window.AudioContext || window.webkitAudioContext;
           // Made during the click, so the browser lets it run.
           if (AudioContextClass && !audioContext) audioContext = new AudioContextClass();
-          const [stream] = await Promise.all([
-            navigator.mediaDevices.getUserMedia({
-              audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-            }),
-            loadIceServers(),
-          ]);
+          const [stream] = await Promise.all([openMic(), loadIceServers()]);
           if (status !== "joining") {
             for (const track of stream.getTracks()) track.stop();
             return;
           }
-          mic = stream;
-          for (const track of mic.getAudioTracks()) track.enabled = !muted;
           if (audioContext && audioContext.state === "suspended") {
             audioContext.resume().catch(() => undefined);
             if (audioContext.state !== "running") resumeOnGesture();
           }
-          watchLevel("self", mic);
+          useMic(stream);
           status = "joined";
-          room.setPresence({ inCall: true, muted });
+          loadInputs();
+          publishPresence();
           sync();
         } catch (error) {
           stop();
@@ -804,6 +887,31 @@ const CLIENT_SOURCE = String.raw`(() => {
       get muted() {
         return muted;
       },
+      /** Whether this browser can switch microphones. */
+      canSelectInput,
+      /** Microphones, { deviceId, label }. Names appear once the person allowed the microphone. */
+      get inputs() {
+        return inputs;
+      },
+      /** The microphone in use (or chosen for the next join); null: the system default. */
+      get input() {
+        const track = mic && mic.getAudioTracks()[0];
+        const settings = track && track.getSettings ? track.getSettings() : null;
+        return (settings && settings.deviceId) || inputId;
+      },
+      /** Chooses a microphone (null: the default). In a call it switches without reconnecting. */
+      setInput(deviceId) {
+        return switchInput(deviceId).catch((error) => {
+          fail(error);
+          throw error;
+        });
+      },
+      /** This page's own state for the others in the call, up to about 800 bytes: participants[].meta. */
+      setMeta(next) {
+        meta = next === undefined ? null : next;
+        publishPresence();
+        changed();
+      },
       /** Everyone in the call, this page included once joined (self: true), oldest first. */
       get participants() {
         return participants();
@@ -817,7 +925,7 @@ const CLIENT_SOURCE = String.raw`(() => {
       setMuted(next) {
         muted = Boolean(next);
         if (mic) for (const track of mic.getAudioTracks()) track.enabled = !muted;
-        if (status === "joined") room.setPresence({ inCall: true, muted });
+        publishPresence();
         changed();
       },
       /** "change" (with this object) on every join, leave, mute, speaking, or connection change; "error". */
@@ -837,6 +945,7 @@ const CLIENT_SOURCE = String.raw`(() => {
         offStatus();
         offError();
         voices.delete(name);
+        if (canSelectInput) navigator.mediaDevices.removeEventListener("devicechange", onDeviceChange);
         room.leave();
         if (audioContext) audioContext.close().catch(() => undefined);
         audioContext = null;
