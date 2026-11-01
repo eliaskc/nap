@@ -28,6 +28,7 @@ import {
 } from "~/server/http";
 import { inBackground } from "~/server/platform";
 import { Storage } from "~/server/storage";
+import { recordVisit } from "~/lib/visits";
 import { randomString, sha256Hex } from "~/server/tokens";
 import COMMENTS_FRAME_SOURCE from "virtual:nap-comments-frame";
 
@@ -118,6 +119,7 @@ export const handleArtifactPage = Effect.fn("handleArtifactPage")(function* (
 
   // The frame token is written with this person's email, which must have a profile.
   yield* ensureProfile(identity);
+  yield* recordVisit(identity.email, slug);
   const token = randomString(32);
   const db = yield* Database;
   yield* db.run(

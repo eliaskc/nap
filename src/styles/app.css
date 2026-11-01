@@ -2,6 +2,7 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 @import "@fontsource-variable/geist";
+@import "@fontsource-variable/geist-mono";
 @import "./theme.css";
 
 @custom-variant dark (&:is(.dark *));
@@ -37,13 +38,6 @@
 
 @layer components {
   .nap-shell {
-    --nap-surface: var(--background);
-    --nap-card: color-mix(in oklch, var(--card) 92%, transparent);
-    --nap-card-muted: color-mix(in oklch, var(--card) 28%, transparent);
-    --nap-line: color-mix(in oklch, var(--border) 82%, var(--foreground) 18%);
-    --nap-line-soft: color-mix(in oklch, var(--border) 72%, transparent);
-    --nap-shadow: 0 1px 2px color-mix(in oklch, var(--foreground) 7%, transparent);
-    --nap-map-height: min(66vw, 660px);
     background: var(--background);
   }
 
@@ -56,121 +50,53 @@
       color-mix(in oklch, var(--foreground) 16%, transparent) 0.8px,
       transparent 0.8px
     );
-    background-position: 0 0;
     background-size: 22px 22px;
   }
 
-  .nap-atlas-viewport {
-    touch-action: none;
-    user-select: none;
+  /* A new example fades in each time the rotation moves on (the element gets a new key). */
+  .nap-example {
+    animation: nap-example-in 520ms cubic-bezier(0.22, 1, 0.36, 1) both;
   }
 
-  .nap-upload {
-    transition:
-      transform 220ms cubic-bezier(0.22, 1, 0.36, 1),
-      box-shadow 220ms ease,
-      border-color 220ms ease;
+  .nap-caret {
+    display: inline-block;
+    width: 0.07em;
+    height: 0.9em;
+    margin-left: 0.06em;
+    vertical-align: -0.08em;
+    background: currentColor;
+    opacity: 0.55;
+    animation: nap-caret 1.1s steps(1) infinite;
   }
 
-  .nap-upload-active {
-    transform: translateY(-2px) scale(1.01);
-    box-shadow: 0 24px 60px -30px color-mix(in oklch, var(--primary) 70%, transparent);
-  }
-
-  @media (prefers-reduced-motion: reduce) {
-    .nap-upload,
-    .nap-upload-active {
-      transition: none;
-      transform: none;
-    }
-  }
-
-  .nap-atlas-map {
-    position: absolute;
-    left: 50%;
-    top: 50%;
-    width: 1px;
-    height: 1px;
-    will-change: transform;
-  }
-
-  .nap-atlas-map-settled {
-    transition: transform 420ms cubic-bezier(0.22, 1, 0.36, 1);
-  }
-
-  .nap-upload-card {
-    position: absolute;
-    left: -260px;
-    top: -110px;
-    width: 520px;
-    height: 220px;
-    min-height: 220px;
-    border-color: var(--nap-line);
-    box-shadow: var(--nap-shadow);
-  }
-
-  .nap-upload-card-surface {
-    background-image: repeating-linear-gradient(
-      -45deg,
-      transparent 0 9px,
-      color-mix(in oklch, var(--foreground) 4%, transparent) 9px 10px
-    );
-    background-position: 0 0;
-    background-size: 100% 100%;
-  }
-
-  .nap-site-card,
-  .nap-slot-card {
-    border-radius: min(var(--radius-md), 8px);
-    border-color: var(--nap-line);
-    box-shadow: var(--nap-shadow);
-  }
-
-  .nap-slot-card {
-    border-color: var(--nap-line-soft);
+  /* Vending: the item drops into the tray. */
+  .nap-vend {
+    animation: nap-vend 620ms cubic-bezier(0.5, 0, 0.75, 0) both;
   }
 }
 
-@media (max-width: 900px) {
-  @layer components {
-    .nap-shell {
-      overflow: auto;
-      --nap-map-height: auto;
-    }
+@keyframes nap-example-in {
+  from {
+    opacity: 0;
+    filter: blur(4px);
+    transform: translateY(0.15em);
+  }
+}
 
-    .nap-atlas-viewport {
-      touch-action: auto;
-      user-select: auto;
-      overflow: visible;
-    }
+@keyframes nap-caret {
+  50% {
+    opacity: 0;
+  }
+}
 
-    .nap-atlas-map {
-      display: flex;
-      position: static;
-      min-height: 0;
-      height: auto;
-      width: 100%;
-      flex-direction: column;
-      gap: 0.75rem;
-      padding-bottom: 1rem;
-      transform: none !important;
-      transition: none;
-    }
-
-    .nap-upload-card,
-    .nap-site-card,
-    .nap-slot-card {
-      position: relative !important;
-      inset: auto !important;
-      width: 100% !important;
-      height: auto !important;
-      min-height: 92px;
-    }
-
-    .nap-upload-card {
-      min-height: 180px;
-      order: -1;
-    }
+@keyframes nap-vend {
+  from {
+    transform: translateY(-140px) rotate(-6deg);
+    opacity: 0;
+  }
+  70% {
+    transform: translateY(6px) rotate(-8deg);
+    opacity: 1;
   }
 }
 

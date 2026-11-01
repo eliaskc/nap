@@ -75,6 +75,7 @@ export const rekeyNap = Effect.fn("rekeyNap")(function* (
     move("site_documents"),
     move("comments"),
     move("artifact_frames"),
+    move("site_visits"),
     // Keep agent `replaces=<claim id>` updates pointing at the nap.
     move("drafts"),
     // Older redirects follow the nap to its new key.

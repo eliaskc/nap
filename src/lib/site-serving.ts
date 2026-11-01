@@ -8,6 +8,7 @@ import { siteManifest } from "~/lib/site-manifest";
 import { Database, type DatabaseError } from "~/server/database";
 import { failText, redirect } from "~/server/http";
 import { Storage } from "~/server/storage";
+import { recordVisit } from "~/lib/visits";
 
 export type ServedNap = {
   slug: string;
@@ -58,7 +59,8 @@ export const serveUploadedSite = Effect.fn("serveUploadedSite")(function* (
   options: { accessPath?: string; dashboardUrl?: string; artifactUrl: (slug: string) => string },
 ) {
   const url = new URL(request.url);
-  const access = yield* findViewableNap(slug, getIdentity(request).email);
+  const identity = getIdentity(request);
+  const access = yield* findViewableNap(slug, identity.email);
   const rest = path.replace(/^\/+/, "");
   const toArtifact = (key: string) =>
     redirect(`${options.artifactUrl(key)}${rest ? `/${rest}` : ""}${url.search}`);
@@ -75,6 +77,7 @@ export const serveUploadedSite = Effect.fn("serveUploadedSite")(function* (
   }
   const { nap, isOwner } = access;
   const normalizedPath = normalizeRequestPath(path);
+  if (isPageVisit(request, normalizedPath)) yield* recordVisit(identity.email, nap.slug);
 
   if (nap.toolbar && wantsToolbar(request, normalizedPath)) {
     return toolbarPage({
@@ -145,6 +148,13 @@ export function fileHeaders(object: R2ObjectBody) {
   headers.set("etag", object.httpEtag);
   headers.set("cache-control", "no-store");
   return headers;
+}
+
+/** A person opening a page in the browser, not a frame, script, or fetch. */
+function isPageVisit(request: Request, normalizedPath: string) {
+  return (
+    request.headers.get("sec-fetch-dest") === "document" && isPagePath(normalizedPath, request)
+  );
 }
 
 /** A GET for a page: the last segment has no extension (index.html is what Nap adds itself). */

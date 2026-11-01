@@ -33,6 +33,12 @@ export type NapConfig = {
     /** The ad hoc provisioning profile Nap signs with, by its name in the developer account. */
     profileName: string;
   } | null;
+  /**
+   * Example requests the dashboard rotates through under "Ask your agent", such as
+   * `{ kind: "site", text: "where we vote on the offsite venue" }`. Each reads after
+   * "Make me a site", "Make me an artifact", or "Make me an app". Optional: Nap has generic ones.
+   */
+  examples?: Array<{ kind: "site" | "artifact" | "app"; text: string }>;
 };
 
 export { napConfig } from "./instance/config.ts";

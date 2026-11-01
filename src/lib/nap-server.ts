@@ -32,6 +32,8 @@ export type SiteRecord = {
   toolbar: boolean;
   /** The caller is in the invite list. */
   invited: boolean;
+  /** When the caller last opened it. */
+  visitedAt: string | null;
 };
 
 export function getIdentity(request?: Request): Identity {
@@ -103,9 +105,13 @@ export const listSites = Effect.fn("listSites")(function* (identity: Identity) {
     toolbar: number;
     invited: number;
     viewerEmails: string | null;
+    visitedAt: string | null;
   }>(
     `WITH mine AS (
          SELECT site_slug FROM site_viewers WHERE lower(email) = lower(?1)
+       ),
+       visits AS (
+         SELECT site_slug, visited_at FROM site_visits WHERE email = lower(?1)
        )
        SELECT
         sites.slug,
@@ -129,11 +135,13 @@ export const listSites = Effect.fn("listSites")(function* (identity: Identity) {
         sites.slug IN (SELECT site_slug FROM mine) AS invited,
         CASE WHEN lower(sites.created_by_email) = lower(?1) THEN
           (SELECT group_concat(email) FROM site_viewers WHERE site_viewers.site_slug = sites.slug)
-        END AS viewerEmails
+        END AS viewerEmails,
+        visits.visited_at AS visitedAt
       FROM sites
       LEFT JOIN profiles ON profiles.email = sites.updated_by_email
+      LEFT JOIN visits ON visits.site_slug = sites.slug
       WHERE lower(sites.created_by_email) = lower(?1)
-         OR (sites.kind = 'site' AND (
+         OR ((sites.kind = 'site' OR visits.site_slug IS NOT NULL) AND (
                sites.visibility = 'everyone'
             OR (sites.visibility = 'selected' AND sites.slug IN (SELECT site_slug FROM mine))
          ))
@@ -163,6 +171,7 @@ export const listSites = Effect.fn("listSites")(function* (identity: Identity) {
       listed: Boolean(row.listed),
       toolbar: Boolean(row.toolbar),
       invited: Boolean(row.invited),
+      visitedAt: row.visitedAt,
     }),
   );
 });
