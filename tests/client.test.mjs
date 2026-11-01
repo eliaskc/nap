@@ -241,3 +241,35 @@ test("voice: participants come from the channel before joining", async () => {
   assert.equal(socket.readyState, 3, "close leaves the channel");
   await assert.rejects(call.join(), { name: "NapError", status: 400 });
 });
+
+test("fetch: the page's headers travel apart from the browser's", async () => {
+  const nap = page();
+  const original = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async (url, init) => {
+    calls.push({ url: String(url), init });
+    return new Response("{}", { headers: { "x-nap-fetch": "upstream" } });
+  };
+  try {
+    await nap.fetch("https://api.example.com/a");
+    assert.equal(calls[0].init.method, "GET");
+    assert.equal(calls[0].init.headers["x-nap-fetch-headers"], undefined);
+
+    await nap.fetch("https://api.example.com/b", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: "Bearer t" },
+      body: '{"a":1}',
+    });
+    const { url, init } = calls[1];
+    assert.match(url, /\/_nap\/fetch\?url=https%3A%2F%2Fapi\.example\.com%2Fb$/);
+    assert.equal(init.method, "POST");
+    assert.equal(init.body, '{"a":1}');
+    assert.equal(init.headers["content-type"], "application/json");
+    assert.deepEqual(JSON.parse(init.headers["x-nap-fetch-headers"]), {
+      "content-type": "application/json",
+      authorization: "Bearer t",
+    });
+  } finally {
+    globalThis.fetch = original;
+  }
+});

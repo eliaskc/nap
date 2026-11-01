@@ -216,13 +216,16 @@ to about eight people.
 
 ### Fetches
 
-A site's pages can read public data from other origins through `/_nap/fetch`
+A site's pages can call public APIs on other origins through `/_nap/fetch`
 (`src/lib/site-fetch.ts`), for APIs that send no CORS headers. The site lists the hosts in a
 `nap.json` at the root of its live version, so each publish decides what it may reach. Nap
-checks that the person can view the site, fetches only GET over https from those hosts (and
-never Nap's own), checks every redirect against the list, and sends nothing of the viewer's:
-no cookies, no Access headers. Responses are cached at the edge for a few minutes, are size
-limited, and carry a sandbox CSP, because they are served from the site's own origin.
+checks that the person can view the site, fetches only over https from those hosts (and never
+Nap's own), and checks every redirect against the list. Pages choose the method, a small body,
+and headers (in `x-nap-fetch-headers`, so they stay apart from the browser's own); Nap sends
+nothing of the viewer's: no cookies, no Access headers. Plain GETs are cached at the edge for a
+few minutes; anything with a body or the page's own headers is not, since the cache keys on the
+URL alone. Responses are size limited and carry a sandbox CSP, because they are served from the
+site's own origin.
 
 The same `nap.json` (`src/lib/site-manifest.ts`, cached per immutable version) can mark a site
 as a single-page app: with `"spa": true`, a page path that has no file gets the root

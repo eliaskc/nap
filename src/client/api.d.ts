@@ -210,8 +210,11 @@ export interface NapVoiceCall<M = unknown> {
 // Fetch (nap.fetch)
 
 export interface NapFetchOptions {
-  method?: "GET" | "HEAD";
+  method?: "GET" | "HEAD" | "POST" | "PUT" | "PATCH" | "DELETE";
+  /** Sent upstream as given; never the viewer's cookies or login. */
   headers?: HeadersInit;
+  /** Up to 256 KB. */
+  body?: BodyInit | null;
   signal?: AbortSignal;
 }
 
@@ -219,14 +222,17 @@ export interface Nap {
   db: { collection<T = Record<string, unknown>>(name: string): NapCollection<T> };
   channel<S = unknown, M = unknown>(name: string): NapChannel<S, M>;
   voice<M = unknown>(name?: string): NapVoiceCall<M>;
-  /** Reads a public URL through Nap. The site lists the hosts in nap.json ("fetch"). */
+  /** Fetches a URL through Nap, for APIs that do not allow other origins. The site lists the hosts in nap.json ("fetch"). */
   fetch(url: string | URL, options?: NapFetchOptions): Promise<Response>;
   /** The person viewing the page, with their name and look. */
   me(): Promise<NapIdentity>;
   /** Everyone on this Nap, or only these emails, with their names and looks. */
   people(emails?: Array<string>): Promise<Array<NapPerson>>;
   /** A person's avatar as an <svg> element. Plain HTML can use <nap-avatar> instead. */
-  avatar(person: Pick<NapPerson, "name" | "shape" | "color">, options?: NapAvatarOptions): SVGSVGElement;
+  avatar(
+    person: Pick<NapPerson, "name" | "shape" | "color">,
+    options?: NapAvatarOptions,
+  ): SVGSVGElement;
   looks: NapLooks;
   NapError: NapErrorConstructor;
 }
