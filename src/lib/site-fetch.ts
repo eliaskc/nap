@@ -98,7 +98,11 @@ export const handleSiteFetch = Effect.fn("handleSiteFetch")(function* (
     if (length > MAX_BYTES) return yield* failNoStore(502, "The response is too large");
     return new Response(upstream.body ? limit(upstream.body, MAX_BYTES) : null, {
       status: upstream.status,
-      headers: proxiedHeaders(upstream.headers, target, cacheable(method, forwarded)),
+      headers: proxiedHeaders(
+        upstream.headers,
+        target,
+        upstream.ok && cacheable(method, forwarded),
+      ),
     });
   }
 });

@@ -210,3 +210,15 @@ test("a 303 after a POST is followed as a GET without the body", async () => {
     mock.restore();
   }
 });
+
+test("errors are never cached", async () => {
+  const env = environment();
+  const mock = upstream(() => new Response("gone", { status: 404 }));
+  try {
+    const response = await call(env, "https://api.example.com/missing");
+    assert.equal(response.status, 404);
+    assert.equal(response.headers.get("cache-control"), "no-store");
+  } finally {
+    mock.restore();
+  }
+});
