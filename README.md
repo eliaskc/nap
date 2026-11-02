@@ -90,13 +90,21 @@ the secrets and a deploy workflow that deploys this code with them.
    Open the root domain, sign in, and give your agent
    `https://<root domain>/_nap/api/instructions`, or install the skill in
    `skills/nap`.
-7. **Apps (optional).** With an Apple Developer account: create a wildcard
-   App ID `<bundleIdPrefix>.*`, an Apple Distribution certificate, and an ad
-   hoc profile for that App ID named as `profileName`, and an App Store
-   Connect team key with the Admin role. Set `apps` in `instance/config.ts`.
-   Add the secrets `NAP_APPLE_SIGNING_PEM` (the certificate's private key and
-   certificate in one PEM) and `NAP_ASC_PRIVATE_KEY` (the `.p8`), and the
-   variables `NAP_ASC_KEY_ID` and `NAP_ASC_ISSUER_ID`.
+7. **Apps (optional).** With an Apple Developer account: an Apple
+   Distribution certificate and an App Store Connect team key with the Admin
+   role. Then ad hoc, TestFlight, or both:
+   - **Ad hoc:** a wildcard App ID `<bundleIdPrefix>.*` and an ad hoc profile
+     for it, named as `profileName`.
+   - **TestFlight:** an explicit App ID, an App Store profile for it named as
+     `testFlight.profileName`, an app record in App Store Connect with that
+     bundle id (`testFlight.appStoreId` is its Apple ID), and an internal
+     tester group with access to all builds.
+
+   Set `apps` in `instance/config.ts`. Add the secrets
+   `NAP_APPLE_SIGNING_PEM` (the certificate's private key and certificate in
+   one PEM) and `NAP_ASC_PRIVATE_KEY` (the `.p8`), and the variables
+   `NAP_ASC_KEY_ID` and `NAP_ASC_ISSUER_ID`.
+
 8. **Voice (optional).** For calls on naps (`nap.voice`), create a TURN key:
    `cf realtime turn keys create --name nap`. Its `uid` is the variable
    `NAP_TURN_KEY_ID` and its `secret` is the secret `NAP_TURN_KEY_API_TOKEN`.
@@ -386,14 +394,16 @@ became ordinary sites in migration 0016 and move in the same way.
 
 ## Apps
 
-Native iOS prototypes in SwiftUI, installed ad hoc on registered iPhones.
-`napConfig.apps` turns them on and names the Apple team, the bundle id
-prefix, and the ad hoc profile. Nap never builds apps; it signs them:
+Native iOS prototypes in SwiftUI, installed ad hoc on registered iPhones,
+from TestFlight, or both. `napConfig.apps` turns them on and names the Apple
+team, the bundle id prefix, the ad hoc profile, and the TestFlight app. Nap
+never builds apps; it signs them:
 
 ```text
 agent → app repo (Artifacts) → Tuist project → xcodebuild without signing on a Mac
 agent → upload the zipped .app with sourceCommit → Nap checks the commit
 Nap → signer container (rcodesign) → signed .ipa in R2 → install link → iPhone
+                                   → App Store .ipa → App Store Connect → TestFlight
 ```
 
 - **Repos.** An app is one Artifacts repo (`app-<slug>`, in `SOURCES`) with a
@@ -419,7 +429,18 @@ Nap → signer container (rcodesign) → signed .ipa in R2 → install link → 
   signs each live build again from its unsigned zip: at once for a pasted UDID,
   at the next install for an enrollment. Apple allows 100 iPhones per team per
   membership year.
-- **Installing.** The dashboard's `/apps` page makes an `itms-services` link.
+- **TestFlight.** With `apps.testFlight`, the launcher of `testFlight.app` is
+  also signed with the App Store profile for the app record's explicit bundle
+  id, without the profile's wildcard entitlements, and uploaded to App Store
+  Connect with the build upload API before it goes live. Its build number goes
+  above every build App Store Connect has. Apple then processes it for
+  internal testers; Nap asks Apple how far it got when someone looks at
+  `/apps`, at most every few seconds per build, and keeps the state on the
+  build. Without ad hoc, the TestFlight launcher is the only thing Nap
+  publishes and the only app: there are no install links, no iPhones, and no
+  paths without Access for them. TestFlight builds need an app icon and
+  `ITSAppUsesNonExemptEncryption`; the template has both.
+- **Installing.** Ad hoc: the dashboard's `/apps` page makes an `itms-services` link.
   iOS fetches the manifest and the `.ipa` from `/_nap/install/<token>/`
   without the Access cookie, so each link is a token for one build that lasts
   an hour.

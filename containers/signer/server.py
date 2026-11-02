@@ -5,7 +5,8 @@ Body: a zip of an unsigned iOS .app (built with CODE_SIGNING_ALLOWED=NO).
 Headers:
   x-bundle-id      the bundle id Nap assigns, e.g. com.example.nap.launcher
   x-build-number   CFBundleVersion, assigned by Nap
-  x-profile        the ad hoc provisioning profile, base64
+  x-profile        the provisioning profile, base64
+  x-distribution   "ad-hoc" (default) or "app-store", for TestFlight
 Environment:
   SIGNING_PEM      the distribution private key and certificate, PEM
 
@@ -70,7 +71,31 @@ def check_executable(path: str):
         )
 
 
-def sign(body: bytes, bundle_id: str, build_number: str, profile_bytes: bytes):
+def app_store_entitlements(entitlements: dict) -> dict:
+    """
+    What an App Store build may claim: the profile's entitlements without its wildcards (such as
+    the keychain group TEAM.*), which only say what the profile allows. App Store Connect refuses
+    builds that claim wildcards.
+    """
+    kept = {}
+    for key, value in entitlements.items():
+        if key == "keychain-access-groups":
+            continue
+        if isinstance(value, str) and value.endswith("*"):
+            continue
+        if isinstance(value, list) and any(isinstance(v, str) and v.endswith("*") for v in value):
+            continue
+        kept[key] = value
+    return kept
+
+
+def sign(
+    body: bytes,
+    bundle_id: str,
+    build_number: str,
+    profile_bytes: bytes,
+    distribution: str = "ad-hoc",
+):
     pem = os.environ.get("SIGNING_PEM", "")
     if "PRIVATE KEY" not in pem or "CERTIFICATE" not in pem:
         raise RuntimeError("SIGNING_PEM is not set")
@@ -78,6 +103,8 @@ def sign(body: bytes, bundle_id: str, build_number: str, profile_bytes: bytes):
         raise BuildError("Bad bundle id")
     if not build_number.isdigit():
         raise BuildError("Bad build number")
+    if distribution not in ("ad-hoc", "app-store"):
+        raise BuildError("Bad distribution")
 
     profile = read_profile(profile_bytes)
     team = profile["TeamIdentifier"][0]
@@ -89,6 +116,10 @@ def sign(body: bytes, bundle_id: str, build_number: str, profile_bytes: bytes):
         raise BuildError("The provisioning profile has expired")
     entitlements["application-identifier"] = app_id
     entitlements["get-task-allow"] = False
+    if distribution == "app-store":
+        if "beta-reports-active" not in entitlements:
+            raise BuildError("The profile is not an App Store profile")
+        entitlements = app_store_entitlements(entitlements)
 
     work = tempfile.mkdtemp()
     try:
@@ -119,6 +150,13 @@ def sign(body: bytes, bundle_id: str, build_number: str, profile_bytes: bytes):
         if not info.get("CFBundleExecutable") or not os.path.isfile(executable):
             raise BuildError("The app's executable is missing")
         check_executable(executable)
+        if distribution == "app-store" and not info.get("CFBundleIcons", {}).get(
+            "CFBundlePrimaryIcon", {}
+        ).get("CFBundleIconName"):
+            raise BuildError(
+                "TestFlight builds need an app icon: an AppIcon set in an asset catalog of the "
+                "launcher (the app template has one in Apps/Launcher/Resources)."
+            )
 
         info["CFBundleIdentifier"] = bundle_id
         info["CFBundleVersion"] = build_number
@@ -196,6 +234,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.headers.get("x-bundle-id", ""),
                 self.headers.get("x-build-number", ""),
                 profile,
+                self.headers.get("x-distribution", "") or "ad-hoc",
             )
         except BuildError as error:
             return self._json(400, {"error": str(error)})

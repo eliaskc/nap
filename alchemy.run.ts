@@ -338,7 +338,8 @@ export default Alchemy.Stack(
       yield* DraftUploadAccess;
       yield* AgentApiAccess;
       yield* ArtifactFrameAccess;
-      if (napConfig.apps) {
+      // Ad hoc only: install links and iPhone enrollment. TestFlight needs no path without Access.
+      if (napConfig.apps?.profileName) {
         yield* AppInstallAccess;
         yield* DeviceEnrollAccess;
       }

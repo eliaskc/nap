@@ -1,15 +1,26 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { ArrowLeftIcon, CheckIcon, DownloadIcon, PlusIcon, SmartphoneIcon } from "lucide-react";
+import {
+  ArrowLeftIcon,
+  CheckIcon,
+  CircleAlertIcon,
+  DownloadIcon,
+  ExternalLinkIcon,
+  PlusIcon,
+  SmartphoneIcon,
+} from "lucide-react";
 import * as React from "react";
 import { Badge } from "~/components/ui/badge";
 import { Button, buttonVariants } from "~/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "~/components/ui/card";
 import { Input } from "~/components/ui/input";
 import { Skeleton } from "~/components/ui/skeleton";
+import { Spinner } from "~/components/ui/spinner";
+import { napConfig } from "~/nap.config";
 
 /**
- * /apps — native apps people can install on a registered iPhone. Install opens an itms-services
- * link; iOS asks to confirm and installs, or updates the app in place.
+ * /apps — native apps. Ad hoc: people install on a registered iPhone; Install opens an
+ * itms-services link, and iOS asks to confirm and installs, or updates the app in place.
+ * TestFlight: one launcher goes to TestFlight, and this page shows Apple processing each build.
  */
 export const Route = createFileRoute("/apps")({
   validateSearch: (
@@ -36,7 +47,16 @@ type Build = {
   name: string;
   by: string;
   createdAt: string;
+  adHoc: boolean;
+  testFlight: { state: "processing" | "ready" | "failed"; error: string | null } | null;
 };
+
+type TestFlight = { app: string; target: string; url: string };
+
+/** The TestFlight app on the App Store. */
+const TESTFLIGHT_STORE_URL = "https://apps.apple.com/app/testflight/id899247664";
+/** While Apple processes a build, the page asks for news this often. */
+const PROCESSING_POLL_MS = 5000;
 
 type App = {
   slug: string;
@@ -49,6 +69,8 @@ type Device = { name: string; product: string; addedBy: string; createdAt: strin
 
 function AppsPage() {
   const [apps, setApps] = React.useState<Array<App> | null>(null);
+  const [adHoc, setAdHoc] = React.useState(false);
+  const [testFlight, setTestFlight] = React.useState<TestFlight | null>(null);
   const [error, setError] = React.useState("");
   const [installing, setInstalling] = React.useState("");
   const [devices, setDevices] = React.useState<Array<Device> | null>(null);
@@ -65,13 +87,43 @@ function AppsPage() {
     [],
   );
 
-  React.useEffect(() => {
+  const loadApps = React.useCallback(() => {
     fetch("/api/apps")
-      .then((response) => response.json() as Promise<{ apps: Array<App> }>)
-      .then((data) => setApps(data.apps))
+      .then(
+        (response) =>
+          response.json() as Promise<{
+            apps: Array<App>;
+            adHoc: boolean;
+            testFlight: TestFlight | null;
+          }>,
+      )
+      .then((data) => {
+        setApps(data.apps);
+        setAdHoc(data.adHoc);
+        setTestFlight(data.testFlight);
+        if (data.adHoc) loadDevices();
+      })
       .catch(() => setError("Could not load apps."));
-    loadDevices();
   }, []);
+
+  React.useEffect(() => loadApps(), [loadApps]);
+
+  const processing = Boolean(
+    apps?.some((app) =>
+      app.targets.some((target) => target.live?.testFlight?.state === "processing"),
+    ),
+  );
+  React.useEffect(() => {
+    if (!processing) return;
+    const timer = window.setInterval(loadApps, PROCESSING_POLL_MS);
+    return () => window.clearInterval(timer);
+  }, [processing, loadApps]);
+
+  const testFlightBuild =
+    testFlight &&
+    apps
+      ?.find((app) => app.slug === testFlight.app)
+      ?.targets.find((target) => target.target === testFlight.target)?.live;
 
   function loadDevices() {
     fetch("/api/devices")
@@ -132,7 +184,45 @@ function AppsPage() {
         <h1 className="text-xl font-semibold">Apps</h1>
       </div>
 
-      {!isIOS && (
+      {testFlight && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Install from TestFlight</CardTitle>
+            <CardDescription>
+              Get Apple's TestFlight app, accept the invite email from TestFlight, and install{" "}
+              {testFlightBuild?.name || "the app"} there. TestFlight updates it after each publish.
+              No invite? Ask {napConfig.admin} to add you as a tester.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-3">
+            {testFlightBuild?.testFlight && (
+              <TestFlightStatus
+                buildNumber={testFlightBuild.buildNumber}
+                status={testFlightBuild.testFlight}
+              />
+            )}
+            <div className="flex flex-wrap gap-2">
+              {isIOS ? (
+                <a href={testFlight.url} className={buttonVariants()}>
+                  <ExternalLinkIcon data-icon="inline-start" />
+                  Open in TestFlight
+                </a>
+              ) : null}
+              <a
+                href={TESTFLIGHT_STORE_URL}
+                target="_blank"
+                rel="noreferrer"
+                className={buttonVariants({ variant: isIOS ? "outline" : "default" })}
+              >
+                <DownloadIcon data-icon="inline-start" />
+                Get TestFlight
+              </a>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {adHoc && !isIOS && (
         <p className="text-sm text-muted-foreground">
           Open this page in Safari on an added iPhone to install.
         </p>
@@ -179,6 +269,9 @@ function AppsPage() {
                       {target.live && (
                         <Badge variant="secondary">Build {target.live.buildNumber}</Badge>
                       )}
+                      {target.live?.testFlight && (
+                        <TestFlightBadge state={target.live.testFlight.state} />
+                      )}
                     </div>
                     {target.live ? (
                       <span className="truncate text-xs text-muted-foreground">
@@ -191,14 +284,18 @@ function AppsPage() {
                       <span className="text-xs text-muted-foreground">No build yet</span>
                     )}
                   </div>
-                  <Button
-                    size="sm"
-                    disabled={!target.live || installing === `${app.slug}/${target.target}`}
-                    onClick={() => install(app.slug, target.target)}
-                  >
-                    <DownloadIcon data-icon="inline-start" />
-                    Install
-                  </Button>
+                  {adHoc && (
+                    <Button
+                      size="sm"
+                      disabled={
+                        !target.live?.adHoc || installing === `${app.slug}/${target.target}`
+                      }
+                      onClick={() => install(app.slug, target.target)}
+                    >
+                      <DownloadIcon data-icon="inline-start" />
+                      Install
+                    </Button>
+                  )}
                 </div>
               ))}
               {app.targets.length === 0 && (
@@ -209,76 +306,125 @@ function AppsPage() {
         ))
       )}
 
-      <Card>
-        <CardHeader>
-          <CardTitle>iPhones</CardTitle>
-          <CardDescription>
-            Apps only install on iPhones added here. To find an iPhone's UDID, connect it to a Mac
-            with a cable, open System Information, and look under USB → iPhone → Serial Number (or
-            in Finder, click the text under the iPhone's name until the UDID shows).
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-4">
-          {devices && devices.length > 0 && (
-            <ul className="flex flex-col gap-1 text-sm">
-              {devices.map((device) => (
-                <li key={device.createdAt} className="flex items-center gap-2">
-                  <SmartphoneIcon className="size-4 text-muted-foreground" />
-                  {device.name || device.product || "iPhone"}
-                  <span className="truncate text-muted-foreground">added by {device.addedBy}</span>
-                </li>
-              ))}
-            </ul>
-          )}
-          {isIOS && (
-            <div className="flex flex-col gap-2">
-              <a
-                href="/api/devices/profile"
-                className={buttonVariants({ className: "self-start" })}
-              >
-                <SmartphoneIcon data-icon="inline-start" />
-                Add this iPhone
-              </a>
+      {adHoc && (
+        <Card>
+          <CardHeader>
+            <CardTitle>iPhones</CardTitle>
+            <CardDescription>
+              Apps only install on iPhones added here. To find an iPhone's UDID, connect it to a Mac
+              with a cable, open System Information, and look under USB → iPhone → Serial Number (or
+              in Finder, click the text under the iPhone's name until the UDID shows).
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-4">
+            {devices && devices.length > 0 && (
+              <ul className="flex flex-col gap-1 text-sm">
+                {devices.map((device) => (
+                  <li key={device.createdAt} className="flex items-center gap-2">
+                    <SmartphoneIcon className="size-4 text-muted-foreground" />
+                    {device.name || device.product || "iPhone"}
+                    <span className="truncate text-muted-foreground">
+                      added by {device.addedBy}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {isIOS && (
+              <div className="flex flex-col gap-2">
+                <a
+                  href="/api/devices/profile"
+                  className={buttonVariants({ className: "self-start" })}
+                >
+                  <SmartphoneIcon data-icon="inline-start" />
+                  Add this iPhone
+                </a>
+                <p className="text-xs text-muted-foreground">
+                  Tap Allow, then open Settings and tap Profile Downloaded to install it. iOS calls
+                  the profile unverified; that is expected, and nothing stays installed. Away from
+                  home, iOS may make you wait an hour first; the profile works for a day. Or paste a
+                  UDID below.
+                </p>
+              </div>
+            )}
+            <form onSubmit={addDevice} className="flex flex-col gap-2 sm:flex-row">
+              <Input
+                placeholder="Name, e.g. Alex's iPhone"
+                value={deviceName}
+                onChange={(event) => setDeviceName(event.target.value)}
+                className="sm:w-48"
+              />
+              <Input
+                placeholder="UDID, e.g. 00008120-001E31091E52201E"
+                value={udid}
+                onChange={(event) => setUdid(event.target.value)}
+                className="font-mono"
+                required
+              />
+              <Button type="submit" disabled={adding || !udid.trim()}>
+                <PlusIcon data-icon="inline-start" />
+                {adding ? "Adding…" : "Add"}
+              </Button>
+            </form>
+            {adding && (
               <p className="text-xs text-muted-foreground">
-                Tap Allow, then open Settings and tap Profile Downloaded to install it. iOS calls
-                the profile unverified; that is expected, and nothing stays installed. Away from
-                home, iOS may make you wait an hour first; the profile works for a day. Or paste a
-                UDID below.
+                Registering it with Apple and signing the apps again. This can take a minute.
               </p>
-            </div>
-          )}
-          <form onSubmit={addDevice} className="flex flex-col gap-2 sm:flex-row">
-            <Input
-              placeholder="Name, e.g. Alex's iPhone"
-              value={deviceName}
-              onChange={(event) => setDeviceName(event.target.value)}
-              className="sm:w-48"
-            />
-            <Input
-              placeholder="UDID, e.g. 00008120-001E31091E52201E"
-              value={udid}
-              onChange={(event) => setUdid(event.target.value)}
-              className="font-mono"
-              required
-            />
-            <Button type="submit" disabled={adding || !udid.trim()}>
-              <PlusIcon data-icon="inline-start" />
-              {adding ? "Adding…" : "Add"}
-            </Button>
-          </form>
-          {adding && (
-            <p className="text-xs text-muted-foreground">
-              Registering it with Apple and signing the apps again. This can take a minute.
-            </p>
-          )}
-          {added && (
-            <p className="flex items-center gap-2 text-sm">
-              <CheckIcon className="size-4 text-primary" />
-              {added}
-            </p>
-          )}
-        </CardContent>
-      </Card>
+            )}
+            {added && (
+              <p className="flex items-center gap-2 text-sm">
+                <CheckIcon className="size-4 text-primary" />
+                {added}
+              </p>
+            )}
+          </CardContent>
+        </Card>
+      )}
     </div>
+  );
+}
+
+function TestFlightBadge({ state }: { state: "processing" | "ready" | "failed" }) {
+  if (state === "processing") {
+    return (
+      <Badge variant="outline">
+        <Spinner data-icon="inline-start" />
+        Processing
+      </Badge>
+    );
+  }
+  if (state === "failed") return <Badge variant="destructive">TestFlight failed</Badge>;
+  return <Badge variant="outline">In TestFlight</Badge>;
+}
+
+/** Where the TestFlight launcher's live build is, in words. */
+function TestFlightStatus({
+  buildNumber,
+  status,
+}: {
+  buildNumber: number;
+  status: NonNullable<Build["testFlight"]>;
+}) {
+  if (status.state === "processing") {
+    return (
+      <p className="flex items-center gap-2 text-sm">
+        <Spinner className="text-muted-foreground" />
+        Apple is processing build {buildNumber}. It reaches TestFlight in a few minutes.
+      </p>
+    );
+  }
+  if (status.state === "failed") {
+    return (
+      <p className="flex items-start gap-2 text-sm text-destructive">
+        <CircleAlertIcon className="mt-0.5 size-4 shrink-0" />
+        Build {buildNumber} did not reach TestFlight. {status.error}
+      </p>
+    );
+  }
+  return (
+    <p className="flex items-center gap-2 text-sm">
+      <CheckIcon className="size-4 text-primary" />
+      Build {buildNumber} is in TestFlight.
+    </p>
   );
 }

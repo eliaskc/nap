@@ -8,8 +8,8 @@ export const OPTIONAL_TOPICS: Record<string, (config: NapConfig) => boolean> = {
 
 /**
  * Fills in one instructions page for a deployment. Text between <!-- if <flag> --> and
- * <!-- /if --> shows only when the flag is on: "apps" when apps are on, and "private" or
- * "everyone" for the default access.
+ * <!-- /if --> shows only when the flag is on: "apps" when apps are on, "adhoc" and "testflight"
+ * for how people install them, and "private" or "everyone" for the default access.
  */
 export function renderInstructions(
   text: string,
@@ -18,6 +18,8 @@ export function renderInstructions(
 ) {
   const flags: Record<string, boolean> = {
     apps: Boolean(config.apps),
+    adhoc: Boolean(config.apps?.profileName),
+    testflight: Boolean(config.apps?.testFlight),
     private: config.defaultAccess === "private",
     everyone: config.defaultAccess === "everyone",
   };
@@ -28,5 +30,8 @@ export function renderInstructions(
       return flags[flag] ? inner : "";
     },
   );
-  return fillDeploymentText(shown.replace(/\n{3,}/g, "\n\n"), { ...config, rootDomain });
+  return fillDeploymentText(shown.replace(/\n{3,}/g, "\n\n"), { ...config, rootDomain }).replaceAll(
+    "{{testFlightApp}}",
+    config.apps?.testFlight?.app ?? "",
+  );
 }

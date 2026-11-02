@@ -32,11 +32,14 @@ let prototypes: [Prototype] = (
 func moduleName(_ slug: String) -> String { "Proto_" + slug.replacingOccurrences(of: "-", with: "_") }
 
 let ios: DeploymentTargets = .iOS("18.0")
-let appInfo: InfoPlist = .extendingDefault(with: [
-  "UILaunchScreen": [:],
-  "CFBundleShortVersionString": "1.0",
-  "CFBundleVersion": "1",
-])
+// iPhone only, and no encryption beyond HTTPS: TestFlight needs both answered (iPad apps need
+// iPad icons and every orientation; the encryption key saves a question in App Store Connect).
+let iPhone: Destinations = [.iPhone]
+let orientations: Plist.Value = [
+  "UIInterfaceOrientationPortrait",
+  "UIInterfaceOrientationLandscapeLeft",
+  "UIInterfaceOrientationLandscapeRight",
+]
 
 let modules: [Target] = prototypes.map { prototype in
   .target(
@@ -52,7 +55,7 @@ let modules: [Target] = prototypes.map { prototype in
 
 let launcher: Target = .target(
   name: "Launcher",
-  destinations: .iOS,
+  destinations: iPhone,
   product: .app,
   productName: "Nap",
   bundleId: "nap.launcher",
@@ -62,15 +65,19 @@ let launcher: Target = .target(
     "CFBundleDisplayName": "Nap",
     "CFBundleShortVersionString": "1.0",
     "CFBundleVersion": "1",
+    "ITSAppUsesNonExemptEncryption": false,
+    "UISupportedInterfaceOrientations": orientations,
   ]),
   sources: ["Apps/Launcher/Sources/**", "Generated/Launcher/**"],
+  // The app icon: TestFlight refuses builds without one. Replace icon.png (1024 x 1024, no alpha).
+  resources: ["Apps/Launcher/Resources/**"],
   dependencies: prototypes.map { .target(name: moduleName($0.slug)) }
 )
 
 let standalone: [Target] = prototypes.filter(\.standalone).map { prototype in
   .target(
     name: "Standalone_" + prototype.slug.replacingOccurrences(of: "-", with: "_"),
-    destinations: .iOS,
+    destinations: iPhone,
     product: .app,
     productName: prototype.slug,
     bundleId: "nap.\(prototype.slug)",
@@ -80,6 +87,8 @@ let standalone: [Target] = prototypes.filter(\.standalone).map { prototype in
       "CFBundleDisplayName": .string(prototype.title),
       "CFBundleShortVersionString": "1.0",
       "CFBundleVersion": "1",
+      "ITSAppUsesNonExemptEncryption": false,
+      "UISupportedInterfaceOrientations": orientations,
     ]),
     sources: ["Generated/Standalone/\(prototype.slug)/**"],
     dependencies: [.target(name: moduleName(prototype.slug))]

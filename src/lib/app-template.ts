@@ -13,13 +13,26 @@ const files = import.meta.glob("/templates/app/**/*", {
 
 const RENAMES: Record<string, string> = { gitignore: ".gitignore" };
 
+/**
+ * Binary files, such as the app icon, are kept as <name>.base64 and sent with encoding "base64":
+ * the template is bundled as text.
+ */
 export function appTemplateFiles() {
   return Object.entries(files)
     .map(([path, content]) => {
       const relative = path.replace(/^\/templates\/app\//, "");
+      if (relative.endsWith(".base64")) {
+        return {
+          path: relative.slice(0, -".base64".length),
+          content: content.replace(/\s+/g, ""),
+          encoding: "base64" as const,
+          executable: false,
+        };
+      }
       return {
         path: RENAMES[relative] ?? relative,
         content: content.replaceAll("{{rootDomain}}", napConfig.rootDomain),
+        encoding: "utf8" as const,
         executable: relative.startsWith("scripts/"),
       };
     })

@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { Effect } from "effect";
-import { appsEnabled } from "~/lib/apps";
+import { adHocEnabled } from "~/lib/apps";
 import { enrollmentProfile } from "~/lib/devices";
 import { signedIn } from "~/lib/nap-server";
 import { fail } from "~/server/http";
@@ -16,7 +16,7 @@ export const Route = createFileRoute("/api/devices/profile")({
       GET: ({ request }) =>
         route(
           Effect.gen(function* () {
-            if (!appsEnabled()) return yield* fail(404, "Not found");
+            if (!adHocEnabled()) return yield* fail(404, "Not found");
             const identity = yield* signedIn(request);
             const profile = yield* enrollmentProfile(identity.email, new URL(request.url).origin);
             return new Response(profile, {

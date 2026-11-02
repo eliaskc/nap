@@ -527,9 +527,12 @@ async function appCommand(options) {
     for (const file of template.data.files) {
       const path = join(dir, file.path);
       await mkdir(join(path, ".."), { recursive: true });
-      const content = file.content
-        .replaceAll("{{app}}", slug)
-        .replaceAll("{{title}}", created.data.app.title);
+      const content =
+        file.encoding === "base64"
+          ? Buffer.from(file.content, "base64")
+          : file.content
+              .replaceAll("{{app}}", slug)
+              .replaceAll("{{title}}", created.data.app.title);
       await writeFile(path, content, { mode: file.executable ? 0o755 : 0o644 });
     }
     const git = (...args) => {

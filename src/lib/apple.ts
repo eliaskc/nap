@@ -5,11 +5,13 @@ import { Settings } from "~/server/platform";
 import { Storage, tryStorage } from "~/server/storage";
 
 /**
- * Apple's side of apps: the App Store Connect API and the ad hoc provisioning profile.
+ * Apple's side of apps: the App Store Connect API, the provisioning profiles, and TestFlight.
  *
- * Nap signs with one Apple Distribution certificate and one ad hoc profile for a wildcard App ID
- * (<bundleIdPrefix>.*). The profile lists the devices that may install. Nap reads it by name
- * through the App Store Connect API and keeps a copy in R2, so signing does not call Apple.
+ * Nap signs with one Apple Distribution certificate. Ad hoc builds use a profile for a wildcard
+ * App ID (<bundleIdPrefix>.*) that lists the devices that may install. TestFlight builds use an
+ * App Store profile for the app record's explicit bundle id, and Nap uploads them with the build
+ * upload API. Nap reads profiles by name through the App Store Connect API and keeps a copy in
+ * R2, so signing does not call Apple.
  */
 
 const PROFILE_KEY = "apps/_signing/adhoc.mobileprovision";
@@ -76,17 +78,42 @@ type ProfileList = {
 
 export type SigningProfile = { id: string; bytes: Uint8Array };
 
-const profileName = Effect.suspend(() =>
-  napConfig.apps
-    ? Effect.succeed(napConfig.apps.profileName)
-    : Effect.fail(new AppleError({ message: "Apps are off on this Nap" })),
-);
+/**
+ * The two ways Nap signs: "adhoc" for every target, installed from /apps on registered iPhones,
+ * and "appstore" for the TestFlight launcher, uploaded to App Store Connect.
+ */
+export type Distribution = "adhoc" | "appstore";
 
-/** The active ad hoc profile with Nap's profile name, from Apple. */
-const currentProfile = Effect.fnUntraced(function* () {
-  const name = yield* profileName;
+const PROFILES = {
+  adhoc: { type: "IOS_APP_ADHOC", key: PROFILE_KEY, label: "ad hoc" },
+  appstore: {
+    type: "IOS_APP_STORE",
+    key: "apps/_signing/appstore.mobileprovision",
+    label: "App Store",
+  },
+} as const;
+
+const profileName = (kind: Distribution) =>
+  Effect.suspend(() => {
+    const name =
+      kind === "adhoc" ? napConfig.apps?.profileName : napConfig.apps?.testFlight?.profileName;
+    return name
+      ? Effect.succeed(name)
+      : Effect.fail(
+          new AppleError({
+            message:
+              kind === "adhoc"
+                ? "Ad hoc installs are off on this Nap"
+                : "TestFlight is off on this Nap",
+          }),
+        );
+  });
+
+/** The active profile of a kind with Nap's profile name, from Apple. */
+const currentProfile = Effect.fnUntraced(function* (kind: Distribution) {
+  const name = yield* profileName(kind);
   const list = yield* appStoreConnect<ProfileList>(
-    `profiles?filter[name]=${encodeURIComponent(name)}&filter[profileType]=IOS_APP_ADHOC&limit=10`,
+    `profiles?filter[name]=${encodeURIComponent(name)}&filter[profileType]=${PROFILES[kind].type}&limit=10`,
   );
   return (
     list.data.find(
@@ -95,25 +122,28 @@ const currentProfile = Effect.fnUntraced(function* () {
   );
 });
 
-const storeProfile = Effect.fnUntraced(function* (id: string, content: string) {
+const storeProfile = Effect.fnUntraced(function* (kind: Distribution, id: string, content: string) {
   const storage = yield* Storage;
   const bytes = Uint8Array.from(atob(content), (c) => c.charCodeAt(0));
-  yield* storage.put(PROFILE_KEY, bytes, {
+  yield* storage.put(PROFILES[kind].key, bytes, {
     customMetadata: { profileId: id, fetchedAt: new Date().toISOString() },
   });
   const profile: SigningProfile = { id, bytes };
   return profile;
 });
 
-/** Fetches the ad hoc profile from Apple by name and stores it in R2. */
-export const refreshProfile = Effect.fn("refreshProfile")(function* () {
-  const profile = yield* currentProfile();
-  if (!profile) {
+const missingProfile = (kind: Distribution) =>
+  Effect.gen(function* () {
     return yield* new AppleError({
-      message: `No active ad hoc profile named "${yield* profileName}"`,
+      message: `No active ${PROFILES[kind].label} profile named "${yield* profileName(kind)}"`,
     });
-  }
-  return yield* storeProfile(profile.id, profile.attributes.profileContent);
+  });
+
+/** Fetches a profile from Apple by name and stores it in R2. */
+export const refreshProfile = Effect.fn("refreshProfile")(function* (kind: Distribution = "adhoc") {
+  const profile = yield* currentProfile(kind);
+  if (!profile) return yield* missingProfile(kind);
+  return yield* storeProfile(kind, profile.id, profile.attributes.profileContent);
 });
 
 /** How long the copy in R2 is trusted before Nap asks Apple again. */
@@ -123,9 +153,9 @@ const PROFILE_TTL_MS = 60 * 60 * 1000;
  * The profile to sign with: the copy in R2 when it is under an hour old, else Apple's. If Apple
  * cannot be reached, the copy is still used.
  */
-export const signingProfile = Effect.fn("signingProfile")(function* () {
+export const signingProfile = Effect.fn("signingProfile")(function* (kind: Distribution = "adhoc") {
   const storage = yield* Storage;
-  const stored = yield* storage.get(PROFILE_KEY);
+  const stored = yield* storage.get(PROFILES[kind].key);
   const id = stored?.customMetadata?.profileId;
   const fetchedAt = Date.parse(stored?.customMetadata?.fetchedAt ?? "");
   if (stored && id) {
@@ -135,9 +165,9 @@ export const signingProfile = Effect.fn("signingProfile")(function* () {
     };
     if (Date.now() - fetchedAt < PROFILE_TTL_MS) return copy;
     // Any failure, expected or not, falls back to the copy.
-    return yield* refreshProfile().pipe(Effect.catchCause(() => Effect.succeed(copy)));
+    return yield* refreshProfile(kind).pipe(Effect.catchCause(() => Effect.succeed(copy)));
   }
-  return yield* refreshProfile();
+  return yield* refreshProfile(kind);
 });
 
 type DeviceList = {
@@ -177,12 +207,8 @@ export const registerDevice = Effect.fn("registerDevice")(function* (udid: strin
  * one and creates one with the same name.
  */
 export const regenerateProfile = Effect.fn("regenerateProfile")(function* () {
-  const old = yield* currentProfile();
-  if (!old) {
-    return yield* new AppleError({
-      message: `No active ad hoc profile named "${yield* profileName}"`,
-    });
-  }
+  const old = yield* currentProfile("adhoc");
+  if (!old) return yield* missingProfile("adhoc");
   const [bundle, certificates, devices] = yield* Effect.all(
     [
       appStoreConnect<{ data: { id: string } }>(`profiles/${old.id}/bundleId`),
@@ -197,7 +223,7 @@ export const regenerateProfile = Effect.fn("regenerateProfile")(function* () {
     body: {
       data: {
         type: "profiles",
-        attributes: { name: yield* profileName, profileType: "IOS_APP_ADHOC" },
+        attributes: { name: yield* profileName("adhoc"), profileType: "IOS_APP_ADHOC" },
         relationships: {
           bundleId: { data: { type: "bundleIds", id: bundle.data.id } },
           certificates: {
@@ -208,7 +234,210 @@ export const regenerateProfile = Effect.fn("regenerateProfile")(function* () {
       },
     },
   });
-  return yield* storeProfile(created.data.id, created.data.attributes.profileContent);
+  return yield* storeProfile("adhoc", created.data.id, created.data.attributes.profileContent);
+});
+
+// ---- TestFlight ----
+
+const testFlightApp = Effect.suspend(() => {
+  const testFlight = napConfig.apps?.testFlight;
+  return testFlight
+    ? Effect.succeed(testFlight)
+    : Effect.fail(new AppleError({ message: "TestFlight is off on this Nap" }));
+});
+
+type VersionList = { data: Array<{ attributes: { version?: string; cfBundleVersion?: string } }> };
+
+/**
+ * The highest build number App Store Connect has for the TestFlight app, from uploads and builds,
+ * or 0. Build numbers must go up, and builds can also arrive from Xcode or an earlier Nap.
+ */
+export const latestTestFlightBuildNumber = Effect.fn("latestTestFlightBuildNumber")(function* () {
+  const { appStoreId } = yield* testFlightApp;
+  const [uploads, builds] = yield* Effect.all(
+    [
+      appStoreConnect<VersionList>(
+        `apps/${appStoreId}/buildUploads?fields[buildUploads]=cfBundleVersion&sort=-uploadedDate&limit=200`,
+      ),
+      appStoreConnect<VersionList>(
+        `builds?filter[app]=${appStoreId}&fields[builds]=version&sort=-uploadedDate&limit=200`,
+      ),
+    ],
+    { concurrency: "unbounded" },
+  );
+  let latest = 0;
+  for (const item of [...uploads.data, ...builds.data]) {
+    const value = Number(item.attributes.cfBundleVersion ?? item.attributes.version);
+    if (Number.isInteger(value) && value > latest) latest = value;
+  }
+  return latest;
+});
+
+type UploadOperation = {
+  method: string;
+  url: string;
+  offset: number;
+  length: number;
+  requestHeaders?: Array<{ name: string; value: string }>;
+};
+
+/**
+ * Uploads a signed .ipa from R2 to App Store Connect with the build upload API and returns the
+ * upload's id. Apple processes it afterwards; buildUploadStatus follows that.
+ */
+export const uploadToTestFlight = Effect.fn("uploadToTestFlight")(function* (
+  ipaKey: string,
+  shortVersion: string,
+  buildNumber: number,
+) {
+  const { appStoreId } = yield* testFlightApp;
+  const storage = yield* Storage;
+  const head = yield* storage.head(ipaKey);
+  if (!head) return yield* new AppleError({ message: "The signed build is missing" });
+
+  const upload = yield* appStoreConnect<{ data: { id: string } }>("buildUploads", {
+    method: "POST",
+    body: {
+      data: {
+        type: "buildUploads",
+        attributes: {
+          cfBundleShortVersionString: shortVersion || "1.0",
+          cfBundleVersion: String(buildNumber),
+          platform: "IOS",
+        },
+        relationships: { app: { data: { type: "apps", id: appStoreId } } },
+      },
+    },
+  });
+  const file = yield* appStoreConnect<{
+    data: { id: string; attributes: { uploadOperations: Array<UploadOperation> } };
+  }>("buildUploadFiles", {
+    method: "POST",
+    body: {
+      data: {
+        type: "buildUploadFiles",
+        attributes: {
+          assetType: "ASSET",
+          fileName: "app.ipa",
+          fileSize: head.size,
+          uti: "com.apple.ipa",
+        },
+        relationships: { buildUpload: { data: { type: "buildUploads", id: upload.data.id } } },
+      },
+    },
+  });
+
+  for (const operation of file.data.attributes.uploadOperations) {
+    const part = yield* storage.get(ipaKey, {
+      range: { offset: operation.offset, length: operation.length },
+    });
+    if (!part) return yield* new AppleError({ message: "The signed build is missing" });
+    const { readable, writable } = new FixedLengthStream(operation.length);
+    void part.body.pipeTo(writable).catch(() => undefined);
+    const response = yield* Effect.promise(() =>
+      fetch(operation.url, {
+        method: operation.method,
+        headers: Object.fromEntries(
+          (operation.requestHeaders ?? []).map((header) => [header.name, header.value]),
+        ),
+        body: readable,
+      }),
+    );
+    if (!response.ok) {
+      return yield* new AppleError({
+        message: `Uploading to App Store Connect failed (${response.status})`,
+      });
+    }
+  }
+
+  const whole = yield* storage.get(ipaKey);
+  if (!whole) return yield* new AppleError({ message: "The signed build is missing" });
+  // Workers' crypto.DigestStream hashes a stream; the DOM types do not know it.
+  const { DigestStream: Digest } = crypto as unknown as { DigestStream: typeof DigestStream };
+  const digest = new Digest("MD5");
+  yield* Effect.promise(() => whole.body.pipeTo(digest));
+  const md5 = [...new Uint8Array(yield* Effect.promise(() => digest.digest))]
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+  yield* appStoreConnect(`buildUploadFiles/${file.data.id}`, {
+    method: "PATCH",
+    body: {
+      data: {
+        type: "buildUploadFiles",
+        id: file.data.id,
+        attributes: {
+          uploaded: true,
+          sourceFileChecksums: { file: { hash: md5, algorithm: "MD5" } },
+        },
+      },
+    },
+  });
+  return upload.data.id;
+});
+
+/** Where a TestFlight build is: Apple still processing it, ready for testers, or failed. */
+export type TestFlightStatus =
+  | { state: "processing" }
+  | { state: "ready" }
+  | { state: "failed"; error: string };
+
+type StateDetails = Array<{ code?: string; description?: string }>;
+
+const describeDetails = (details: StateDetails | undefined, fallback: string) =>
+  (details ?? [])
+    .map((detail) => detail.description || detail.code)
+    .filter(Boolean)
+    .join(" ")
+    .slice(0, 1000) || fallback;
+
+/** Asks App Store Connect where an upload is. */
+export const buildUploadStatus = Effect.fn("buildUploadStatus")(function* (uploadId: string) {
+  const upload = yield* appStoreConnect<{
+    data: {
+      attributes: { state?: { state?: string; errors?: StateDetails } };
+      relationships?: { build?: { data?: { id: string } | null } };
+    };
+    included?: Array<{ type: string; id: string; attributes: { processingState?: string } }>;
+  }>(`buildUploads/${uploadId}?include=build&fields[builds]=processingState`);
+  const state = upload.data.attributes.state;
+  if (state?.state === "FAILED") {
+    return {
+      state: "failed",
+      error: describeDetails(state.errors, "App Store Connect did not accept the build."),
+    } satisfies TestFlightStatus;
+  }
+  const buildId = upload.data.relationships?.build?.data?.id;
+  if (state?.state !== "COMPLETE" || !buildId) return { state: "processing" } as TestFlightStatus;
+  const build = upload.included?.find((item) => item.type === "builds" && item.id === buildId);
+  const processing = build?.attributes.processingState;
+  if (processing === "FAILED" || processing === "INVALID") {
+    return {
+      state: "failed",
+      error: "Apple could not process the build. App Store Connect has the details.",
+    } satisfies TestFlightStatus;
+  }
+  if (processing !== "VALID") return { state: "processing" } as TestFlightStatus;
+  const beta = yield* appStoreConnect<{ data: { attributes: { internalBuildState?: string } } }>(
+    `builds/${buildId}/buildBetaDetail`,
+  );
+  switch (beta.data.attributes.internalBuildState) {
+    case "READY_FOR_BETA_TESTING":
+    case "IN_BETA_TESTING":
+      return { state: "ready" } as TestFlightStatus;
+    case "MISSING_EXPORT_COMPLIANCE":
+      return {
+        state: "failed",
+        error:
+          "The build needs an export compliance answer. Set ITSAppUsesNonExemptEncryption in its Info.plist, or answer in App Store Connect.",
+      } satisfies TestFlightStatus;
+    case "EXPIRED":
+      return {
+        state: "failed",
+        error: "The build expired in TestFlight.",
+      } satisfies TestFlightStatus;
+    default:
+      return { state: "processing" } as TestFlightStatus;
+  }
 });
 
 /** The bundle id of a target. Only called where apps are on (the apps API checks first). */

@@ -8,7 +8,8 @@ prototype can also be its own app.
 - `Prototypes/<slug>/` is one prototype: `prototype.json` (title, summary, standalone), `Sources/`
   with a `public struct PrototypeView: View`, and optional `Resources/`. Slugs are lowercase
   letters, numbers, and hyphens. To start one, copy `Prototypes/hello`.
-- `Apps/Launcher/` is the launcher.
+- `Apps/Launcher/` is the launcher. Its app icon is `Resources/Assets.xcassets/AppIcon.appiconset/icon.png`
+  (1024 x 1024, no transparency); replace it, but keep one: TestFlight refuses builds without it.
 - `Project.swift` finds prototypes by folder. Never edit or commit an `.xcodeproj`: it is generated.
 - `nap.json` names the app on Nap.
 
@@ -35,4 +36,6 @@ Test in the Simulator while you work: open the generated project in Xcode, or
 
 - No capabilities that need entitlements (push notifications, App Groups, iCloud, Sign in with
   Apple): the signing profile is a wildcard App ID. Networking, WebSockets, and audio are fine.
+- iPhone only, and `ITSAppUsesNonExemptEncryption` stays false (HTTPS is exempt): TestFlight
+  needs both.
 - No Swift packages from the internet unless you need them: builds should stay seconds long.

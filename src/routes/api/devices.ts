@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { Effect } from "effect";
-import { appsEnabled } from "~/lib/apps";
+import { adHocEnabled } from "~/lib/apps";
 import { addDevice, listDevices } from "~/lib/devices";
 import { signedIn } from "~/lib/nap-server";
 import { fail, json, noStore, readJsonObject, requireSameSite, stringField } from "~/server/http";
@@ -24,7 +24,7 @@ export const Route = createFileRoute("/api/devices")({
         route(
           Effect.gen(function* () {
             yield* requireSameSite(request);
-            if (!appsEnabled()) return yield* fail(404, "Not found");
+            if (!adHocEnabled()) return yield* fail(404, "Not found");
             const identity = yield* signedIn(request);
             const body = yield* readJsonObject(request);
             return yield* addDevice(identity.email, stringField(body.udid), stringField(body.name));

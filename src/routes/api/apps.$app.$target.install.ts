@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { Effect } from "effect";
-import { appsEnabled, installLiveBuild } from "~/lib/apps";
+import { adHocEnabled, installLiveBuild } from "~/lib/apps";
 import { signedIn, slugify } from "~/lib/nap-server";
 import { fail, json, noStore, requireSameSite } from "~/server/http";
 import { route } from "~/server/route";
@@ -16,7 +16,7 @@ export const Route = createFileRoute("/api/apps/$app/$target/install")({
         route(
           Effect.gen(function* () {
             yield* requireSameSite(request);
-            if (!appsEnabled()) return yield* fail(404, "Not found");
+            if (!adHocEnabled()) return yield* fail(404, "Not found");
             const identity = yield* signedIn(request);
             const install = yield* installLiveBuild(
               identity.email,

@@ -27,7 +27,7 @@ sites/<slug>/versions/<version_id>/<path>
 
 - Serve from D1 `sites.current_version`; never overwrite live files in place.
 - Use email as the stable identity key.
-- Nap never builds apps either: agents upload unsigned iOS builds with their commit, and only the `SIGNER` container holds the signing certificate. Never sign on a laptop or in CI. Templates for app repos are in `templates/app`.
+- Nap never builds apps either: agents upload unsigned iOS builds with their commit, and only the `SIGNER` container holds the signing certificate. Never sign on a laptop or in CI. Nap uploads TestFlight builds to App Store Connect itself. Templates for app repos are in `templates/app`.
 - Nap never runs Git or builds sites. Agents push source to a site's Artifacts repo and publish the build with its commit; `src/lib/sources.ts` checks that commit. Use the `cf` CLI to inspect or clean up Artifacts repos.
 - Keep production private. `workers_dev` and `preview_urls` are bypass URLs that can avoid Cloudflare Access. They must be `false` in production:
 
@@ -102,6 +102,7 @@ pnpm run build
 pnpm test
 pnpm test:http
 pnpm test:apps
+pnpm test:testflight
 pnpm infra:inventory
 pnpm plan
 pnpm run deploy
