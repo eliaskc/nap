@@ -10,8 +10,10 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as WelcomeRouteImport } from './routes/welcome'
+import { Route as InstallRouteImport } from './routes/install'
 import { Route as ConnectRouteImport } from './routes/connect'
 import { Route as AppsRouteImport } from './routes/apps'
+import { Route as AppRouteImport } from './routes/app'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as DevClaimRouteImport } from './routes/dev.claim'
 import { Route as ClaimIdRouteImport } from './routes/claim.$id'
@@ -44,6 +46,11 @@ const WelcomeRoute = WelcomeRouteImport.update({
   path: '/welcome',
   getParentRoute: () => rootRouteImport,
 } as any)
+const InstallRoute = InstallRouteImport.update({
+  id: '/install',
+  path: '/install',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ConnectRoute = ConnectRouteImport.update({
   id: '/connect',
   path: '/connect',
@@ -52,6 +59,11 @@ const ConnectRoute = ConnectRouteImport.update({
 const AppsRoute = AppsRouteImport.update({
   id: '/apps',
   path: '/apps',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AppRoute = AppRouteImport.update({
+  id: '/app',
+  path: '/app',
   getParentRoute: () => rootRouteImport,
 } as any)
 const IndexRoute = IndexRouteImport.update({
@@ -187,8 +199,10 @@ const ApiAppsAppTargetInstallRoute = ApiAppsAppTargetInstallRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/app': typeof AppRoute
   '/apps': typeof AppsRoute
   '/connect': typeof ConnectRoute
+  '/install': typeof InstallRoute
   '/welcome': typeof WelcomeRoute
   '/api/apps': typeof ApiAppsRouteWithChildren
   '/api/devices': typeof ApiDevicesRouteWithChildren
@@ -218,8 +232,10 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/app': typeof AppRoute
   '/apps': typeof AppsRoute
   '/connect': typeof ConnectRoute
+  '/install': typeof InstallRoute
   '/welcome': typeof WelcomeRoute
   '/api/apps': typeof ApiAppsRouteWithChildren
   '/api/devices': typeof ApiDevicesRouteWithChildren
@@ -250,8 +266,10 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/app': typeof AppRoute
   '/apps': typeof AppsRoute
   '/connect': typeof ConnectRoute
+  '/install': typeof InstallRoute
   '/welcome': typeof WelcomeRoute
   '/api/apps': typeof ApiAppsRouteWithChildren
   '/api/devices': typeof ApiDevicesRouteWithChildren
@@ -283,8 +301,10 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/app'
     | '/apps'
     | '/connect'
+    | '/install'
     | '/welcome'
     | '/api/apps'
     | '/api/devices'
@@ -314,8 +334,10 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/app'
     | '/apps'
     | '/connect'
+    | '/install'
     | '/welcome'
     | '/api/apps'
     | '/api/devices'
@@ -345,8 +367,10 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/'
+    | '/app'
     | '/apps'
     | '/connect'
+    | '/install'
     | '/welcome'
     | '/api/apps'
     | '/api/devices'
@@ -377,8 +401,10 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  AppRoute: typeof AppRoute
   AppsRoute: typeof AppsRoute
   ConnectRoute: typeof ConnectRoute
+  InstallRoute: typeof InstallRoute
   WelcomeRoute: typeof WelcomeRoute
   ApiAppsRoute: typeof ApiAppsRouteWithChildren
   ApiDevicesRoute: typeof ApiDevicesRouteWithChildren
@@ -406,6 +432,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof WelcomeRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/install': {
+      id: '/install'
+      path: '/install'
+      fullPath: '/install'
+      preLoaderRoute: typeof InstallRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/connect': {
       id: '/connect'
       path: '/connect'
@@ -418,6 +451,13 @@ declare module '@tanstack/react-router' {
       path: '/apps'
       fullPath: '/apps'
       preLoaderRoute: typeof AppsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/app': {
+      id: '/app'
+      path: '/app'
+      fullPath: '/app'
+      preLoaderRoute: typeof AppRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/': {
@@ -696,8 +736,10 @@ const ApiDraftsIdRouteWithChildren = ApiDraftsIdRoute._addFileChildren(
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  AppRoute: AppRoute,
   AppsRoute: AppsRoute,
   ConnectRoute: ConnectRoute,
+  InstallRoute: InstallRoute,
   WelcomeRoute: WelcomeRoute,
   ApiAppsRoute: ApiAppsRouteWithChildren,
   ApiDevicesRoute: ApiDevicesRouteWithChildren,

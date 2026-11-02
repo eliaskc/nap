@@ -1,4 +1,12 @@
-import { CheckIcon, DownloadIcon, ExternalLinkIcon, SmartphoneIcon, XIcon } from "lucide-react";
+import {
+  CheckIcon,
+  CopyIcon,
+  DownloadIcon,
+  ExternalLinkIcon,
+  LinkIcon,
+  SmartphoneIcon,
+  XIcon,
+} from "lucide-react";
 import * as React from "react";
 import { renderSVG } from "uqr";
 import { Button } from "~/components/ui/button";
@@ -23,8 +31,8 @@ import { napConfig } from "~/nap.config";
 export const TESTFLIGHT_ENABLED = Boolean(napConfig.apps?.testFlight);
 /** The TestFlight app on the App Store. */
 const TESTFLIGHT_STORE_URL = "https://apps.apple.com/app/testflight/id899247664";
-/** ?app opens the panel: where the QR code sends people who are not testers yet. */
-const OPEN_PARAM = "app";
+/** The page with the same flow, to send people a link to, and where QR codes go. */
+export const INSTALL_PAGE = "/app";
 /** While Apple is busy (an invite, a build), the open panel asks again this often. */
 const POLL_MS = 8_000;
 
@@ -93,11 +101,21 @@ function waiting(status: InstallStatus | null) {
   );
 }
 
-export function InstallProvider({ children }: { children: React.ReactNode }) {
+/**
+ * The state every spot shares. `page`: the /app page, where the panel is always open and there is
+ * no sheet.
+ */
+export function InstallProvider({
+  children,
+  page = false,
+}: {
+  children: React.ReactNode;
+  page?: boolean;
+}) {
   const [status, setStatus] = React.useState<InstallStatus | null>(null);
   const [error, setError] = React.useState("");
   const [busy, setBusy] = React.useState(false);
-  const [open, setOpen] = React.useState(false);
+  const [open, setOpen] = React.useState(page);
   const isIOS = useIsIOS();
   const isPhone = useIsPhone();
 
@@ -116,12 +134,6 @@ export function InstallProvider({ children }: { children: React.ReactNode }) {
   React.useEffect(() => {
     if (!TESTFLIGHT_ENABLED) return;
     void refresh();
-    const url = new URL(window.location.href);
-    if (url.searchParams.has(OPEN_PARAM)) {
-      setOpen(true);
-      url.searchParams.delete(OPEN_PARAM);
-      window.history.replaceState(window.history.state, "", url);
-    }
   }, [refresh]);
 
   // Opening asks again; while it is open and Apple is busy, keep asking.
@@ -164,6 +176,7 @@ export function InstallProvider({ children }: { children: React.ReactNode }) {
   );
 
   if (!TESTFLIGHT_ENABLED) return children;
+  if (page) return <InstallContext value={value}>{children}</InstallContext>;
   return (
     <InstallContext value={value}>
       {children}
@@ -189,10 +202,15 @@ export function useShowInstallSpots() {
   return !(step?.kind === "tester" && step.tester === "installed");
 }
 
-/** Where a QR code points: straight to TestFlight for testers, else this Nap, with the panel open. */
+/** The /app page's address on this Nap. */
+export function installPageUrl() {
+  return typeof window === "undefined" ? "" : `${window.location.origin}${INSTALL_PAGE}`;
+}
+
+/** Where a QR code points: straight to TestFlight for testers, else the /app page. */
 function qrTarget(status: InstallStatus | null) {
   if (status?.step.kind === "tester") return status.webUrl;
-  return typeof window === "undefined" ? "" : `${window.location.origin}/?${OPEN_PARAM}`;
+  return installPageUrl();
 }
 
 // ---- Pieces --------------------------------------------------------------------------------
@@ -260,14 +278,17 @@ function Note({ children }: { children: React.ReactNode }) {
   );
 }
 
-/** The panel: the same in the popover and the phone sheet. */
-export function InstallPanel({ className }: { className?: string }) {
+/**
+ * The panel: the same in the popover, the phone sheet, and the /app page. The page shows its own
+ * header, a bigger QR code, and no link to itself.
+ */
+export function InstallPanel({ className, page = false }: { className?: string; page?: boolean }) {
   const install = useInstall();
   if (!install) return null;
   const { status, error, busy, isIOS } = install;
   return (
     <div className={cn("flex flex-col gap-4 p-4", className)}>
-      <div className="flex items-center gap-3">
+      <div className={cn("flex items-center gap-3", page && "hidden")}>
         <AppIcon />
         <div className="flex min-w-0 flex-col">
           <b className="text-[15px] font-semibold">Nap for iPhone</b>
@@ -355,8 +376,11 @@ export function InstallPanel({ className }: { className?: string }) {
               </span>
             </div>
           ) : (
-            <div className="flex items-center gap-4">
-              <QrCode value={status.webUrl} className="ring-1 ring-border" />
+            <div className={cn("flex items-center gap-4", page && "max-sm:flex-col sm:gap-6")}>
+              <QrCode
+                value={status.webUrl}
+                className={cn("ring-1 ring-border", page && "size-44")}
+              />
               <div className="flex flex-col gap-2 text-[13px] leading-snug text-muted-foreground">
                 <span className="text-foreground/80">
                   Scan with your iPhone camera to open Nap in TestFlight.
@@ -393,6 +417,38 @@ export function InstallPanel({ className }: { className?: string }) {
           {error}
         </p>
       )}
+      {!page && <ShareLink />}
+    </div>
+  );
+}
+
+/** The /app page's link, for sending to someone who wants the app. */
+function ShareLink() {
+  const [copied, setCopied] = React.useState(false);
+  const url = installPageUrl();
+  return (
+    <div className="-mx-4 -mb-4 flex items-center gap-2 border-t px-4 py-2.5 text-xs text-muted-foreground">
+      <LinkIcon className="size-3.5 shrink-0" />
+      <a
+        href={INSTALL_PAGE}
+        className="min-w-0 flex-1 truncate underline-offset-2 hover:text-foreground hover:underline"
+      >
+        {url.replace(/^https?:\/\//, "")}
+      </a>
+      <Button
+        size="xs"
+        variant="ghost"
+        className="rounded-full"
+        onClick={() => {
+          void navigator.clipboard.writeText(url).then(() => {
+            setCopied(true);
+            window.setTimeout(() => setCopied(false), 1_500);
+          });
+        }}
+      >
+        {copied ? <CheckIcon data-icon="inline-start" /> : <CopyIcon data-icon="inline-start" />}
+        {copied ? "Copied" : "Copy link"}
+      </Button>
     </div>
   );
 }
