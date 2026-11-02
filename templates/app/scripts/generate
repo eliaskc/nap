@@ -71,6 +71,12 @@ SWIFT
   echo "}"
 } > "$registry"
 
+# Project.swift reads Prototypes/ when Tuist evaluates it, and Tuist caches that result by the
+# manifest's own content. A TUIST_ variable is part of the cache key, so pass one that changes
+# whenever a prototype is added, removed, or its prototype.json changes.
+TUIST_PROTOTYPES=$( (ls Prototypes; cat Prototypes/*/prototype.json) | shasum | cut -c1-16)
+export TUIST_PROTOTYPES
+
 if command -v mise >/dev/null 2>&1; then
   mise exec -- tuist generate --no-open
 else
