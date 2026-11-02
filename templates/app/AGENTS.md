@@ -50,6 +50,12 @@ them. `scripts/generate` puts them into the app.
   `NSMicrophoneUsageDescription`, `NSLocationWhenInUseUsageDescription`,
   `NSPhotoLibraryUsageDescription`, `NSMotionUsageDescription`, …). Apple refuses a build that
   uses one of these APIs without its string. Say why the prototype asks, in a sentence.
+- `infoPlist`: any other Info.plist keys the prototype needs, such as background modes or the
+  Bonjour services of a local-network feature:
+  `{"UIBackgroundModes": ["audio"], "NSBonjourServices": ["_my-app._tcp"]}`. Lists from several
+  prototypes are combined; for other values the first prototype (by slug) wins. Keys
+  `Project.swift` sets itself (bundle names, versions, orientations, encryption) stay as they are.
+  Entitlements never go here: they are capabilities.
 - `capabilities`: Nap turns these on for the TestFlight app when it signs: `push-notifications`,
   `healthkit`, `siri`, `nfc-tag-reading`, `wifi-info`, `homekit`, `game-center`. A Nap can limit
   which. It cannot turn on `app-groups`, `icloud`, `associated-domains`, `sign-in-with-apple`, or
@@ -61,7 +67,10 @@ them. `scripts/generate` puts them into the app.
 
 ## Limits
 
-- Networking, WebSockets, and audio need nothing declared.
+- Networking, WebSockets, and audio need nothing declared. Audio that keeps running when the
+  phone locks needs `"infoPlist": {"UIBackgroundModes": ["audio"]}`, and MultipeerConnectivity or
+  Bonjour need `NSLocalNetworkUsageDescription` in `permissions` and `NSBonjourServices` in
+  `infoPlist`. The whole launcher gets them, like capabilities.
 - iPhone only, and `ITSAppUsesNonExemptEncryption` stays false (HTTPS is exempt): TestFlight
   needs both.
 - No Swift packages from the internet unless you need them: builds should stay seconds long.

@@ -220,13 +220,20 @@ try {
   const dir = join(work, APP);
   repo = (await call(`/_nap/api/apps/${APP}`, { token })).json.source.repo;
 
-  step("the template prototype declares a permission and capabilities in prototype.json");
+  step(
+    "the template prototype declares a permission, Info.plist keys, and capabilities in prototype.json",
+  );
   turnedOnWifi = !(await appIdCapabilities()).has("ACCESS_WIFI_INFORMATION");
   await writeFile(
     join(dir, "Prototypes/hello/prototype.json"),
     JSON.stringify({
       title: "Hello",
       permissions: { NSMotionUsageDescription: "The TestFlight test asks for nothing." },
+      infoPlist: {
+        UIBackgroundModes: ["audio"],
+        NSBonjourServices: ["_nap-test._tcp"],
+        CFBundleVersion: "99",
+      },
       capabilities: ["wifi-info", "icloud", "teleport"],
     }),
   );
@@ -244,6 +251,9 @@ try {
   const info = JSON.parse(plist.stdout);
   assert.equal(info.NSMotionUsageDescription, "The TestFlight test asks for nothing.");
   assert.deepEqual(info.NapCapabilities, { hello: ["wifi-info", "icloud", "teleport"] });
+  assert.deepEqual(info.UIBackgroundModes, ["audio"]);
+  assert.deepEqual(info.NSBonjourServices, ["_nap-test._tcp"]);
+  assert.notEqual(info.CFBundleVersion, "99");
   for (const args of [
     ["add", "-A"],
     ["commit", "-qm", "test: capabilities"],
