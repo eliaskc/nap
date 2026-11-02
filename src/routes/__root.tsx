@@ -1,5 +1,6 @@
 /// <reference types="vite/client" />
 import { HeadContent, Outlet, Scripts, createRootRoute } from "@tanstack/react-router";
+import { MotionConfig } from "motion/react";
 import * as React from "react";
 import { ThemeProvider } from "~/components/theme-provider";
 import { DefaultCatchBoundary } from "~/components/DefaultCatchBoundary";
@@ -41,7 +42,8 @@ function RootDocument({ children }: { children: React.ReactNode }) {
       </head>
       <body>
         <ThemeProvider defaultTheme="system" storageKey="nap-theme">
-          {children}
+          {/* Motion animations follow the system's reduce-motion setting. */}
+          <MotionConfig reducedMotion="user">{children}</MotionConfig>
         </ThemeProvider>
         <Scripts />
       </body>

@@ -146,7 +146,8 @@ export function VariantSwitch({
         style={{
           width: open ? PANEL_WIDTH : pill.width,
           height: open ? panelHeight : pill.height,
-          borderRadius: open ? 18 : 999,
+          // Half the pill's height is fully round, and doesn't go oval on the way to 18.
+          borderRadius: open ? 18 : pill.height / 2,
         }}
       >
         <div
@@ -187,8 +188,11 @@ export function VariantSwitch({
           aria-hidden={!open}
           inert={!open}
           className={cn(
-            "flex flex-col gap-2 p-2 transition-[opacity,translate] duration-300",
-            open ? "translate-y-0 opacity-100 delay-100" : "-translate-y-1 opacity-0",
+            "flex flex-col gap-2 p-2 transition-[opacity,translate]",
+            // In after the surface has started to grow; out quickly, before the tabs are back.
+            open
+              ? "translate-y-0 opacity-100 delay-100 duration-300"
+              : "-translate-y-1 opacity-0 duration-100",
           )}
           style={{ width: PANEL_WIDTH }}
         >
