@@ -189,7 +189,8 @@ export function FilterBar({
         {FILTERS.map((filter) => (
           <GroupTab key={filter.value} value={filter.value}>
             {filter.label}
-            {!compact && view.filter === filter.value && (
+            {/* Every tab shows its count, so switching tabs doesn't change their widths. */}
+            {!compact && (
               <span className="text-xs text-muted-foreground tabular-nums">
                 {view.counts[filter.value]}
               </span>

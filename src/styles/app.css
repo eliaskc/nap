@@ -29,6 +29,8 @@
 @layer base {
   html {
     color-scheme: light;
+    /* Keep room for the scrollbar, so the page doesn't jump sideways when a list gets short. */
+    scrollbar-gutter: stable;
   }
 
   .using-mouse * {
