@@ -229,10 +229,48 @@ test("the changes feed returns writes and deletes after since, in order", async 
   );
   assert.equal(next.json.hasMore, false);
 
-  const paged = await call("GET", "doc?since=0&limit=1");
+  const paged = await call("GET", `doc?since=${since}&limit=1`);
   assert.equal(paged.json.changes.length, 1);
   assert.equal(paged.json.hasMore, true);
   assert.equal((await call("GET", "doc?since=abc")).status, 400);
+});
+
+test("the changes feed from scratch leaves out deleted documents and skips past them", async () => {
+  const { env } = database();
+  const call = client(env);
+  await call("PUT", "doc/a", { body: { n: 1 } });
+  await call("PUT", "doc/b", { body: { n: 1 } });
+  await call("PUT", "doc/c", { body: { n: 1 } });
+  await call("DELETE", "doc/c");
+  await call("DELETE", "doc/a");
+
+  const all = await call("GET", "doc?since=0");
+  assert.deepEqual(
+    all.json.changes.map((c) => c.id),
+    ["b"],
+  );
+  assert.equal(all.json.hasMore, false);
+  // Nothing is left to read: the deletes after b are behind the returned since.
+  assert.deepEqual((await call("GET", `doc?since=${all.json.since}`)).json.changes, []);
+
+  // Later deletes still arrive.
+  await call("DELETE", "doc/b");
+  const next = await call("GET", `doc?since=${all.json.since}`);
+  assert.deepEqual(
+    next.json.changes.map((c) => [c.id, Boolean(c.deleted)]),
+    [["b", true]],
+  );
+});
+
+test("the changes feed sends up to 1000 changes a page", async () => {
+  const { env } = database();
+  const call = client(env);
+  for (let i = 0; i < 120; i++) await call("POST", "doc", { body: { i } });
+  const page = await call("GET", "doc?since=0&limit=1000");
+  assert.equal(page.json.changes.length, 120);
+  assert.equal(page.json.hasMore, false);
+  const listed = await call("GET", "doc?limit=1000");
+  assert.equal(listed.json.documents.length, 100);
 });
 
 test("bad ids and conditions are rejected", async () => {

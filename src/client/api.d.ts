@@ -92,6 +92,7 @@ export interface NapCollection<T = Record<string, unknown>> {
   /** Merges fields into a document (JSON Merge Patch: null removes a field). */
   patch(id: string, data: Partial<T>, options?: NapWriteOptions): Promise<NapDocument<T>>;
   delete(id: string, options?: NapWriteOptions): Promise<void>;
+  /** Writes after `since`, oldest first, deletes included. From 0 it leaves deletes out. Up to 1000 a page. */
   changes(options?: {
     since?: number;
     limit?: number;

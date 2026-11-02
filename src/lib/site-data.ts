@@ -6,6 +6,10 @@ import { fail, HttpError, json } from "~/server/http";
 const MAX_DOCUMENT_BYTES = 64 * 1024;
 const DEFAULT_PAGE_SIZE = 50;
 const MAX_PAGE_SIZE = 100;
+// The changes feed is how pages load a whole collection, so it sends more per request, up to a
+// size budget so a page of large documents stays small enough to hold in memory.
+const MAX_CHANGES_PAGE_SIZE = 1000;
+const MAX_CHANGES_PAGE_BYTES = 4 * 1024 * 1024;
 const COLLECTION_PATTERN = /^[a-z][a-z0-9_-]{0,47}$/;
 // Nap's ids are UUIDs. Apps that use put() choose their own, for example "q3" or "settings".
 const DOCUMENT_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
@@ -293,42 +297,49 @@ const listDocuments = Effect.fnUntraced(function* ({ slug, collection }: Where, 
 
 /**
  * The changes feed: every write after `since`, oldest first, deletes included. `since=0` is the
- * whole collection. Pass the returned `since` back to get the next changes.
+ * whole collection; it leaves out deleted documents, which a page loading from scratch has never
+ * seen. Pass the returned `since` back to get the next changes.
  */
 const listChanges = Effect.fnUntraced(function* ({ slug, collection }: Where, url: URL) {
   const since = url.searchParams.get("since") ?? "";
   if (!SINCE_PATTERN.test(since)) {
     return yield* fail(400, "since must be a number from an earlier response");
   }
-  const limit = pageSize(url);
+  const limit = pageSize(url, MAX_CHANGES_PAGE_SIZE);
+  const fromScratch = Number(since) === 0;
   const db = yield* Database;
-  const results = yield* db.all<DocumentRow>(
-    `SELECT ${COLUMNS}
+  // head: the collection's latest change, read in the same statement as the page.
+  const results = yield* db.all<DocumentRow & { head: number }>(
+    `SELECT ${COLUMNS},
+       (SELECT max(seq) FROM site_documents WHERE site_slug = ?1 AND collection = ?2) AS head
      FROM site_documents
-     WHERE site_slug = ? AND collection = ? AND seq > ?
-     ORDER BY seq LIMIT ?`,
+     WHERE site_slug = ?1 AND collection = ?2 AND seq > ?3 AND (?3 > 0 OR deleted_at IS NULL)
+     ORDER BY seq LIMIT ?4`,
     slug,
     collection,
     Number(since),
     limit + 1,
   );
-  const hasMore = results.length > limit;
-  const page = results.slice(0, limit);
+  let page = results.slice(0, limit);
+  let bytes = 0;
+  const fits = page.findIndex((row) => (bytes += row.dataJson.length) > MAX_CHANGES_PAGE_BYTES);
+  if (fits > 0) page = page.slice(0, fits);
+  const hasMore = results.length > page.length;
+  // From scratch, everything after the last document sent is a delete, so skip past it.
+  const head = fromScratch && !hasMore ? (results[0]?.head ?? 0) : 0;
   return json(
     {
       changes: page.map(toChange),
-      since: page.at(-1)?.seq ?? Number(since),
+      since: Math.max(page.at(-1)?.seq ?? Number(since), head),
       hasMore,
     },
     { headers: { "cache-control": "no-store" } },
   );
 });
 
-function pageSize(url: URL) {
+function pageSize(url: URL, max = MAX_PAGE_SIZE) {
   const requested = Number.parseInt(url.searchParams.get("limit") ?? "", 10);
-  return Number.isFinite(requested)
-    ? Math.min(Math.max(requested, 1), MAX_PAGE_SIZE)
-    : DEFAULT_PAGE_SIZE;
+  return Number.isFinite(requested) ? Math.min(Math.max(requested, 1), max) : DEFAULT_PAGE_SIZE;
 }
 
 const getRow = Effect.fnUntraced(function* ({ slug, collection }: Where, id: string) {

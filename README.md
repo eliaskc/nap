@@ -190,7 +190,10 @@ a browser client at `/_nap/client.js`. Every write raises the document's
 `version` and gives it the site's next change number, `seq`. Conditional
 writes compare `version`, so an app can refuse to overwrite an edit it has
 not seen. Deletes stay as tombstones, so the changes feed (rows after a
-`seq`) also reports them.
+`seq`) also reports them. Read from `seq` 0, the feed leaves tombstones out,
+because a page loading a collection from scratch has never seen those
+documents. It sends up to 1000 changes a request, so most collections load in
+one.
 
 Live updates go through one Durable Object per nap (`src/lib/site-live.ts`),
 named by its slug. D1 stays the only store: the Worker commits the write, then

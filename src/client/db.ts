@@ -177,7 +177,7 @@ function subscribe(
     try {
       let more = true;
       while (more && !stopped) {
-        const page = await changes({ since, limit: 100 });
+        const page = await changes({ since, limit: 1000 });
         // Emits once loaded. The first load emits once, below.
         subscriber.apply(page.changes);
         since = page.since;
