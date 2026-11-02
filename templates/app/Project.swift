@@ -4,16 +4,25 @@ import ProjectDescription
 // Every folder in Prototypes/ is a prototype: a module with a PrototypeView, shown in the launcher.
 // A prototype with "standalone": true in its prototype.json is also its own app.
 // Nap sets the real bundle id and build number when it signs, so the ids here are placeholders.
+//
+// prototype.json also declares what the prototype needs, and the app gets it from there:
+// - "permissions": Info.plist usage strings, such as {"NSCameraUsageDescription": "…"}.
+// - "capabilities": such as ["push-notifications"]. They go into Info.plist as NapCapabilities,
+//   by prototype; Nap turns them on when it signs, and the launcher warns about any it could not.
 
 struct Manifest: Decodable {
   var title: String?
   var standalone: Bool?
+  var permissions: [String: String]?
+  var capabilities: [String]?
 }
 
 struct Prototype {
   var slug: String
   var title: String
   var standalone: Bool
+  var permissions: [String: String]
+  var capabilities: [String]
 }
 
 let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
@@ -26,7 +35,31 @@ let prototypes: [Prototype] = (
   let file = root.appendingPathComponent("Prototypes/\(slug)/prototype.json")
   guard let data = try? Data(contentsOf: file),
         let manifest = try? JSONDecoder().decode(Manifest.self, from: data) else { return nil }
-  return Prototype(slug: slug, title: manifest.title ?? slug, standalone: manifest.standalone ?? false)
+  return Prototype(
+    slug: slug,
+    title: manifest.title ?? slug,
+    standalone: manifest.standalone ?? false,
+    permissions: manifest.permissions ?? [:],
+    capabilities: manifest.capabilities ?? []
+  )
+}
+
+/// Usage strings and capability requests for an app made of these prototypes. When two
+/// prototypes word the same permission, the first (by slug) wins.
+func declared(_ prototypes: [Prototype]) -> [String: Plist.Value] {
+  var plist: [String: Plist.Value] = [:]
+  for prototype in prototypes {
+    for (key, text) in prototype.permissions where plist[key] == nil {
+      plist[key] = .string(text)
+    }
+  }
+  let requests = prototypes.filter { !$0.capabilities.isEmpty }
+  if !requests.isEmpty {
+    plist["NapCapabilities"] = .dictionary(Dictionary(uniqueKeysWithValues: requests.map {
+      ($0.slug, Plist.Value.array($0.capabilities.map { .string($0) }))
+    }))
+  }
+  return plist
 }
 
 func moduleName(_ slug: String) -> String { "Proto_" + slug.replacingOccurrences(of: "-", with: "_") }
@@ -60,14 +93,14 @@ let launcher: Target = .target(
   productName: "Nap",
   bundleId: "nap.launcher",
   deploymentTargets: ios,
-  infoPlist: .extendingDefault(with: [
+  infoPlist: .extendingDefault(with: declared(prototypes).merging([
     "UILaunchScreen": [:],
     "CFBundleDisplayName": "Nap",
     "CFBundleShortVersionString": "1.0",
     "CFBundleVersion": "1",
     "ITSAppUsesNonExemptEncryption": false,
     "UISupportedInterfaceOrientations": orientations,
-  ]),
+  ]) { _, fixed in fixed }),
   sources: ["Apps/Launcher/Sources/**", "Generated/Launcher/**"],
   // The app icon: TestFlight refuses builds without one. Replace icon.png (1024 x 1024, no alpha).
   resources: ["Apps/Launcher/Resources/**"],
@@ -82,14 +115,14 @@ let standalone: [Target] = prototypes.filter(\.standalone).map { prototype in
     productName: prototype.slug,
     bundleId: "nap.\(prototype.slug)",
     deploymentTargets: ios,
-    infoPlist: .extendingDefault(with: [
+    infoPlist: .extendingDefault(with: declared([prototype]).merging([
       "UILaunchScreen": [:],
       "CFBundleDisplayName": .string(prototype.title),
       "CFBundleShortVersionString": "1.0",
       "CFBundleVersion": "1",
       "ITSAppUsesNonExemptEncryption": false,
       "UISupportedInterfaceOrientations": orientations,
-    ]),
+    ]) { _, fixed in fixed }),
     sources: ["Generated/Standalone/\(prototype.slug)/**"],
     dependencies: [.target(name: moduleName(prototype.slug))]
   )

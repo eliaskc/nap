@@ -440,6 +440,17 @@ Nap → signer container (rcodesign) → signed .ipa in R2 → install link → 
   publishes and the only app: there are no install links, no iPhones, and no
   paths without Access for them. TestFlight builds need an app icon and
   `ITSAppUsesNonExemptEncryption`; the template has both.
+- **Capabilities.** A prototype declares Info.plist usage strings and
+  capabilities in its `prototype.json`; the template writes the capabilities
+  into the app's Info.plist as `NapCapabilities`, by prototype. When it signs,
+  Nap reads them (the signer's `/inspect`), turns the ones it can on for the
+  TestFlight App ID through App Store Connect, makes a new App Store profile if
+  any was off, and signs with the basic entitlements plus those of the granted
+  capabilities. `apps.testFlight.capabilities` limits which it turns on. What a
+  build cannot have (those needing setup in the developer account, any in ad
+  hoc builds, or Apple refused) the signer writes into Info.plist as
+  `NapCapabilityWarnings`, and the launcher shows them on the prototype that
+  asked. Nap never turns capabilities off.
 - **Testers.** Internal testers must be App Store Connect users. From the
   dashboard's Get the app, anyone signed in to Nap gives their Apple Account
   email; Nap invites it to the team with the Marketing role and access to the

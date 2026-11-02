@@ -39,8 +39,29 @@ import $module
 
 @main
 struct StandaloneApp: App {
+  /// Capabilities this prototype asked for and the build does not have. Nap writes them.
+  let warnings = (Bundle.main.object(forInfoDictionaryKey: "NapCapabilityWarnings")
+    as? [String: [String]])?["$slug"] ?? []
+
   var body: some Scene {
-    WindowGroup { $module.PrototypeView() }
+    WindowGroup {
+      $module.PrototypeView()
+        .safeAreaInset(edge: .bottom) {
+          if !warnings.isEmpty {
+            VStack(alignment: .leading, spacing: 2) {
+              ForEach(warnings, id: \\.self) { warning in
+                Label(warning, systemImage: "exclamationmark.triangle.fill")
+                  .font(.caption)
+                  .foregroundStyle(.orange)
+              }
+            }
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12))
+            .padding(.horizontal)
+          }
+        }
+    }
   }
 }
 SWIFT

@@ -2,7 +2,9 @@
 // instance (napConfig.apps.testFlight, no profileName), with its SOURCES binding pointed at an
 // Artifacts test namespace and the signer image in local Docker. It creates the TestFlight app
 // from the template, builds the launcher with Xcode, publishes it, and waits until Apple has
-// processed the build for TestFlight.
+// processed the build for TestFlight. The template prototype declares capabilities: Nap turns
+// Wi-Fi information on for the App ID (and the test turns it off again if it was off), and the
+// publish warns about the ones it cannot turn on.
 //
 // This uploads a real build to the instance's app in App Store Connect: its internal testers get
 // it. Run it against an instance whose testers expect test builds.
@@ -13,6 +15,7 @@
 //   docker run --rm -p 18080:8080 -e SIGNING_PEM="$NAP_APPLE_SIGNING_PEM" nap-signer
 //   NAP_SIGNER_URL=http://localhost:18080 pnpm test:testflight
 import { spawnSync } from "node:child_process";
+import { createPrivateKey, createSign } from "node:crypto";
 import { request as httpRequest } from "node:http";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -49,6 +52,69 @@ const gitIdentity = {
   GIT_COMMITTER_NAME: "Nap test",
   GIT_COMMITTER_EMAIL: "test@example.com",
 };
+
+/** App Store Connect, to check and undo what the test turns on. */
+async function appStoreConnect(path, init = {}) {
+  const key = createPrivateKey(process.env.NAP_ASC_PRIVATE_KEY.replace(/\\n/g, "\n"));
+  const b64 = (value) => Buffer.from(JSON.stringify(value)).toString("base64url");
+  const iat = Math.floor(Date.now() / 1000);
+  const input = `${b64({ alg: "ES256", kid: process.env.NAP_ASC_KEY_ID, typ: "JWT" })}.${b64({
+    iss: process.env.NAP_ASC_ISSUER_ID,
+    iat,
+    exp: iat + 600,
+    aud: "appstoreconnect-v1",
+  })}`;
+  const signature = createSign("SHA256")
+    .update(input)
+    .sign({ key, dsaEncoding: "ieee-p1363" })
+    .toString("base64url");
+  const response = await fetch(`https://api.appstoreconnect.apple.com/v1/${path}`, {
+    ...init,
+    headers: { authorization: `Bearer ${input}.${signature}`, "content-type": "application/json" },
+  });
+  const text = await response.text();
+  if (!response.ok) throw new Error(`${path}: ${response.status} ${text}`);
+  return text ? JSON.parse(text) : null;
+}
+
+async function appIdCapabilities() {
+  const bundles = await appStoreConnect(
+    `bundleIds?filter[identifier]=${encodeURIComponent(testFlight.bundleId)}&limit=20`,
+  );
+  const bundle = bundles.data.find((item) => item.attributes.identifier === testFlight.bundleId);
+  const list = await appStoreConnect(`bundleIds/${bundle.id}/bundleIdCapabilities`);
+  return new Map(list.data.map((item) => [item.attributes.capabilityType, item.id]));
+}
+
+/** Makes the App Store profile again, as Nap does, so it drops a capability that was turned off. */
+async function regenerateAppStoreProfile() {
+  const list = await appStoreConnect(
+    `profiles?filter[name]=${encodeURIComponent(testFlight.profileName)}&filter[profileType]=IOS_APP_STORE&limit=10`,
+  );
+  // Turning a capability off makes the profile invalid; it stays the one to replace.
+  const named = list.data.filter((item) => item.attributes.name === testFlight.profileName);
+  const old = named.find((item) => item.attributes.profileState === "ACTIVE") ?? named[0];
+  const [bundle, certificates] = await Promise.all([
+    appStoreConnect(`profiles/${old.id}/bundleId`),
+    appStoreConnect(`profiles/${old.id}/certificates`),
+  ]);
+  await appStoreConnect(`profiles/${old.id}`, { method: "DELETE" });
+  await appStoreConnect("profiles", {
+    method: "POST",
+    body: JSON.stringify({
+      data: {
+        type: "profiles",
+        attributes: { name: testFlight.profileName, profileType: "IOS_APP_STORE" },
+        relationships: {
+          bundleId: { data: { type: "bundleIds", id: bundle.data.id } },
+          certificates: {
+            data: certificates.data.map((item) => ({ type: "certificates", id: item.id })),
+          },
+        },
+      },
+    }),
+  });
+}
 
 /** One request on a fresh connection: the local dev server resets reused keep-alive sockets. */
 function call(path, { method = "GET", token, json, headers = {} } = {}) {
@@ -130,6 +196,7 @@ function build(dir, target) {
 
 let nap;
 let repo;
+let turnedOnWifi = false;
 const step = (name) => console.log(`- ${name}`);
 try {
   nap = await startLocalNap({
@@ -153,6 +220,41 @@ try {
   const dir = join(work, APP);
   repo = (await call(`/_nap/api/apps/${APP}`, { token })).json.source.repo;
 
+  step("the template prototype declares a permission and capabilities in prototype.json");
+  turnedOnWifi = !(await appIdCapabilities()).has("ACCESS_WIFI_INFORMATION");
+  await writeFile(
+    join(dir, "Prototypes/hello/prototype.json"),
+    JSON.stringify({
+      title: "Hello",
+      permissions: { NSMotionUsageDescription: "The TestFlight test asks for nothing." },
+      capabilities: ["wifi-info", "icloud", "teleport"],
+    }),
+  );
+  const built = build(dir, "launcher");
+  const unzipped = join(state, "unzipped");
+  spawnSync("unzip", ["-q", "-o", built, "-d", unzipped]);
+  const plist = spawnSync(
+    "sh",
+    [
+      "-c",
+      `plutil -convert json -o - "${unzipped}"/*.app/Info.plist 2>/dev/null || plutil -convert json -o - "${unzipped}"/*/*.app/Info.plist`,
+    ],
+    { encoding: "utf8" },
+  );
+  const info = JSON.parse(plist.stdout);
+  assert.equal(info.NSMotionUsageDescription, "The TestFlight test asks for nothing.");
+  assert.deepEqual(info.NapCapabilities, { hello: ["wifi-info", "icloud", "teleport"] });
+  for (const args of [
+    ["add", "-A"],
+    ["commit", "-qm", "test: capabilities"],
+  ]) {
+    const git = spawnSync("git", ["-C", dir, ...args], {
+      encoding: "utf8",
+      env: { ...process.env, ...gitIdentity },
+    });
+    assert.equal(git.status, 0, git.stderr);
+  }
+
   step("publishing the launcher signs it for the App Store and uploads it to TestFlight");
   const published = script(token, [
     "app",
@@ -167,6 +269,12 @@ try {
     "TestFlight test",
   ]);
   assert.match(published.stdout, /uploaded to TestFlight/);
+
+  step("Nap turned Wi-Fi information on, and warns about iCloud and the unknown name");
+  assert.ok((await appIdCapabilities()).has("ACCESS_WIFI_INFORMATION"));
+  assert.match(published.stdout, /iCloud needs an iCloud container/);
+  assert.match(published.stdout, /teleport is not a capability Nap knows/);
+  assert.doesNotMatch(published.stdout, /Wi-Fi information/);
   const buildNumber = Number(published.stdout.match(/Build (\d+) of launcher/)[1]);
   assert.ok(buildNumber > 1, "the build number goes above what App Store Connect has");
 
@@ -207,6 +315,17 @@ try {
   console.log("TestFlight test passed.");
 } finally {
   await nap?.stop();
+  if (turnedOnWifi) {
+    try {
+      const id = (await appIdCapabilities()).get("ACCESS_WIFI_INFORMATION");
+      if (id) {
+        await appStoreConnect(`bundleIdCapabilities/${id}`, { method: "DELETE" });
+        await regenerateAppStoreProfile();
+      }
+    } catch (error) {
+      console.error(`Turn Wi-Fi information off for ${testFlight.bundleId} by hand: ${error}`);
+    }
+  }
   if (repo) {
     const deleted = spawnSync(
       "cf",

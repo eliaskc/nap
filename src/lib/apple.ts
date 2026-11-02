@@ -1,4 +1,4 @@
-import { Effect, Schema } from "effect";
+import { Effect, Schedule, Schema } from "effect";
 import { importPKCS8, SignJWT } from "jose";
 import { napConfig } from "~/nap.config";
 import { Settings } from "~/server/platform";
@@ -62,6 +62,13 @@ export const appStoreConnect = Effect.fn("appStoreConnect")(function* <T>(
   };
   if (!response.ok) {
     const error = data.errors?.[0];
+    yield* Effect.logWarning("App Store Connect request failed").pipe(
+      Effect.annotateLogs({
+        method: init.method ?? "GET",
+        path: path.split("?")[0],
+        status: response.status,
+      }),
+    );
     return yield* new AppleError({
       message: `App Store Connect: ${error?.detail ?? error?.title ?? response.statusText}`,
     });
@@ -110,16 +117,17 @@ const profileName = (kind: Distribution) =>
   });
 
 /** The active profile of a kind with Nap's profile name, from Apple. */
-const currentProfile = Effect.fnUntraced(function* (kind: Distribution) {
+/**
+ * The profile with the configured name: the active one, else one Apple made invalid (it does
+ * when a capability of the App ID changes), which only regenerating fixes.
+ */
+const namedProfile = Effect.fnUntraced(function* (kind: Distribution) {
   const name = yield* profileName(kind);
   const list = yield* appStoreConnect<ProfileList>(
     `profiles?filter[name]=${encodeURIComponent(name)}&filter[profileType]=${PROFILES[kind].type}&limit=10`,
   );
-  return (
-    list.data.find(
-      (item) => item.attributes.name === name && item.attributes.profileState === "ACTIVE",
-    ) ?? null
-  );
+  const named = list.data.filter((item) => item.attributes.name === name);
+  return named.find((item) => item.attributes.profileState === "ACTIVE") ?? named[0] ?? null;
 });
 
 const storeProfile = Effect.fnUntraced(function* (kind: Distribution, id: string, content: string) {
@@ -141,8 +149,12 @@ const missingProfile = (kind: Distribution) =>
 
 /** Fetches a profile from Apple by name and stores it in R2. */
 export const refreshProfile = Effect.fn("refreshProfile")(function* (kind: Distribution = "adhoc") {
-  const profile = yield* currentProfile(kind);
+  const profile = yield* namedProfile(kind);
   if (!profile) return yield* missingProfile(kind);
+  if (profile.attributes.profileState !== "ACTIVE") {
+    yield* Effect.logInfo("Profile invalid, regenerating").pipe(Effect.annotateLogs({ kind }));
+    return yield* regenerateProfile(kind);
+  }
   return yield* storeProfile(kind, profile.id, profile.attributes.profileContent);
 });
 
@@ -153,7 +165,10 @@ const PROFILE_TTL_MS = 60 * 60 * 1000;
  * The profile to sign with: the copy in R2 when it is under an hour old, else Apple's. If Apple
  * cannot be reached, the copy is still used.
  */
-export const signingProfile = Effect.fn("signingProfile")(function* (kind: Distribution = "adhoc") {
+export const signingProfile = Effect.fn("signingProfile")(function* (
+  kind: Distribution = "adhoc",
+  { fresh = false }: { fresh?: boolean } = {},
+) {
   const storage = yield* Storage;
   const stored = yield* storage.get(PROFILES[kind].key);
   const id = stored?.customMetadata?.profileId;
@@ -163,7 +178,7 @@ export const signingProfile = Effect.fn("signingProfile")(function* (kind: Distr
       id,
       bytes: new Uint8Array(yield* tryStorage(() => stored.arrayBuffer())),
     };
-    if (Date.now() - fetchedAt < PROFILE_TTL_MS) return copy;
+    if (!fresh && Date.now() - fetchedAt < PROFILE_TTL_MS) return copy;
     // Any failure, expected or not, falls back to the copy.
     return yield* refreshProfile(kind).pipe(Effect.catchCause(() => Effect.succeed(copy)));
   }
@@ -202,18 +217,24 @@ export const registerDevice = Effect.fn("registerDevice")(function* (udid: strin
 });
 
 /**
- * Replaces the ad hoc profile with one that lists every enabled iPhone of the team, for the same
- * App ID and certificate, and stores it. Apple profiles cannot be edited, so this deletes the old
- * one and creates one with the same name.
+ * Replaces a profile with a new one with the same name, App ID, and certificates: Apple profiles
+ * cannot be edited. An ad hoc profile then lists every enabled iPhone of the team; an App Store
+ * profile picks up the App ID's capabilities.
  */
-export const regenerateProfile = Effect.fn("regenerateProfile")(function* () {
-  const old = yield* currentProfile("adhoc");
-  if (!old) return yield* missingProfile("adhoc");
+export const regenerateProfile = Effect.fn("regenerateProfile")(function* (
+  kind: Distribution = "adhoc",
+) {
+  const old = yield* namedProfile(kind);
+  if (!old) return yield* missingProfile(kind);
   const [bundle, certificates, devices] = yield* Effect.all(
     [
       appStoreConnect<{ data: { id: string } }>(`profiles/${old.id}/bundleId`),
       appStoreConnect<{ data: Array<{ id: string }> }>(`profiles/${old.id}/certificates`),
-      appStoreConnect<DeviceList>("devices?filter[status]=ENABLED&filter[platform]=IOS&limit=200"),
+      kind === "adhoc"
+        ? appStoreConnect<DeviceList>(
+            "devices?filter[status]=ENABLED&filter[platform]=IOS&limit=200",
+          )
+        : Effect.succeed(null),
     ],
     { concurrency: "unbounded" },
   );
@@ -223,18 +244,20 @@ export const regenerateProfile = Effect.fn("regenerateProfile")(function* () {
     body: {
       data: {
         type: "profiles",
-        attributes: { name: yield* profileName("adhoc"), profileType: "IOS_APP_ADHOC" },
+        attributes: { name: yield* profileName(kind), profileType: PROFILES[kind].type },
         relationships: {
           bundleId: { data: { type: "bundleIds", id: bundle.data.id } },
           certificates: {
             data: certificates.data.map((item) => ({ type: "certificates", id: item.id })),
           },
-          devices: { data: devices.data.map((item) => ({ type: "devices", id: item.id })) },
+          ...(devices
+            ? { devices: { data: devices.data.map((item) => ({ type: "devices", id: item.id })) } }
+            : {}),
         },
       },
     },
   });
-  return yield* storeProfile("adhoc", created.data.id, created.data.attributes.profileContent);
+  return yield* storeProfile(kind, created.data.id, created.data.attributes.profileContent);
 });
 
 // ---- TestFlight ----
@@ -359,6 +382,7 @@ export const uploadToTestFlight = Effect.fn("uploadToTestFlight")(function* (
   const md5 = [...new Uint8Array(yield* Effect.promise(() => digest.digest))]
     .map((byte) => byte.toString(16).padStart(2, "0"))
     .join("");
+  // Apple sometimes answers this with a 500 that a moment later is a 200.
   yield* appStoreConnect(`buildUploadFiles/${file.data.id}`, {
     method: "PATCH",
     body: {
@@ -371,8 +395,61 @@ export const uploadToTestFlight = Effect.fn("uploadToTestFlight")(function* (
         },
       },
     },
-  });
+  }).pipe(Effect.retry({ schedule: Schedule.spaced("5 seconds"), times: 2 }));
   return upload.data.id;
+});
+
+type BundleIdList = { data: Array<{ id: string; attributes: { identifier: string } }> };
+type CapabilityList = { data: Array<{ attributes: { capabilityType: string } }> };
+
+/**
+ * Turns capabilities on for the TestFlight app's App ID (Apple's capability types, such as
+ * PUSH_NOTIFICATIONS) and makes a new App Store profile when any was off, so it carries their
+ * entitlements. Returns Apple's reason for each one it would not turn on.
+ */
+export const ensureCapabilities = Effect.fn("ensureCapabilities")(function* (
+  types: ReadonlyArray<string>,
+) {
+  const refused = new Map<string, string>();
+  if (types.length === 0) return refused;
+  const { bundleId } = yield* testFlightApp;
+  const bundles = yield* appStoreConnect<BundleIdList>(
+    `bundleIds?filter[identifier]=${encodeURIComponent(bundleId)}&fields[bundleIds]=identifier&limit=20`,
+  );
+  const bundle = bundles.data.find((item) => item.attributes.identifier === bundleId);
+  if (!bundle) return yield* new AppleError({ message: `No App ID ${bundleId}` });
+  const enabled = yield* appStoreConnect<CapabilityList>(
+    `bundleIds/${bundle.id}/bundleIdCapabilities`,
+  );
+  const on = new Set(enabled.data.map((item) => item.attributes.capabilityType));
+  let changed = false;
+  for (const type of types) {
+    if (on.has(type)) continue;
+    const added = yield* appStoreConnect("bundleIdCapabilities", {
+      method: "POST",
+      body: {
+        data: {
+          type: "bundleIdCapabilities",
+          attributes: { capabilityType: type },
+          relationships: { bundleId: { data: { type: "bundleIds", id: bundle.id } } },
+        },
+      },
+    }).pipe(
+      Effect.as(true),
+      Effect.catchTag("AppleError", (error) => {
+        refused.set(type, error.message);
+        return Effect.succeed(false);
+      }),
+    );
+    if (added) {
+      changed = true;
+      yield* Effect.logInfo("Capability turned on").pipe(
+        Effect.annotateLogs({ bundleId, capability: type }),
+      );
+    }
+  }
+  if (changed) yield* regenerateProfile("appstore");
+  return refused;
 });
 
 /** Where a TestFlight build is: Apple still processing it, ready for testers, or failed. */

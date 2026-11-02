@@ -1,3 +1,4 @@
+import type { AutomaticCapability } from "~/lib/capabilities";
 /**
  * What makes a Nap deployment its own: its domain and its organisation. The values live in
  * instance/config.ts, which each deployment provides (see instance.example/).
@@ -49,6 +50,13 @@ export type NapConfig = {
       profileName: string;
       /** The Nap app whose launcher goes to TestFlight. Without ad hoc, it is the only app. */
       app: string;
+      /**
+       * Capabilities that prototypes may turn on for the App ID by declaring them in
+       * prototype.json, such as ["push-notifications", "healthkit"]. Leave it out to allow every
+       * one Nap can turn on (src/lib/capabilities.ts); [] allows none. The rest become warnings
+       * inside the app.
+       */
+      capabilities?: Array<AutomaticCapability>;
     };
   } | null;
   /**

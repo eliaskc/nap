@@ -1,5 +1,5 @@
 """
-Nap's app signer. One endpoint: POST /sign.
+Nap's app signer. POST /sign signs a build; POST /inspect reads what a build asks for.
 
 Body: a zip of an unsigned iOS .app (built with CODE_SIGNING_ALLOWED=NO).
 Headers:
@@ -7,10 +7,17 @@ Headers:
   x-build-number   CFBundleVersion, assigned by Nap
   x-profile        the provisioning profile, base64
   x-distribution   "ad-hoc" (default) or "app-store", for TestFlight
+  x-entitlement-keys  App Store only: entitlements beyond the basic ones to take from the profile,
+                   comma-separated (those of the capabilities Nap turned on)
+  x-warnings       optional, base64 JSON {prototype slug: [sentence]}: capabilities the build
+                   asked for and does not get. Written into Info.plist as NapCapabilityWarnings.
 Environment:
   SIGNING_PEM      the distribution private key and certificate, PEM
 
-Returns the signed .ipa, with x-app-* headers describing the build. Errors are JSON with status
+POST /inspect takes the same body and answers {"capabilities": {slug: [name]}}, from the
+NapCapabilities key the app template writes into Info.plist.
+
+/sign returns the signed .ipa, with x-app-* headers describing the build. Errors are JSON with status
 400 (the build is wrong) or 500. The container has no internet access: it signs without a
 timestamp server, which iOS does not need.
 """
@@ -71,22 +78,66 @@ def check_executable(path: str):
         )
 
 
-def app_store_entitlements(entitlements: dict) -> dict:
+BASIC_APP_STORE_ENTITLEMENTS = (
+    "application-identifier",
+    "com.apple.developer.team-identifier",
+    "get-task-allow",
+    "beta-reports-active",
+)
+
+
+def is_wildcard(value) -> bool:
+    if isinstance(value, str):
+        return value.endswith("*")
+    if isinstance(value, list):
+        return any(isinstance(v, str) and v.endswith("*") for v in value)
+    return False
+
+
+def app_store_entitlements(entitlements: dict, extra_keys: list) -> dict:
     """
-    What an App Store build may claim: the profile's entitlements without its wildcards (such as
-    the keychain group TEAM.*), which only say what the profile allows. App Store Connect refuses
-    builds that claim wildcards.
+    What an App Store build claims: the basic entitlements, and those of the capabilities Nap
+    turned on, with the profile's values. Never wildcards (such as the keychain group TEAM.*):
+    they only say what the profile allows, and App Store Connect refuses builds that claim them.
     """
     kept = {}
-    for key, value in entitlements.items():
-        if key == "keychain-access-groups":
-            continue
-        if isinstance(value, str) and value.endswith("*"):
-            continue
-        if isinstance(value, list) and any(isinstance(v, str) and v.endswith("*") for v in value):
-            continue
-        kept[key] = value
+    for key in (*BASIC_APP_STORE_ENTITLEMENTS, *extra_keys):
+        if key in entitlements and not is_wildcard(entitlements[key]):
+            kept[key] = entitlements[key]
     return kept
+
+
+def unpack(body: bytes, work: str):
+    """The one .app in an uploaded zip, and its Info.plist."""
+    with zipfile.ZipFile(_bytes_file(work, "unsigned.zip", body)) as archive:
+        unpacked = os.path.join(work, "in")
+        safe_extract(archive, unpacked)
+    apps = [
+        os.path.join(dirpath, name)
+        for dirpath, dirnames, _ in os.walk(unpacked)
+        for name in dirnames
+        if name.endswith(".app")
+    ]
+    top = [app for app in apps if not any(app.startswith(other + os.sep) for other in apps)]
+    if len(top) != 1:
+        raise BuildError("The zip must hold exactly one .app")
+    app = top[0]
+    info_path = os.path.join(app, "Info.plist")
+    if not os.path.exists(info_path):
+        raise BuildError("The app has no Info.plist")
+    with open(info_path, "rb") as handle:
+        info = plistlib.load(handle)
+    return app, info_path, info
+
+
+def inspect(body: bytes) -> dict:
+    work = tempfile.mkdtemp()
+    try:
+        _, _, info = unpack(body, work)
+        requests = info.get("NapCapabilities", {})
+        return {"capabilities": requests if isinstance(requests, dict) else {}}
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
 
 
 def sign(
@@ -95,6 +146,8 @@ def sign(
     build_number: str,
     profile_bytes: bytes,
     distribution: str = "ad-hoc",
+    extra_keys: list = (),
+    warnings: dict = None,
 ):
     pem = os.environ.get("SIGNING_PEM", "")
     if "PRIVATE KEY" not in pem or "CERTIFICATE" not in pem:
@@ -119,29 +172,11 @@ def sign(
     if distribution == "app-store":
         if "beta-reports-active" not in entitlements:
             raise BuildError("The profile is not an App Store profile")
-        entitlements = app_store_entitlements(entitlements)
+        entitlements = app_store_entitlements(entitlements, list(extra_keys))
 
     work = tempfile.mkdtemp()
     try:
-        with zipfile.ZipFile(_bytes_file(work, "unsigned.zip", body)) as archive:
-            unpacked = os.path.join(work, "in")
-            safe_extract(archive, unpacked)
-        apps = [
-            os.path.join(dirpath, name)
-            for dirpath, dirnames, _ in os.walk(unpacked)
-            for name in dirnames
-            if name.endswith(".app")
-        ]
-        top = [app for app in apps if not any(app.startswith(other + os.sep) for other in apps)]
-        if len(top) != 1:
-            raise BuildError("The zip must hold exactly one .app")
-        app = top[0]
-
-        info_path = os.path.join(app, "Info.plist")
-        if not os.path.exists(info_path):
-            raise BuildError("The app has no Info.plist")
-        with open(info_path, "rb") as handle:
-            info = plistlib.load(handle)
+        app, info_path, info = unpack(body, work)
         if info.get("DTPlatformName") != "iphoneos":
             raise BuildError(
                 f"This is a {info.get('DTPlatformName', 'unknown')} build. Build for iphoneos."
@@ -160,6 +195,10 @@ def sign(
 
         info["CFBundleIdentifier"] = bundle_id
         info["CFBundleVersion"] = build_number
+        if warnings:
+            info["NapCapabilityWarnings"] = warnings
+        else:
+            info.pop("NapCapabilityWarnings", None)
         with open(info_path, "wb") as handle:
             plistlib.dump(info, handle, fmt=plistlib.FMT_BINARY)
         with open(os.path.join(app, "embedded.mobileprovision"), "wb") as handle:
@@ -221,20 +260,29 @@ class Handler(BaseHTTPRequestHandler):
         self._json(200, {"ok": True})
 
     def do_POST(self):
-        if self.path != "/sign":
+        if self.path not in ("/sign", "/inspect"):
             return self._json(404, {"error": "Not found"})
         try:
             length = int(self.headers.get("content-length", "0"))
             if length <= 0 or length > MAX_BYTES:
                 raise BuildError("The upload is empty or too large")
             body = self.rfile.read(length)
+            if self.path == "/inspect":
+                return self._json(200, inspect(body))
             profile = base64.b64decode(self.headers.get("x-profile", ""))
+            keys = self.headers.get("x-entitlement-keys", "")
+            warnings_header = self.headers.get("x-warnings", "")
+            warnings = json.loads(base64.b64decode(warnings_header)) if warnings_header else None
+            if warnings is not None and not isinstance(warnings, dict):
+                raise BuildError("Bad warnings")
             signed, meta = sign(
                 body,
                 self.headers.get("x-bundle-id", ""),
                 self.headers.get("x-build-number", ""),
                 profile,
                 self.headers.get("x-distribution", "") or "ad-hoc",
+                [key for key in keys.split(",") if key],
+                warnings,
             )
         except BuildError as error:
             return self._json(400, {"error": str(error)})

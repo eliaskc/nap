@@ -6,11 +6,19 @@ import {
   buildUploadStatus,
   bundleIdFor,
   type Distribution,
+  ensureCapabilities,
   latestTestFlightBuildNumber,
   signingProfile,
   toBase64,
   uploadToTestFlight,
 } from "~/lib/apple";
+import {
+  AUTOMATIC_CAPABILITIES,
+  type AutomaticCapability,
+  type CapabilityRequests,
+  planCapabilities,
+  readRequests,
+} from "~/lib/capabilities";
 import { slugify } from "~/lib/nap-server";
 import {
   checkRepoCommit,
@@ -459,6 +467,7 @@ const publishBuild = Effect.fnUntraced(function* (
       ? `Build ${buildNumber} of ${target} is uploaded to TestFlight. Apple processes it for a few minutes; then testers install or update it in the TestFlight app. ${page} shows when it is ready.`
       : `Build ${buildNumber} of ${target} is live.`,
     adHocSigned ? `People with a registered iPhone install it from ${page} now.` : "",
+    capabilityNote(storeSigned ?? signed),
   ]
     .filter(Boolean)
     .join(" ");
@@ -473,11 +482,23 @@ const publishBuild = Effect.fnUntraced(function* (
       sourceCommit: commit,
       installPage: page,
       testFlight: testFlight ? { state: "processing" } : null,
+      capabilities: storeSigned?.capabilities ?? [],
+      capabilityWarnings: (storeSigned ?? signed).capabilityWarnings,
       message,
     },
     { status: 201, headers: noStore },
   );
 });
+
+/** For the publish message: what the build may not use, which the launcher also shows. */
+function capabilityNote(signed: Signed) {
+  const lines = Object.entries(signed.capabilityWarnings).flatMap(([slug, warnings]) =>
+    warnings.map((warning) => `${slug}: ${warning}`),
+  );
+  return lines.length
+    ? `Capabilities the build does not get (the launcher shows these on the prototype): ${lines.join(" ")}`
+    : "";
+}
 
 /** Signing a build failed. `status` is the status the agent gets for a new build. */
 class SignError extends Schema.TaggedError<SignError>()("SignError", {
@@ -500,23 +521,40 @@ const signBuild = Effect.fnUntraced(function* (
   if (!unsigned) {
     return yield* new SignError({ message: "The unsigned build is missing", status: 500 });
   }
-  const profile = yield* signingProfile(kind);
-  const key = signedKey(app, build, profile.id, kind);
   const signer = yield* SignerBinding;
   if (!signer) {
     return yield* new SignError({ message: "The app signer is not set up", status: 503 });
+  }
+  // Capabilities first: turning one on makes a new App Store profile, which signing then uses.
+  const requests = yield* inspectBuild(signer, unsigned.body, unsigned.size);
+  const capabilities = yield* grantCapabilities(requests, kind);
+  // App Store profiles change with capabilities, from any Nap that shares the App ID, and
+  // publishes are rare: ask Apple each time.
+  const profile = yield* signingProfile(kind, { fresh: kind === "appstore" });
+  const key = signedKey(app, build, profile.id, kind);
+  const fresh = yield* storage.get(unsignedKey(app, build));
+  if (!fresh) {
+    return yield* new SignError({ message: "The unsigned build is missing", status: 500 });
   }
   const response = yield* Effect.promise(() =>
     signer.fetch(
       new Request(`${signer.url}/sign`, {
         method: "POST",
-        body: fixedLength(unsigned.body, unsigned.size),
+        body: fixedLength(fresh.body, fresh.size),
         headers: {
           "content-type": "application/zip",
           "x-bundle-id": bundleId,
           "x-build-number": String(buildNumber),
           "x-profile": toBase64(profile.bytes),
           "x-distribution": kind === "appstore" ? "app-store" : "ad-hoc",
+          "x-entitlement-keys": capabilities.entitlementKeys.join(","),
+          ...(Object.keys(capabilities.warnings).length
+            ? {
+                "x-warnings": toBase64(
+                  new TextEncoder().encode(JSON.stringify(capabilities.warnings)),
+                ),
+              }
+            : {}),
         },
       }),
     ),
@@ -553,7 +591,68 @@ const signBuild = Effect.fnUntraced(function* (
     appName: header("x-app-name").slice(0, 120),
     shortVersion: header("x-app-short-version").slice(0, 40),
     xcode: header("x-app-xcode").slice(0, 20),
+    capabilities: capabilities.granted,
+    capabilityWarnings: capabilities.warnings,
   };
+});
+
+/** What a build asks for: the NapCapabilities key in its Info.plist, read by the signer. */
+const inspectBuild = Effect.fnUntraced(function* (
+  signer: NonNullable<Effect.Success<typeof SignerBinding>>,
+  body: ReadableStream,
+  size: number,
+) {
+  const response = yield* Effect.promise(() =>
+    signer.fetch(
+      new Request(`${signer.url}/inspect`, {
+        method: "POST",
+        body: fixedLength(body, size),
+        headers: { "content-type": "application/zip" },
+      }),
+    ),
+  );
+  const result = (yield* Effect.promise(() => response.json().catch(() => ({})))) as {
+    capabilities?: unknown;
+    error?: string;
+  };
+  if (!response.ok) {
+    return yield* new SignError({
+      message: String(result.error ?? `Reading the build failed (${response.status})`),
+      status: response.status === 400 ? 400 : 502,
+    });
+  }
+  return readRequests(result.capabilities);
+});
+
+/**
+ * Turns on what a build asks for and can have, and says what it cannot. Only the TestFlight App
+ * ID gets capabilities: an ad hoc build is signed with a wildcard profile, which has none.
+ */
+const grantCapabilities = Effect.fnUntraced(function* (
+  requests: CapabilityRequests,
+  kind: Distribution,
+) {
+  const allowed = napConfig.apps?.testFlight?.capabilities;
+  const refuse = (name: AutomaticCapability) => {
+    if (kind === "adhoc") return "is not available in ad hoc builds, only in TestFlight";
+    if (allowed && !allowed.includes(name)) {
+      return "is not on this Nap's list of capabilities. Ask whoever runs Nap to add it";
+    }
+    return null;
+  };
+  const plan = planCapabilities(requests, refuse);
+  if (kind !== "appstore" || plan.granted.length === 0) return plan;
+  const refused = yield* ensureCapabilities(
+    plan.granted.map((name) => AUTOMATIC_CAPABILITIES[name].apple),
+  );
+  if (refused.size === 0) return plan;
+  // Apple would not turn some on: warn about those instead.
+  return planCapabilities(requests, (name) => {
+    const reason = refuse(name);
+    if (reason) return reason;
+    const apple = refused.get(AUTOMATIC_CAPABILITIES[name].apple);
+    return apple ? `could not be turned on: ${apple}` : null;
+  });
 });
 
 /**

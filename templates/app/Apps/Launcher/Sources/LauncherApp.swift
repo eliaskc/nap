@@ -17,6 +17,28 @@ struct PrototypeEntry: Identifiable {
   var id: String { slug }
 }
 
+/// Capabilities a prototype asked for in prototype.json and this build does not have, by
+/// prototype. Nap writes them into Info.plist when it signs.
+enum CapabilityWarnings {
+  static let all = Bundle.main.object(forInfoDictionaryKey: "NapCapabilityWarnings")
+    as? [String: [String]] ?? [:]
+  static func of(_ slug: String) -> [String] { all[slug] ?? [] }
+}
+
+struct CapabilityWarningList: View {
+  let warnings: [String]
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 2) {
+      ForEach(warnings, id: \.self) { warning in
+        Label(warning, systemImage: "exclamationmark.triangle.fill")
+          .font(.caption)
+          .foregroundStyle(.orange)
+      }
+    }
+  }
+}
+
 struct LauncherView: View {
   @State private var open: PrototypeEntry?
 
@@ -30,6 +52,10 @@ struct LauncherView: View {
             Text(prototype.title).font(.headline)
             if !prototype.summary.isEmpty {
               Text(prototype.summary).font(.subheadline).foregroundStyle(.secondary)
+            }
+            let warnings = CapabilityWarnings.of(prototype.slug)
+            if !warnings.isEmpty {
+              CapabilityWarningList(warnings: warnings)
             }
           }
         }
@@ -45,6 +71,16 @@ struct LauncherView: View {
     }
     .fullScreenCover(item: $open) { prototype in
       prototype.view()
+        .safeAreaInset(edge: .bottom) {
+          let warnings = CapabilityWarnings.of(prototype.slug)
+          if !warnings.isEmpty {
+            CapabilityWarningList(warnings: warnings)
+              .padding(10)
+              .frame(maxWidth: .infinity, alignment: .leading)
+              .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12))
+              .padding(.horizontal)
+          }
+        }
         .overlay(alignment: .topTrailing) {
           Button {
             open = nil
