@@ -79,8 +79,9 @@ export const signedIn = Effect.fn("signedIn")(function* (request: Request) {
  * What the caller may see on the dashboard:
  * - their own sites and artifacts, listed or not;
  * - sites shared with everyone;
- * - sites that invite them.
- * Other people's artifacts are never listed. They are shared by link.
+ * - sites and artifacts that invite them;
+ * - artifacts shared with everyone that they have opened.
+ * Other artifacts shared with everyone are not listed until opened: they are shared by link.
  */
 export const listSites = Effect.fn("listSites")(function* (identity: Identity) {
   const db = yield* Database;
@@ -141,10 +142,8 @@ export const listSites = Effect.fn("listSites")(function* (identity: Identity) {
       LEFT JOIN profiles ON profiles.email = sites.updated_by_email
       LEFT JOIN visits ON visits.site_slug = sites.slug
       WHERE lower(sites.created_by_email) = lower(?1)
-         OR ((sites.kind = 'site' OR visits.site_slug IS NOT NULL) AND (
-               sites.visibility = 'everyone'
-            OR (sites.visibility = 'selected' AND sites.slug IN (SELECT site_slug FROM mine))
-         ))
+         OR (sites.visibility = 'selected' AND sites.slug IN (SELECT site_slug FROM mine))
+         OR (sites.visibility = 'everyone' AND (sites.kind = 'site' OR visits.site_slug IS NOT NULL))
       ORDER BY sites.sort_order ASC, sites.created_at ASC`,
     identity.email,
   );

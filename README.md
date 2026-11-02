@@ -162,8 +162,9 @@ redirects.
   so sites cannot read each other's data, and they get real browser storage.
   They are for things that people come back to.
 - **Artifacts** are at `<root>/artifact/<id>`. The id is random, not made
-  from the title, and cannot be renamed. They are quick pages, and each one
-  shows only to its owner on the dashboard.
+  from the title, and cannot be renamed. They are quick pages. On the
+  dashboard an artifact shows to its owner and the people it invites; one
+  shared with everyone shows to others once they have opened it.
 
 A site that moves to Artifacts gets a random id; the R2 files and rows move
 to the new key (`src/lib/rekey.ts`). The old slug stays in `nap_redirects`.
