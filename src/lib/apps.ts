@@ -615,6 +615,11 @@ const inspectBuild = Effect.fnUntraced(function* (
     capabilities?: unknown;
     error?: string;
   };
+  // A signer from before /inspect, while a new one rolls out: the build asks for nothing.
+  if (response.status === 404) {
+    yield* Effect.logWarning("The signer cannot inspect builds yet");
+    return {};
+  }
   if (!response.ok) {
     return yield* new SignError({
       message: String(result.error ?? `Reading the build failed (${response.status})`),
