@@ -18,6 +18,7 @@ import { Route as ClaimIdRouteImport } from './routes/claim.$id'
 import { Route as ApiUploadsRouteImport } from './routes/api/uploads'
 import { Route as ApiUploadRouteImport } from './routes/api/upload'
 import { Route as ApiTokensRouteImport } from './routes/api/tokens'
+import { Route as ApiTestflightRouteImport } from './routes/api/testflight'
 import { Route as ApiSitesRouteImport } from './routes/api/sites'
 import { Route as ApiProfileRouteImport } from './routes/api/profile'
 import { Route as ApiPeopleRouteImport } from './routes/api/people'
@@ -81,6 +82,11 @@ const ApiUploadRoute = ApiUploadRouteImport.update({
 const ApiTokensRoute = ApiTokensRouteImport.update({
   id: '/api/tokens',
   path: '/api/tokens',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiTestflightRoute = ApiTestflightRouteImport.update({
+  id: '/api/testflight',
+  path: '/api/testflight',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiSitesRoute = ApiSitesRouteImport.update({
@@ -190,6 +196,7 @@ export interface FileRoutesByFullPath {
   '/api/people': typeof ApiPeopleRoute
   '/api/profile': typeof ApiProfileRoute
   '/api/sites': typeof ApiSitesRouteWithChildren
+  '/api/testflight': typeof ApiTestflightRoute
   '/api/tokens': typeof ApiTokensRouteWithChildren
   '/api/upload': typeof ApiUploadRoute
   '/api/uploads': typeof ApiUploadsRouteWithChildren
@@ -220,6 +227,7 @@ export interface FileRoutesByTo {
   '/api/people': typeof ApiPeopleRoute
   '/api/profile': typeof ApiProfileRoute
   '/api/sites': typeof ApiSitesRouteWithChildren
+  '/api/testflight': typeof ApiTestflightRoute
   '/api/tokens': typeof ApiTokensRouteWithChildren
   '/api/upload': typeof ApiUploadRoute
   '/api/uploads': typeof ApiUploadsRouteWithChildren
@@ -251,6 +259,7 @@ export interface FileRoutesById {
   '/api/people': typeof ApiPeopleRoute
   '/api/profile': typeof ApiProfileRoute
   '/api/sites': typeof ApiSitesRouteWithChildren
+  '/api/testflight': typeof ApiTestflightRoute
   '/api/tokens': typeof ApiTokensRouteWithChildren
   '/api/upload': typeof ApiUploadRoute
   '/api/uploads': typeof ApiUploadsRouteWithChildren
@@ -283,6 +292,7 @@ export interface FileRouteTypes {
     | '/api/people'
     | '/api/profile'
     | '/api/sites'
+    | '/api/testflight'
     | '/api/tokens'
     | '/api/upload'
     | '/api/uploads'
@@ -313,6 +323,7 @@ export interface FileRouteTypes {
     | '/api/people'
     | '/api/profile'
     | '/api/sites'
+    | '/api/testflight'
     | '/api/tokens'
     | '/api/upload'
     | '/api/uploads'
@@ -343,6 +354,7 @@ export interface FileRouteTypes {
     | '/api/people'
     | '/api/profile'
     | '/api/sites'
+    | '/api/testflight'
     | '/api/tokens'
     | '/api/upload'
     | '/api/uploads'
@@ -374,6 +386,7 @@ export interface RootRouteChildren {
   ApiPeopleRoute: typeof ApiPeopleRoute
   ApiProfileRoute: typeof ApiProfileRoute
   ApiSitesRoute: typeof ApiSitesRouteWithChildren
+  ApiTestflightRoute: typeof ApiTestflightRoute
   ApiTokensRoute: typeof ApiTokensRouteWithChildren
   ApiUploadRoute: typeof ApiUploadRoute
   ApiUploadsRoute: typeof ApiUploadsRouteWithChildren
@@ -447,6 +460,13 @@ declare module '@tanstack/react-router' {
       path: '/api/tokens'
       fullPath: '/api/tokens'
       preLoaderRoute: typeof ApiTokensRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/testflight': {
+      id: '/api/testflight'
+      path: '/api/testflight'
+      fullPath: '/api/testflight'
+      preLoaderRoute: typeof ApiTestflightRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/sites': {
@@ -685,6 +705,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiPeopleRoute: ApiPeopleRoute,
   ApiProfileRoute: ApiProfileRoute,
   ApiSitesRoute: ApiSitesRouteWithChildren,
+  ApiTestflightRoute: ApiTestflightRoute,
   ApiTokensRoute: ApiTokensRouteWithChildren,
   ApiUploadRoute: ApiUploadRoute,
   ApiUploadsRoute: ApiUploadsRouteWithChildren,

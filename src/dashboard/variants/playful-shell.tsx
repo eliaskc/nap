@@ -22,12 +22,15 @@ export function PlayfulShell({
   hint,
   connect = "bottom-left",
   background,
+  overlay,
   children,
 }: Pick<VariantProps, "view" | "bar"> & {
   /** Only what you would not find on your own. */
   hint?: string;
   connect?: "bottom-left" | "bottom-right" | "none";
   background?: string;
+  /** Fixed over the layout, hidden with the rest by `h`. */
+  overlay?: React.ReactNode;
   children: React.ReactNode;
 }) {
   const [hidden, setHidden] = React.useState(false);
@@ -53,6 +56,7 @@ export function PlayfulShell({
           <FilterBar view={view} compact floating />
           <UploadError />
         </div>
+        {overlay}
         {connect !== "none" && (
           <ConnectCard
             className={cn(

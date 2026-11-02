@@ -787,6 +787,24 @@ export const liveBuild = Effect.fn("liveBuild")(function* (app: string, target: 
   return row?.liveBuild ? yield* getBuild(row.liveBuild) : null;
 });
 
+/**
+ * The TestFlight launcher's live build, with Apple's latest word on processing: what the
+ * dashboard's Get the app shows. Null when TestFlight is off or nothing was published yet.
+ */
+export const testFlightBuild = Effect.fn("testFlightBuild")(function* () {
+  const testFlight = testFlightConfig();
+  if (!testFlight) return null;
+  const build = yield* liveBuild(testFlight.app, "launcher");
+  if (!build) return null;
+  const fresh = yield* refreshTestFlight(build);
+  return {
+    buildNumber: fresh.buildNumber,
+    name: fresh.appName,
+    state: fresh.testflightState,
+    error: fresh.testflightError,
+  };
+});
+
 function describeBuild(build: BuildRow) {
   return {
     id: build.id,

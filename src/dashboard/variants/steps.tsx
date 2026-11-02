@@ -4,6 +4,7 @@ import { Group, GroupButton } from "~/dashboard/controls";
 import { FilterBar, NapMark, UploadError } from "~/dashboard/chrome";
 import { ExampleDots, ExampleText, PromptButtons, useExample } from "~/dashboard/connect";
 import { useStored } from "~/dashboard/data";
+import { PhoneInstallBanner, SidebarInstallCard } from "~/dashboard/install";
 import { ItemCollection } from "~/dashboard/items";
 import type { VariantProps } from "~/dashboard/variants/types";
 import { cn } from "~/lib/utils";
@@ -28,7 +29,7 @@ export function StepsLayout({ view, loading, bar }: VariantProps) {
   );
 
   return (
-    <div className="flex min-h-dvh">
+    <div className="flex min-h-dvh overflow-x-clip">
       {!collapsed && (
         // A dark panel in light and dark mode: `dark` switches the theme tokens inside it.
         <aside className="dark sticky top-0 flex h-dvh w-[min(560px,42vw)] shrink-0 flex-col gap-9 overflow-y-auto border-r bg-sidebar px-8 pb-10 text-sidebar-foreground max-md:hidden lg:px-12">
@@ -57,6 +58,7 @@ export function StepsLayout({ view, loading, bar }: VariantProps) {
             </ExampleText>
           </Step>
           <Step number={3} title="It shows up here, ready to share" />
+          <SidebarInstallCard />
         </aside>
       )}
       <div className="flex min-w-0 flex-1 flex-col">
@@ -79,6 +81,7 @@ export function StepsLayout({ view, loading, bar }: VariantProps) {
             collapsed && "mx-auto max-w-4xl",
           )}
         >
+          <PhoneInstallBanner />
           {collapsed || (
             <div className="md:hidden">
               <PromptButtons />

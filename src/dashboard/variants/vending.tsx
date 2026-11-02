@@ -3,6 +3,7 @@ import { ItemMenu, useActions } from "~/dashboard/actions";
 import type { Item } from "~/dashboard/data";
 import { formatCount } from "~/dashboard/format";
 import { Preview, seeded } from "~/dashboard/kinds";
+import { VendingInstallSticker } from "~/dashboard/install";
 import { isShortcut, PlayfulShell } from "~/dashboard/variants/playful-shell";
 import type { VariantProps } from "~/dashboard/variants/types";
 import { cn } from "~/lib/utils";
@@ -171,6 +172,7 @@ export function VendingLayout({ view, bar }: VariantProps) {
                 <span className="opacity-70">(upload)</span>
               </span>
             </button>
+            <VendingInstallSticker />
           </div>
         </div>
       </div>

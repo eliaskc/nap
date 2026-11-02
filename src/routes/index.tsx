@@ -3,6 +3,7 @@ import * as React from "react";
 import { DashboardActions, useActions } from "~/dashboard/actions";
 import { TopBar } from "~/dashboard/chrome";
 import { useDashboardData, useItemView, useStored } from "~/dashboard/data";
+import { InstallProvider } from "~/dashboard/install";
 import { VARIANT_IDS, VARIANTS, type Mode, type Variant } from "~/dashboard/variant-switch";
 import { CanvasLayout } from "~/dashboard/variants/canvas";
 import { HeadlineLayout } from "~/dashboard/variants/headline";
@@ -39,7 +40,9 @@ function Home() {
         )
       }
     >
-      <Dashboard data={data} />
+      <InstallProvider>
+        <Dashboard data={data} />
+      </InstallProvider>
     </DashboardActions>
   );
 }

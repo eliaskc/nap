@@ -2,6 +2,7 @@ import * as React from "react";
 import { ItemMenu, useActions } from "~/dashboard/actions";
 import type { Item } from "~/dashboard/data";
 import { KindIcon, Preview, seeded } from "~/dashboard/kinds";
+import { PinnedInstallCard } from "~/dashboard/install";
 import { PlayfulShell } from "~/dashboard/variants/playful-shell";
 import type { VariantProps } from "~/dashboard/variants/types";
 import { cn } from "~/lib/utils";
@@ -201,6 +202,9 @@ export function CanvasLayout({ view, bar }: VariantProps) {
       view={view}
       bar={bar}
       hint="fling a card"
+      overlay={
+        <PinnedInstallCard className="pointer-events-auto absolute top-[96px] right-8 max-md:hidden" />
+      }
       background="color-mix(in oklch, var(--muted) 70%, oklch(0.9 0.02 80))"
     >
       <div

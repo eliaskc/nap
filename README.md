@@ -440,6 +440,14 @@ Nap → signer container (rcodesign) → signed .ipa in R2 → install link → 
   publishes and the only app: there are no install links, no iPhones, and no
   paths without Access for them. TestFlight builds need an app icon and
   `ITSAppUsesNonExemptEncryption`; the template has both.
+- **Testers.** Internal testers must be App Store Connect users. From the
+  dashboard's Get the app, anyone signed in to Nap gives their Apple Account
+  email; Nap invites it to the team with the Marketing role and access to the
+  TestFlight app only, and once Apple lists them as a user, adds them to the
+  app's internal group (the one named Nap, else the first). Existing users go
+  straight into the group. Nap learns that an invite was accepted only by
+  asking Apple when the person looks. The team API key needs the Admin role
+  for this.
 - **Installing.** Ad hoc: the dashboard's `/apps` page makes an `itms-services` link.
   iOS fetches the manifest and the `.ipa` from `/_nap/install/<token>/`
   without the Access cookie, so each link is a token for one build that lasts

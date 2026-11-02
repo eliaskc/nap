@@ -36,6 +36,7 @@ import {
   type Sort,
 } from "~/dashboard/data";
 import { formatDateTime } from "~/dashboard/format";
+import { GetAppButton } from "~/dashboard/install";
 import { KindIcon } from "~/dashboard/kinds";
 import {
   PANEL_CLASS,
@@ -103,6 +104,7 @@ export function TopBar({
         {/* Flat in Tidy, where the page is plain; a surface in Playful, over the layout. */}
         <Group floating flat={VARIANTS[variant].mode === "tidy"}>
           <UploadButton />
+          <GetAppButton />
           <ConnectedAgents />
           {profile && (
             <GroupButton
