@@ -62,7 +62,9 @@ function htmlInCanvasAvailable() {
 function viaHtmlInCanvas(element: HTMLElement, dpr: number): Promise<HTMLCanvasElement | null> {
   const width = element.offsetWidth;
   const height = element.offsetHeight;
-  const host = document.createElement("canvas") as HTMLCanvasElement & { requestPaint?: () => void };
+  const host = document.createElement("canvas") as HTMLCanvasElement & {
+    requestPaint?: () => void;
+  };
   host.setAttribute("layoutsubtree", "");
   host.setAttribute("content", "drawable");
   host.width = Math.round(width * dpr);
@@ -70,7 +72,9 @@ function viaHtmlInCanvas(element: HTMLElement, dpr: number): Promise<HTMLCanvasE
   host.style.cssText = `position:fixed;left:0;top:0;width:${width}px;height:${height}px;opacity:0.001;pointer-events:none;z-index:-1`;
   const clone = element.cloneNode(true) as HTMLElement;
   const inputs = element.querySelectorAll("input");
-  clone.querySelectorAll("input").forEach((input, i) => input.setAttribute("value", inputs[i]?.value ?? ""));
+  clone
+    .querySelectorAll("input")
+    .forEach((input, i) => input.setAttribute("value", inputs[i]?.value ?? ""));
   // A clone replays entrance animations from frame 0; freeze everything as it is now.
   for (const node of [clone, ...Array.from(clone.querySelectorAll<HTMLElement>("*"))]) {
     node.style.animation = "none";
@@ -127,7 +131,9 @@ export function rasterize(root: HTMLElement, dpr: number): HTMLCanvasElement {
   const ctx = canvas.getContext("2d")!;
   ctx.scale(dpr, dpr);
   const background = getComputedStyle(root).backgroundColor;
-  ctx.fillStyle = transparent(background) ? getComputedStyle(document.body).backgroundColor : background;
+  ctx.fillStyle = transparent(background)
+    ? getComputedStyle(document.body).backgroundColor
+    : background;
   ctx.fillRect(0, 0, width, height);
   const local = (rect: DOMRect) => ({
     x: (rect.left - box.left) / scale,
@@ -138,7 +144,11 @@ export function rasterize(root: HTMLElement, dpr: number): HTMLCanvasElement {
 
   const opacityOf = (element: Element) => {
     let opacity = 1;
-    for (let node: Element | null = element; node && node !== root.parentElement; node = node.parentElement) {
+    for (
+      let node: Element | null = element;
+      node && node !== root.parentElement;
+      node = node.parentElement
+    ) {
       opacity *= parseFloat(getComputedStyle(node).opacity || "1");
     }
     return opacity;
@@ -163,7 +173,8 @@ export function rasterize(root: HTMLElement, dpr: number): HTMLCanvasElement {
     const spacing = style.letterSpacing === "normal" ? 0 : parseFloat(style.letterSpacing) || 0;
     const setFont = (k: number) => {
       ctx.font = `${style.fontStyle} ${style.fontWeight} ${size * k}px ${style.fontFamily}`;
-      if ("letterSpacing" in ctx) (ctx as { letterSpacing: string }).letterSpacing = `${spacing * k}px`;
+      if ("letterSpacing" in ctx)
+        (ctx as { letterSpacing: string }).letterSpacing = `${spacing * k}px`;
     };
     // Fit the font to the longest word's measured width, so canvas and layout agree.
     const longest = words.reduce((a, b) => (b.word.length > a.word.length ? b : a));
@@ -187,7 +198,17 @@ export function rasterize(root: HTMLElement, dpr: number): HTMLCanvasElement {
     const avatar = (element as HTMLElement).dataset?.rasterAvatar;
     if (avatar) {
       const [shape, fill, letters] = avatar.split("|");
-      drawShape(ctx, shape, fill, letters, r.x + r.w / 2, r.y + r.h / 2, r.w, "#fff", style.fontFamily);
+      drawShape(
+        ctx,
+        shape,
+        fill,
+        letters,
+        r.x + r.w / 2,
+        r.y + r.h / 2,
+        r.w,
+        "#fff",
+        style.fontFamily,
+      );
       return;
     }
     if (element instanceof SVGElement) return;
@@ -216,7 +237,11 @@ export function rasterize(root: HTMLElement, dpr: number): HTMLCanvasElement {
       ctx.textAlign = "left";
       const top = parseFloat(style.paddingTop);
       const bottom = parseFloat(style.paddingBottom);
-      ctx.fillText(element.value, r.x + parseFloat(style.paddingLeft), r.y + top + (r.h - top - bottom) / 2);
+      ctx.fillText(
+        element.value,
+        r.x + parseFloat(style.paddingLeft),
+        r.y + top + (r.h - top - bottom) / 2,
+      );
       return;
     }
     for (const child of Array.from(element.childNodes)) {

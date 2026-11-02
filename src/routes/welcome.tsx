@@ -273,7 +273,9 @@ function Welcome() {
         </div>
       </div>
       <div ref={overlayRef} className="pointer-events-none absolute inset-0" />
-      {stage === "card" && look && <Card name={saved || name} look={look} subtitle={subtitleFor(next)} />}
+      {stage === "card" && look && (
+        <Card name={saved || name} look={look} subtitle={subtitleFor(next)} />
+      )}
     </div>
   );
 }
@@ -327,7 +329,10 @@ function AskForm({
         onSubmit();
       }}
     >
-      <div key={emoji} className="text-6xl leading-none animate-in zoom-in-50 duration-200 sm:text-7xl">
+      <div
+        key={emoji}
+        className="text-6xl leading-none animate-in zoom-in-50 duration-200 sm:text-7xl"
+      >
         {emoji}
       </div>
       <h1 className="mt-4 text-[34px] leading-[1.05] font-bold tracking-tight sm:text-[44px]">
@@ -393,7 +398,13 @@ function AskForm({
         )}
       >
         <span className={cn("transition-opacity", saving && "opacity-0")}>
-          {editing ? "Save" : edited ? "Save" : state.guess.confident ? "That's me" : "Sure, whatever"}
+          {editing
+            ? "Save"
+            : edited
+              ? "Save"
+              : state.guess.confident
+                ? "That's me"
+                : "Sure, whatever"}
         </span>
         {saving && (
           <span className="absolute inset-0 grid place-items-center">
@@ -566,8 +577,12 @@ function Reaction({
       <div className="text-7xl leading-none animate-in zoom-in-[0.2] spin-in-12 duration-300 sm:text-8xl">
         {copy.emoji}
       </div>
-      <h1 className="mt-4 text-[30px] leading-[1.08] font-bold tracking-tight sm:text-[40px]">{copy.title}</h1>
-      {copy.body && <p className="mt-2 text-[15px] text-muted-foreground sm:text-base">{copy.body}</p>}
+      <h1 className="mt-4 text-[30px] leading-[1.08] font-bold tracking-tight sm:text-[40px]">
+        {copy.title}
+      </h1>
+      {copy.body && (
+        <p className="mt-2 text-[15px] text-muted-foreground sm:text-base">{copy.body}</p>
+      )}
       <div className="mt-6 flex items-center gap-2.5">
         <Avatar look={look} name={name} size={36} />
         <span className="text-[17px] font-semibold tracking-tight">{name}</span>
@@ -583,7 +598,11 @@ function Reaction({
             >
               Busted. Let me fix it
             </button>
-            <button className="h-11 text-[15px] font-medium disabled:opacity-40" onClick={onContinue} disabled={busy}>
+            <button
+              className="h-11 text-[15px] font-medium disabled:opacity-40"
+              onClick={onContinue}
+              disabled={busy}
+            >
               No really, that's me
             </button>
           </>
@@ -614,7 +633,9 @@ function Reaction({
 
 /** The card the transition resolves into, as DOM: the same layout as drawCard in dust.ts. */
 function Card({ name, look, subtitle }: { name: string; look: Look; subtitle: string }) {
-  const [theme] = React.useState(() => cardTheme(document.documentElement.classList.contains("dark")));
+  const [theme] = React.useState(() =>
+    cardTheme(document.documentElement.classList.contains("dark")),
+  );
   return (
     <div className="fixed inset-0 z-50" style={{ background: theme.bg, color: theme.fg }}>
       <div

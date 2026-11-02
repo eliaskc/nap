@@ -1,5 +1,13 @@
 import type { NapAvatarOptions, NapLooks, NapPerson } from "./api";
-import { COLOR_VALUES, COLORS, SHAPE_PATHS, SHAPES, avatarSvg, isColor, isShape } from "../lib/looks";
+import {
+  COLOR_VALUES,
+  COLORS,
+  SHAPE_PATHS,
+  SHAPES,
+  avatarSvg,
+  isColor,
+  isShape,
+} from "../lib/looks";
 import { napJson } from "./paths";
 
 /** Everyone on Nap, or only these emails, with their names and looks. */
@@ -18,11 +26,19 @@ export const looks: NapLooks = Object.freeze({
 }) as NapLooks;
 
 /** A person's avatar as an <svg> element: their shape, their colour, their initials. */
-export function avatar(person: Pick<NapPerson, "name" | "shape" | "color">, options: NapAvatarOptions = {}) {
+export function avatar(
+  person: Pick<NapPerson, "name" | "shape" | "color">,
+  options: NapAvatarOptions = {},
+) {
   const shape = isShape(person.shape) ? person.shape : "circle";
   const color = isColor(person.color) ? person.color : "blue";
   const template = document.createElement("template");
-  template.innerHTML = avatarSvg({ shape, color }, person.name || "", options.size ?? 32, options.initials !== false);
+  template.innerHTML = avatarSvg(
+    { shape, color },
+    person.name || "",
+    options.size ?? 32,
+    options.initials !== false,
+  );
   return template.content.firstElementChild as SVGSVGElement;
 }
 

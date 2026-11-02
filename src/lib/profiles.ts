@@ -61,7 +61,9 @@ export const assignMissingLooks = Effect.fn("assignMissingLooks")(function* () {
     `SELECT ${PERSON_COLUMNS} FROM profiles ORDER BY created_at, email`,
   );
   const taken = new Set(
-    rows.filter((row) => isShape(row.shape) && isColor(row.color)).map((row) => lookKey(lookOf(row))),
+    rows
+      .filter((row) => isShape(row.shape) && isColor(row.color))
+      .map((row) => lookKey(lookOf(row))),
   );
   for (const row of rows) {
     if (isShape(row.shape) && isColor(row.color)) continue;
@@ -111,9 +113,7 @@ export const listPeople = Effect.fn("listPeopleWithLooks")(function* (
     rows = yield* db.all<Row>(`SELECT ${PERSON_COLUMNS} FROM profiles ORDER BY created_at`);
   }
   const wanted = emails ? new Set(emails.map((email) => email.trim().toLowerCase())) : null;
-  return rows
-    .filter((row) => !wanted || wanted.has(row.email))
-    .map((row) => toPerson(row));
+  return rows.filter((row) => !wanted || wanted.has(row.email)).map((row) => toPerson(row));
 });
 
 /** True when this person has a profile but no name yet: the welcome page is next. */

@@ -111,7 +111,13 @@ export class SiteChannel extends DurableObject<ChannelEnv> {
     if (parsed?.t === "send") {
       const out = {
         t: "message",
-        from: { id: peer.id, email: peer.email, name: peer.name, shape: peer.shape, color: peer.color },
+        from: {
+          id: peer.id,
+          email: peer.email,
+          name: peer.name,
+          shape: peer.shape,
+          color: peer.color,
+        },
         data: parsed.data ?? null,
       };
       if (typeof parsed.to === "string") {

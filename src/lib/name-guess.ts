@@ -2,8 +2,39 @@
 // Score 0–100; >= 60 counts as "we think it's pretty good".
 import { FAMILY, GIVEN, fold, looksLikeSurname } from "./name-list.ts";
 
-const GENERIC = new Set(["gmail.com", "googlemail.com", "hotmail.com", "hotmail.se", "outlook.com", "icloud.com", "yahoo.com", "yahoo.fr", "proton.me", "protonmail.com", "live.se", "me.com", "orange.fr", "free.fr", "laposte.net", "telia.com", "bredband.net"]);
-const ROLE = new Set(["admin", "info", "hello", "hej", "contact", "team", "support", "dev", "office", "noreply", "bonjour", "kontakt"]);
+const GENERIC = new Set([
+  "gmail.com",
+  "googlemail.com",
+  "hotmail.com",
+  "hotmail.se",
+  "outlook.com",
+  "icloud.com",
+  "yahoo.com",
+  "yahoo.fr",
+  "proton.me",
+  "protonmail.com",
+  "live.se",
+  "me.com",
+  "orange.fr",
+  "free.fr",
+  "laposte.net",
+  "telia.com",
+  "bredband.net",
+]);
+const ROLE = new Set([
+  "admin",
+  "info",
+  "hello",
+  "hej",
+  "contact",
+  "team",
+  "support",
+  "dev",
+  "office",
+  "noreply",
+  "bonjour",
+  "kontakt",
+]);
 
 export type Guess = { guess: string; score: number; confident: boolean; reasons: string[] };
 
@@ -11,12 +42,18 @@ const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1).toLowerCase();
 const hasVowel = (s: string) => /[aeiouy]/i.test(s);
 const given = (t: string) => GIVEN.get(t);
 const family = (t: string) => FAMILY.get(t) ?? cap(t);
-const pretty = (t: string, i: number) => (t.length === 1 ? t.toUpperCase() + "." : i === 0 ? given(t) ?? cap(t) : family(t));
+const pretty = (t: string, i: number) =>
+  t.length === 1 ? t.toUpperCase() + "." : i === 0 ? (given(t) ?? cap(t)) : family(t);
 
 export function guessName(email: string, idpName?: string | null): Guess {
   const reasons: string[] = [];
   if (idpName && idpName.trim().split(/\s+/).length >= 2) {
-    return { guess: idpName.trim(), score: 92, confident: true, reasons: ["Sign-in provider sent a full name"] };
+    return {
+      guess: idpName.trim(),
+      score: 92,
+      confident: true,
+      reasons: ["Sign-in provider sent a full name"],
+    };
   }
   const [rawLocal = "", domain = ""] = email.trim().toLowerCase().split("@");
   const local = fold(rawLocal.split("+")[0]);
@@ -34,9 +71,17 @@ export function guessName(email: string, idpName?: string | null): Guess {
     reasons.push("Digits in the address");
   }
 
-  const tokens = local.replace(/\d+/g, "").split(/[._-]+/).filter(Boolean);
+  const tokens = local
+    .replace(/\d+/g, "")
+    .split(/[._-]+/)
+    .filter(Boolean);
   if (tokens.length === 0 || ROLE.has(tokens[0])) {
-    return { guess: tokens[0] ? cap(tokens[0]) : "", score: 5, confident: false, reasons: [...reasons, "Looks like a role address"] };
+    return {
+      guess: tokens[0] ? cap(tokens[0]) : "",
+      score: 5,
+      confident: false,
+      reasons: [...reasons, "Looks like a role address"],
+    };
   }
 
   if (tokens.length >= 2) {

@@ -8,7 +8,14 @@
 import { COLOR_VALUES, firstName, initials, type Look } from "~/lib/looks";
 import { drawShape } from "./capture";
 
-export const CARD = { shape: 124, shapeY: 0.42, nameGap: 104, nameSize: 34, subGap: 142, subSize: 13 };
+export const CARD = {
+  shape: 124,
+  shapeY: 0.42,
+  nameGap: 104,
+  nameSize: 34,
+  subGap: 142,
+  subSize: 13,
+};
 export const DUST_SECONDS = 2.5;
 
 export type CardTheme = { bg: string; fg: string; sub: string };
@@ -27,7 +34,17 @@ export function drawCard(
   font: string,
 ) {
   const cy = height * CARD.shapeY;
-  drawShape(ctx, person.shape, COLOR_VALUES[person.color], initials(person.name), width / 2, cy, CARD.shape, "#fff", font);
+  drawShape(
+    ctx,
+    person.shape,
+    COLOR_VALUES[person.color],
+    initials(person.name),
+    width / 2,
+    cy,
+    CARD.shape,
+    "#fff",
+    font,
+  );
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   ctx.fillStyle = theme.fg;
@@ -97,14 +114,16 @@ function compile(gl: WebGL2RenderingContext, vs: string, fs: string) {
     const s = gl.createShader(type)!;
     gl.shaderSource(s, source);
     gl.compileShader(s);
-    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s) ?? "shader");
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS))
+      throw new Error(gl.getShaderInfoLog(s) ?? "shader");
     return s;
   };
   const program = gl.createProgram()!;
   gl.attachShader(program, shader(gl.VERTEX_SHADER, vs));
   gl.attachShader(program, shader(gl.FRAGMENT_SHADER, fs));
   gl.linkProgram(program);
-  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(program) ?? "link");
+  if (!gl.getProgramParameter(program, gl.LINK_STATUS))
+    throw new Error(gl.getProgramInfoLog(program) ?? "link");
   return program;
 }
 
@@ -165,7 +184,14 @@ export function runDust(options: {
     for (let x = 0; x < gx; x++) {
       const i = (y * gx + x) * 4;
       if (pixels[i + 3] > 40) {
-        targets.push(x, y, pixels[i] / 255, pixels[i + 1] / 255, pixels[i + 2] / 255, pixels[i + 3] / 255);
+        targets.push(
+          x,
+          y,
+          pixels[i] / 255,
+          pixels[i + 1] / 255,
+          pixels[i + 2] / 255,
+          pixels[i + 3] / 255,
+        );
       }
     }
   }

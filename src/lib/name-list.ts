@@ -40,7 +40,44 @@ Martin Bernard Thomas Petit Robert Richard Durand Dubois Moreau Laurent Simon Mi
 Müller Schmidt Schneider Fischer Weber Wagner Becker Hoffmann Schulz Koch Richter Rossi Russo Ferrari Esposito Bianchi Romano Colombo Ricci González Rodríguez Fernández López Martínez Sánchez Pérez Gómez Silva Santos Oliveira Souza Kowalski Nowak Wiśniewski Ivanov Petrov Novak Horvat Yilmaz Kaya Demir Nguyen Tran Wang Li Zhang Liu Chen Yang Huang Kim Park Choi Tanaka Suzuki Sato Singh Kumar Sharma Gupta Hussain Ahmed Hassan Ibrahim De Jong Jansen Visser Bakker
 `;
 
-const SURNAME_SUFFIXES = ["son", "sson", "berg", "ström", "strom", "qvist", "kvist", "quist", "gren", "lund", "holm", "dahl", "blad", "stedt", "sen", "nen", "ski", "ska", "ov", "ova", "ez", "ini", "elli", "mann", "man", "ley", "ton", "ford", "field", "wood", "eau", "ier", "ard", "oux", "ault", "ette"];
+const SURNAME_SUFFIXES = [
+  "son",
+  "sson",
+  "berg",
+  "ström",
+  "strom",
+  "qvist",
+  "kvist",
+  "quist",
+  "gren",
+  "lund",
+  "holm",
+  "dahl",
+  "blad",
+  "stedt",
+  "sen",
+  "nen",
+  "ski",
+  "ska",
+  "ov",
+  "ova",
+  "ez",
+  "ini",
+  "elli",
+  "mann",
+  "man",
+  "ley",
+  "ton",
+  "ford",
+  "field",
+  "wood",
+  "eau",
+  "ier",
+  "ard",
+  "oux",
+  "ault",
+  "ette",
+];
 
 export const fold = (s: string) =>
   s
@@ -57,7 +94,8 @@ const toMap = (...lists: string[]) => {
     for (const n of list.split(/\s+/).filter(Boolean)) {
       const k = fold(n);
       // Prefer the accented spelling when the same key appears twice (e.g. Helene/Hélène keep the first).
-      if (!m.has(k) || (m.get(k) === k[0].toUpperCase() + k.slice(1) && n !== m.get(k))) m.set(k, n);
+      if (!m.has(k) || (m.get(k) === k[0].toUpperCase() + k.slice(1) && n !== m.get(k)))
+        m.set(k, n);
     }
   return m;
 };
@@ -67,4 +105,5 @@ export const FAMILY = toMap(SURNAMES);
 export const GIVEN_COUNT = GIVEN.size;
 export const FAMILY_COUNT = FAMILY.size;
 
-export const looksLikeSurname = (t: string) => FAMILY.has(t) || (t.length >= 4 && SURNAME_SUFFIXES.some((s) => t.endsWith(s)));
+export const looksLikeSurname = (t: string) =>
+  FAMILY.has(t) || (t.length >= 4 && SURNAME_SUFFIXES.some((s) => t.endsWith(s)));
