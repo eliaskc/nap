@@ -41,19 +41,24 @@ export class UpstreamFetchError extends Schema.TaggedError<UpstreamFetchError>()
 
 /**
  * Fetches a URL for a page, so pages can use APIs that do not allow other origins. Only HTTPS,
- * only hosts the site lists in nap.json, and only for people who can view the site. Nothing of
+ * only hosts the page lists in nap.json, and only for people who can view the page. Nothing of
  * the viewer's is sent on (no cookies, no Access headers, no referrer); only the method, body,
  * and headers the page passes. Plain GETs are cached at the edge for a few minutes.
+ *
+ * Sites call it on their own host. Artifacts call it below their frame token (`frame: true`):
+ * the frame's origin is opaque, so its requests are always cross-site, and the token in the
+ * path is the credential instead of the Access cookie.
  */
 export const handleSiteFetch = Effect.fn("handleSiteFetch")(function* (
   slug: string,
   request: Request,
   email: string,
+  options: { frame?: boolean } = {},
 ) {
   if (!METHODS.has(request.method)) {
     return yield* failNoStore(405, `${request.method} requests cannot be fetched`);
   }
-  if (isCrossSite(request)) return yield* failNoStore(403, "Forbidden");
+  if (!options.frame && isCrossSite(request)) return yield* failNoStore(403, "Forbidden");
   const forwarded = readForwardedHeaders(request.headers.get(HEADERS_HEADER));
   if (typeof forwarded === "string") return yield* failNoStore(400, forwarded);
 
@@ -62,8 +67,8 @@ export const handleSiteFetch = Effect.fn("handleSiteFetch")(function* (
     `SELECT current_version AS currentVersion, kind FROM sites WHERE slug = ?`,
     slug,
   );
-  if (!site?.currentVersion || site.kind !== "site") {
-    return yield* failNoStore(404, "Site not found");
+  if (!site?.currentVersion || site.kind !== (options.frame ? "artifact" : "site")) {
+    return yield* failNoStore(404, options.frame ? "Artifact not found" : "Site not found");
   }
   if (!(yield* canViewSite(slug, email))) return yield* failNoStore(403, "Forbidden");
 

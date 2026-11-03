@@ -223,7 +223,7 @@ export interface Nap {
   db: { collection<T = Record<string, unknown>>(name: string): NapCollection<T> };
   channel<S = unknown, M = unknown>(name: string): NapChannel<S, M>;
   voice<M = unknown>(name?: string): NapVoiceCall<M>;
-  /** Fetches a URL through Nap, for APIs that do not allow other origins. The site lists the hosts in nap.json ("fetch"). */
+  /** Fetches a URL through Nap, for APIs that do not allow other origins. The page lists the hosts in nap.json ("fetch"). */
   fetch(url: string | URL, options?: NapFetchOptions): Promise<Response>;
   /** The person viewing the page, with their name and look. */
   me(): Promise<NapIdentity>;

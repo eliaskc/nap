@@ -222,3 +222,24 @@ test("errors are never cached", async () => {
     mock.restore();
   }
 });
+
+test("artifacts fetch below their frame token, which is cross-site by nature", async () => {
+  const env = environment();
+  await env.DB.prepare(`UPDATE sites SET kind = 'artifact' WHERE slug = 'games'`).run();
+  const mock = upstream();
+  try {
+    const request = () =>
+      new Request(
+        `https://nap.test/_nap/frame/t/_nap/fetch?url=${encodeURIComponent("https://api.example.com/x")}`,
+        { headers: { "sec-fetch-site": "cross-site" } },
+      );
+    const framed = await respond(env, handleSiteFetch("games", request(), OWNER, { frame: true }));
+    assert.equal(framed.status, 200);
+    assert.equal(await framed.text(), "ok");
+    // Not on a site's host: an artifact has none, and cross-site requests are refused there.
+    const unframed = await respond(env, handleSiteFetch("games", request(), OWNER));
+    assert.equal(unframed.status, 403);
+  } finally {
+    mock.restore();
+  }
+});

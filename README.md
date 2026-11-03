@@ -228,10 +228,11 @@ to about eight people.
 
 ### Fetches
 
-A site's pages can call public APIs on other origins through `/_nap/fetch`
-(`src/lib/site-fetch.ts`), for APIs that send no CORS headers. The site lists the hosts in a
-`nap.json` at the root of its live version, so each publish decides what it may reach. Nap
-checks that the person can view the site, fetches only over https from those hosts (and never
+Pages can call public APIs on other origins through `/_nap/fetch`
+(`src/lib/site-fetch.ts`), for APIs that send no CORS headers: sites on their own host,
+artifacts below their frame token. The page lists the hosts in a `nap.json` at the root of its
+live version, so each publish decides what it may reach. Nap checks that the person can view
+the page, fetches only over https from those hosts (and never
 Nap's own), and checks every redirect against the list. Pages choose the method, a small body,
 and headers (in `x-nap-fetch-headers`, so they stay apart from the browser's own); Nap sends
 nothing of the viewer's: no cookies, no Access headers. Plain GETs are cached at the edge for a

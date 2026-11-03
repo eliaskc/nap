@@ -11,6 +11,7 @@ import { serveSiteDataClient, serveVoiceEngine } from "~/lib/site-data-client";
 import { handleLiveRequest, publishChange } from "~/lib/site-live";
 import { handleChannelRequest } from "~/lib/site-channel";
 import { handleRtcRequest } from "~/lib/site-rtc";
+import { handleSiteFetch } from "~/lib/site-fetch";
 import { fileHeaders, findViewableNap, getNapFile, normalizeRequestPath } from "~/lib/site-serving";
 import { serveShareWidget } from "~/lib/share-widget";
 import { findVersion, listVersions, restoreVersion } from "~/lib/versions";
@@ -182,7 +183,8 @@ export const handleFrameRequest = Effect.fn("handleFrameRequest")(function* (req
         status: 204,
         headers: {
           "access-control-allow-methods": "GET, HEAD, POST, PUT, PATCH, DELETE",
-          "access-control-allow-headers": "content-type, if-match, if-none-match",
+          "access-control-allow-headers":
+            "content-type, if-match, if-none-match, x-nap-fetch-headers",
           "access-control-max-age": "600",
         },
       }),
@@ -258,6 +260,11 @@ export const handleFrameRequest = Effect.fn("handleFrameRequest")(function* (req
   }
   if (rest === "/_nap/rtc") {
     return withCors(yield* recoverHttpError(handleRtcRequest(frame.slug, request, identity)));
+  }
+  if (rest === "/_nap/fetch") {
+    return withCors(
+      yield* recoverHttpError(handleSiteFetch(frame.slug, request, frame.email, { frame: true })),
+    );
   }
   if (rest.startsWith("/_nap/")) return withCors(new Response("Not found", { status: 404 }));
 
@@ -399,6 +406,8 @@ function withCors(response: Response) {
   // cross-origin. The token in the path is the credential, not a cookie.
   const result = new Response(response.body, response);
   result.headers.set("access-control-allow-origin", "*");
+  // nap.fetch tells Nap's own errors from the upstream's by these.
+  result.headers.set("access-control-expose-headers", "x-nap-fetch, x-nap-fetch-url");
   return result;
 }
 

@@ -16,7 +16,7 @@ This page covers the common case. Read a topic below when you need it.
 ## Artifact or site
 
 - **Artifact** (the default): one page to look at or use, such as a report, a prototype, or a one-off tool. It lives at `https://{{rootDomain}}/artifact/<random id>` below a small Nap bar with a Share button.
-- **Site**: something people come back to, at `https://<slug>.{{rootDomain}}`. Make a site when the user asks for one, or when the page needs client-side routing, root-absolute URLs, storage that lasts across reloads, or `nap.fetch`. Read the `sites` topic first.
+- **Site**: something people come back to, at `https://<slug>.{{rootDomain}}`. Make a site when the user asks for one, or when the page needs client-side routing, root-absolute URLs, or storage that lasts across reloads. Read the `sites` topic first.
 
 ## Sign in and publish
 
@@ -59,7 +59,7 @@ Read one with `curl -fsSL https://{{rootDomain}}/_nap/api/instructions/<topic>`.
 - `data`: collections that save JSON documents, with live updates (`nap.db`).
 - `channels`: multiplayer, presence, and messages between the people on a page (`nap.channel`).
 - `voice`: a live audio call between the people on a page (`nap.voice`).
-- `fetch`: reading public APIs from other origins from a site (`nap.fetch`).
+- `fetch`: reading public APIs from other origins (`nap.fetch`).
 - `api`: the HTTP API without the script: sign-in, publishing, files, versions, restore, comments, and limits.
 - `drafts`: publishing without a token through a claim link the user opens.
 <!-- if apps -->
