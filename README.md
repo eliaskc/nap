@@ -162,7 +162,8 @@ Both are rows in `sites`, and `kind` says how each one is served. They share
 redirects.
 
 - **Sites** have their own host, `<slug>.<root>`. Each one has its own origin,
-  so sites cannot read each other's data, and they get real browser storage.
+  so sites cannot read each other's data unless one allows it (below), and they
+  get real browser storage.
   They are for things that people come back to.
 - **Artifacts** are at `<root>/artifact/<id>`. The id is random, not made
   from the title, and cannot be renamed. They are quick pages. On the
@@ -206,6 +207,12 @@ The Worker checks access before it opens a socket, and the object checks
 again on every send and closes the sockets of people who lost access. The
 client polls the changes feed when it connects and, more slowly, while
 connected, so a missed message only delays an update.
+
+A site can let another site's pages use some of its collections, in the `nap.json` of its live
+version (`"data": { "allow": { "<other site>": ["<collection>"] } }`). Those pages call
+`/_nap/data/@<site>/<collection>` on their own host, so Access works as for their own data; Nap
+checks that the person can view the site that owns the data and that its live manifest allows the
+calling site and collection. There is no live socket for another site's collections.
 
 ### Channels
 

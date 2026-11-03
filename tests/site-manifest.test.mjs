@@ -16,17 +16,29 @@ registerHooks({
 const { parseManifest } = await import("../src/lib/site-manifest.ts");
 
 test("nap.json: spa only when true, and only valid fetch hosts", () => {
-  assert.deepEqual(parseManifest(null), { fetch: [], spa: false });
-  assert.deepEqual(parseManifest({ spa: "yes" }), { fetch: [], spa: false });
+  const none = { allow: {} };
+  assert.deepEqual(parseManifest(null), { fetch: [], spa: false, data: none });
+  assert.deepEqual(parseManifest({ spa: "yes" }), { fetch: [], spa: false, data: none });
   assert.deepEqual(
     parseManifest({ spa: true, fetch: [" API.example.com ", "*.x.org", "bad", 3] }),
     {
       fetch: ["api.example.com", "*.x.org"],
       spa: true,
+      data: none,
     },
   );
   assert.equal(
     parseManifest({ fetch: Array.from({ length: 30 }, (_, i) => `h${i}.com`) }).fetch.length,
     20,
   );
+});
+
+test("nap.json: data.allow keeps only valid sites and collections", () => {
+  const manifest = parseManifest({
+    data: { allow: { weave: ["weave", "weave", "Bad", 3], "Bad slug": ["x"], empty: [] } },
+  });
+  assert.deepEqual(manifest.data, { allow: { weave: ["weave"] } });
+  assert.deepEqual(parseManifest({ data: { allow: ["weave"] } }).data, { allow: {} });
+  const many = Object.fromEntries(Array.from({ length: 30 }, (_, i) => [`s${i}`, ["c"]]));
+  assert.equal(Object.keys(parseManifest({ data: { allow: many } }).data.allow).length, 20);
 });

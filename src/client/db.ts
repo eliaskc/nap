@@ -1,6 +1,7 @@
 import type {
   NapChange,
   NapCollection,
+  NapCollectionOptions,
   NapDocument,
   NapIdentity,
   NapSubscribeOptions,
@@ -218,16 +219,25 @@ function subscribe(
   };
 }
 
-export function collection(name: string): NapCollection {
+export function collection(name: string, options: NapCollectionOptions = {}): NapCollection {
   if (!/^[a-z][a-z0-9_-]{0,47}$/.test(name)) {
     throw new TypeError("Invalid Nap collection name");
   }
-  const base = encodeURIComponent(name);
+  const site = options.site;
+  if (site != null && !/^[a-z0-9-]{1,32}$/.test(site)) {
+    throw new TypeError("Invalid Nap site");
+  }
+  // Another site's collection: /_nap/data/@<site>/<name> on this page's own host.
+  const base = (site != null ? "@" + site + "/" : "") + encodeURIComponent(name);
   const item = (id: string) => base + "/" + encodeURIComponent(id);
+  // This page's subscribers see only its own collections.
+  const notify = (change: Change) => {
+    if (site == null) publish(name, change);
+  };
 
   async function saved(promise: Promise<{ document: NapDocument }>) {
     const document = (await promise).document;
-    publish(name, document);
+    notify(document);
     return document;
   }
 
@@ -266,11 +276,19 @@ export function collection(name: string): NapCollection {
     },
     async delete(id: string, options: NapWriteOptions = {}) {
       await request(item(id), { method: "DELETE", headers: conditions(options) });
-      publish(name, { id, deleted: true });
+      notify({ id, deleted: true });
     },
     changes,
     // Calls back with every document, newest first, now and after each change.
     subscribe(callback: (documents: Array<NapDocument>) => void, options?: NapSubscribeOptions) {
+      if (site != null) {
+        throw new NapError(
+          "subscribe() is not available for another site's collection (\"" +
+            site +
+            '"). Use changes() or list().',
+          400,
+        );
+      }
       return subscribe(name, changes, callback, options);
     },
   });

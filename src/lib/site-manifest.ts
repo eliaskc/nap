@@ -6,15 +6,21 @@ import { Storage } from "~/server/storage";
 export const MANIFEST_PATH = "nap.json";
 const MAX_HOSTS = 20;
 const HOST_PATTERN = /^(?:\*\.)?[a-z0-9-]+(?:\.[a-z0-9-]+)+$/;
+const MAX_DATA_SITES = 20;
+const MAX_DATA_COLLECTIONS = 20;
+export const SLUG_PATTERN = /^[a-z0-9-]{1,32}$/;
+export const COLLECTION_PATTERN = /^[a-z][a-z0-9_-]{0,47}$/;
 
 export type SiteManifest = {
   /** Hosts its pages may fetch through Nap: "api.example.com", "*.example.org". */
   fetch: string[];
   /** A single-page app: paths without a file serve the root index.html. */
   spa: boolean;
+  /** Other sites whose pages may use its collections: source slug -> collection names. */
+  data: { allow: Record<string, string[]> };
 };
 
-const EMPTY: SiteManifest = { fetch: [], spa: false };
+const EMPTY: SiteManifest = { fetch: [], spa: false, data: { allow: {} } };
 
 /** Manifests per site version. Versions are immutable, so an entry never goes stale. */
 const byVersion = new Map<string, SiteManifest>();
@@ -37,7 +43,7 @@ export const siteManifest = Effect.fnUntraced(function* (slug: string, version: 
 
 export function parseManifest(value: unknown): SiteManifest {
   if (!value || typeof value !== "object") return EMPTY;
-  const raw = value as { fetch?: unknown; spa?: unknown };
+  const raw = value as { fetch?: unknown; spa?: unknown; data?: unknown };
   const fetch = Array.isArray(raw.fetch)
     ? raw.fetch
         .filter(Predicate.isString)
@@ -45,5 +51,20 @@ export function parseManifest(value: unknown): SiteManifest {
         .filter((host) => HOST_PATTERN.test(host))
         .slice(0, MAX_HOSTS)
     : [];
-  return { fetch, spa: raw.spa === true };
+  return { fetch, spa: raw.spa === true, data: { allow: parseDataAllow(raw.data) } };
+}
+
+/** `{ "allow": { "<site>": ["<collection>", ...] } }`, keeping only valid names. */
+function parseDataAllow(data: unknown) {
+  const allow: Record<string, string[]> = {};
+  const raw = data && typeof data === "object" ? (data as { allow?: unknown }).allow : undefined;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return allow;
+  for (const [slug, names] of Object.entries(raw).slice(0, MAX_DATA_SITES)) {
+    if (!SLUG_PATTERN.test(slug) || !Array.isArray(names)) continue;
+    const collections = [
+      ...new Set(names.filter(Predicate.isString).filter((name) => COLLECTION_PATTERN.test(name))),
+    ].slice(0, MAX_DATA_COLLECTIONS);
+    if (collections.length) allow[slug] = collections;
+  }
+  return allow;
 }

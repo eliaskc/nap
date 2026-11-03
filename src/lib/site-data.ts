@@ -1,5 +1,6 @@
 import { Effect } from "effect";
 import { ensureProfile, getIdentity, type Identity } from "~/lib/nap-server";
+import { COLLECTION_PATTERN, SLUG_PATTERN, siteManifest } from "~/lib/site-manifest";
 import { Database } from "~/server/database";
 import { fail, HttpError, json } from "~/server/http";
 
@@ -10,7 +11,6 @@ const MAX_PAGE_SIZE = 100;
 // size budget so a page of large documents stays small enough to hold in memory.
 const MAX_CHANGES_PAGE_SIZE = 1000;
 const MAX_CHANGES_PAGE_BYTES = 4 * 1024 * 1024;
-const COLLECTION_PATTERN = /^[a-z][a-z0-9_-]{0,47}$/;
 // Nap's ids are UUIDs. Apps that use put() choose their own, for example "q3" or "settings".
 const DOCUMENT_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 const SINCE_PATTERN = /^\d{1,15}$/;
@@ -45,6 +45,18 @@ type Precondition =
 
 export type DocumentChange = ReturnType<typeof toChange>;
 
+/**
+ * Whose collections a /_nap/data/<path> request on a site's host uses. `@<site>/<collection>...`
+ * is another site's, which that site allows in its nap.json; anything else is the host's own.
+ */
+export function siteDataTarget(hostSlug: string, path: string) {
+  const match = path.match(/^@([^/]*)(?:\/(.*))?$/);
+  if (!match || match[1] === hostSlug) {
+    return { slug: hostSlug, path: match ? (match[2] ?? "") : path, from: undefined };
+  }
+  return { slug: match[1], path: match[2] ?? "", from: hostSlug };
+}
+
 export const handleSiteDataRequest = Effect.fn("handleSiteDataRequest")(function* <R = never>(
   slug: string,
   request: Request,
@@ -55,13 +67,20 @@ export const handleSiteDataRequest = Effect.fn("handleSiteDataRequest")(function
      * so the request headers say nothing, and the request must not count as using Nap.
      */
     frameIdentity?: Identity;
+    /**
+     * For another site's pages: its slug. They may use only the collections this site's live
+     * nap.json allows them ("data": { "allow": { "<from>": ["<collection>"] } }).
+     */
+    from?: string;
     /** Runs after each committed write, with what the changes feed will return for it. */
     onChange?: (collection: string, change: DocumentChange) => Effect.Effect<void, never, R>;
   } = {},
 ) {
-  const { frameIdentity, onChange } = options;
+  const { frameIdentity, from, onChange } = options;
   const identity = frameIdentity ?? getIdentity(request);
-  if (!(yield* canViewSite(slug, identity.email))) return yield* fail(404, "Site not found");
+  if (!SLUG_PATTERN.test(slug) || !(yield* canViewSite(slug, identity.email))) {
+    return yield* fail(404, "Site not found");
+  }
 
   if (!frameIdentity) yield* ensureProfile(identity);
 
@@ -79,6 +98,13 @@ export const handleSiteDataRequest = Effect.fn("handleSiteDataRequest")(function
     return yield* fail(
       400,
       "Document ids must start with a letter or number and contain at most 64 letters, numbers, _ or -",
+    );
+  }
+  if (from !== undefined && !(yield* allowsSite(slug, from, collection))) {
+    return yield* fail(
+      403,
+      `The site "${slug}" does not let "${from}" use its collection "${collection}". ` +
+        `Its nap.json needs { "data": { "allow": { "${from}": ["${collection}"] } } }`,
     );
   }
 
@@ -189,6 +215,18 @@ export const handleSiteDataRequest = Effect.fn("handleSiteDataRequest")(function
 });
 
 type Where = { slug: string; collection: string };
+
+/** Whether the live version of `slug` lets pages of `from` use `collection`. */
+const allowsSite = Effect.fnUntraced(function* (slug: string, from: string, collection: string) {
+  const db = yield* Database;
+  const site = yield* db.first<{ currentVersion: string | null }>(
+    `SELECT current_version AS currentVersion FROM sites WHERE slug = ?`,
+    slug,
+  );
+  if (!site?.currentVersion) return false;
+  const { allow } = (yield* siteManifest(slug, site.currentVersion)).data;
+  return Object.hasOwn(allow, from) && allow[from].includes(collection);
+});
 
 const putDocument = Effect.fnUntraced(function* (
   { slug, collection }: Where,

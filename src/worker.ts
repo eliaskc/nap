@@ -14,7 +14,7 @@ import { ensureProfile, getIdentity } from "~/lib/nap-server";
 import { serveToolbarScript, serveViewerScript } from "~/lib/nap-toolbar";
 import { ARTIFACT_PATH, type NapPlace } from "~/lib/nap-urls";
 import { handleSiteAccessRequest } from "~/lib/site-access";
-import { handleSiteDataRequest } from "~/lib/site-data";
+import { handleSiteDataRequest, siteDataTarget } from "~/lib/site-data";
 import { serveClientTypes, serveSiteDataClient, serveVoiceEngine } from "~/lib/site-data-client";
 import { handleLiveRequest, publishChange } from "~/lib/site-live";
 import { handleChannelRequest } from "~/lib/site-channel";
@@ -36,10 +36,14 @@ export { SiteChannel } from "~/lib/site-channel";
 export { AppSigner } from "~/lib/app-signer";
 
 /** Collections for a site, with each committed write sent to the site's open pages. */
-const siteData = (slug: string, request: Request, path: string) =>
-  handleSiteDataRequest(slug, request, path, {
+/** /_nap/data/<path> on a site's host: its own collections, or `@<site>/...` another site's. */
+const siteData = (hostSlug: string, request: Request, path: string) => {
+  const { slug, path: rest, from } = siteDataTarget(hostSlug, path);
+  return handleSiteDataRequest(slug, request, rest, {
+    from,
     onChange: (collection, change) => publishChange(slug, collection, change),
   });
+};
 
 /** Routes a request by host and path. Everything else goes to the TanStack app. */
 const routeRequest = Effect.fn("routeRequest")(function* (
@@ -167,7 +171,8 @@ const routeRequest = Effect.fn("routeRequest")(function* (
   }
 
   // <slug>.<root> serves one site. Each site has its own origin, so sites cannot read each
-  // other's data. Artifacts redirect to <root>/artifact/<slug>.
+  // other's data, except collections another site's nap.json allows them (/_nap/data/@<site>/).
+  // Artifacts redirect to <root>/artifact/<slug>.
   if (target.type === "site") {
     const slug = target.slug;
     // Opening a nap counts as using Nap. It keeps the person's agent tokens active.

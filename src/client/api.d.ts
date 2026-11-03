@@ -78,6 +78,14 @@ export interface NapSubscribeOptions {
   onError?: (error: NapError) => void;
 }
 
+export interface NapCollectionOptions {
+  /**
+   * Another site's collection, by its slug. That site's nap.json must allow this site:
+   * `{ "data": { "allow": { "<this site>": ["<collection>"] } } }`. No subscribe().
+   */
+  site?: string;
+}
+
 export interface NapCollection<T = Record<string, unknown>> {
   list(options?: {
     limit?: number;
@@ -97,7 +105,10 @@ export interface NapCollection<T = Record<string, unknown>> {
     since?: number;
     limit?: number;
   }): Promise<{ changes: Array<NapChange<T>>; since: number; hasMore: boolean }>;
-  /** Calls back with every document, newest first, now and after each change. Returns stop. */
+  /**
+   * Calls back with every document, newest first, now and after each change. Returns stop.
+   * Throws for another site's collection.
+   */
   subscribe(
     callback: (documents: Array<NapDocument<T>>) => void,
     options?: NapSubscribeOptions,
@@ -220,7 +231,12 @@ export interface NapFetchOptions {
 }
 
 export interface Nap {
-  db: { collection<T = Record<string, unknown>>(name: string): NapCollection<T> };
+  db: {
+    collection<T = Record<string, unknown>>(
+      name: string,
+      options?: NapCollectionOptions,
+    ): NapCollection<T>;
+  };
   channel<S = unknown, M = unknown>(name: string): NapChannel<S, M>;
   voice<M = unknown>(name?: string): NapVoiceCall<M>;
   /** Fetches a URL through Nap, for APIs that do not allow other origins. The page lists the hosts in nap.json ("fetch"). */

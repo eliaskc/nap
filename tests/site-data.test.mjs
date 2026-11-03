@@ -22,8 +22,11 @@ registerHooks({
     return next(specifier, context);
   },
 });
-const { handleSiteDataRequest, viewersAmong: viewersAmongEffect } =
-  await import("../src/lib/site-data.ts");
+const {
+  handleSiteDataRequest,
+  siteDataTarget,
+  viewersAmong: viewersAmongEffect,
+} = await import("../src/lib/site-data.ts");
 const { respond, runNap } = await import("../src/server/runtime.ts");
 const viewersAmong = (env, slug, emails) => runNap(env, viewersAmongEffect(slug, emails));
 
@@ -63,7 +66,17 @@ function database({ before } = {}) {
       };
     },
   };
-  return { sqlite, env: { DB } };
+  // Elo's live nap.json lets the "other" site's pages use its "scores" collection.
+  const manifests = {
+    "sites/elo/versions/v1/nap.json": { data: { allow: { other: ["scores"] } } },
+  };
+  const SITES = {
+    async get(key) {
+      const manifest = manifests[key];
+      return manifest ? { json: async () => manifest } : null;
+    },
+  };
+  return { sqlite, env: { DB, SITES } };
 }
 
 function client(env, { slug = "elo", email = OWNER } = {}) {
@@ -78,7 +91,11 @@ function client(env, { slug = "elo", email = OWNER } = {}) {
       body: body ? JSON.stringify(body) : undefined,
     });
     // The Worker passes the path without the query string.
-    const response = await respond(env, handleSiteDataRequest(slug, request, path.split("?")[0]));
+    const target = siteDataTarget(slug, path.split("?")[0]);
+    const response = await respond(
+      env,
+      handleSiteDataRequest(target.slug, request, target.path, { from: target.from }),
+    );
     const text = await response.text();
     return { status: response.status, json: text ? JSON.parse(text) : null };
   };
@@ -273,6 +290,47 @@ test("the changes feed sends up to 1000 changes a page", async () => {
   assert.equal(listed.json.documents.length, 100);
 });
 
+test("another site's pages use a collection only when its nap.json allows them", async () => {
+  const { env, sqlite } = database();
+  sqlite.exec(`INSERT INTO sites (slug, title, created_by_email, updated_by_email, current_version,
+      sort_order, visibility)
+      VALUES ('secret', 'Secret', '${OTHER}', '${OTHER}', 'v1', 3, 'private')`);
+  const elo = client(env);
+  const other = client(env, { slug: "other" });
+
+  const put = await other("PUT", "@elo/scores/g1", { body: { score: 3 } });
+  assert.equal(put.status, 201);
+  assert.equal(put.json.document.createdBy, OWNER);
+  // It lands in elo's collection, not the other site's.
+  assert.deepEqual((await elo("GET", "scores/g1")).json.document.data, { score: 3 });
+  assert.equal((await other("GET", "scores/g1")).status, 404);
+
+  const patched = await other("PATCH", "@elo/scores/g1", {
+    body: { score: 4 },
+    headers: { "if-match": '"1"' },
+  });
+  assert.equal(patched.json.document.version, 2);
+  const stale = await other("PUT", "@elo/scores/g1", {
+    body: { score: 5 },
+    headers: { "if-match": '"1"' },
+  });
+  assert.equal(stale.status, 409);
+  assert.equal((await other("GET", "@elo/scores")).json.documents.length, 1);
+  assert.equal((await other("GET", "@elo/scores?since=0")).json.changes.length, 1);
+  assert.equal((await other("DELETE", "@elo/scores/g1")).status, 204);
+
+  // A collection it does not list, and a site it does not list.
+  const denied = await other("GET", "@elo/games");
+  assert.equal(denied.status, 403);
+  assert.match(denied.json.error, /"data": \{ "allow": \{ "other": \["games"\] \} \}/);
+  assert.equal((await elo("GET", "@other/scores")).status, 403);
+  // A site the person cannot view, or that does not exist, is not found.
+  assert.equal((await other("GET", "@secret/scores")).status, 404);
+  assert.equal((await other("GET", "@nope/scores")).status, 404);
+  // @<own slug> is the site's own collection.
+  assert.equal((await elo("GET", "@elo/games")).status, 200);
+});
+
 test("bad ids and conditions are rejected", async () => {
   const { env } = database();
   const call = client(env);
@@ -334,20 +392,21 @@ function clientSource() {
 }
 
 /** Runs the served client.js against the handler, as one page of the elo site. */
-async function page(env, email = OWNER, WebSocket = undefined) {
+async function page(env, email = OWNER, WebSocket = undefined, slug = "elo") {
   const source = await clientSource();
   const window = {};
   const document = { hidden: false, addEventListener() {}, removeEventListener() {} };
-  const location = new URL("https://elo.nap.test/");
+  const location = new URL(`https://${slug}.nap.test/`);
   const fetch = (path, options = {}) => {
     const url = new URL(path, location);
     const request = new Request(url, {
       ...options,
       headers: { ...options.headers, "cf-access-authenticated-user-email": email },
     });
+    const target = siteDataTarget(slug, url.pathname.slice("/_nap/data/".length));
     return respond(
       env,
-      handleSiteDataRequest("elo", request, url.pathname.slice("/_nap/data/".length)),
+      handleSiteDataRequest(target.slug, request, target.path, { from: target.from }),
     );
   };
   new Function("window", "document", "location", "fetch", "WebSocket", source)(
@@ -447,6 +506,31 @@ test("the client: changes pushed over the live socket reach subscribers", async 
   });
   assert.deepEqual(seen.at(-1), []);
   stop();
+});
+
+test("the client: another site's collection, without subscribe", async () => {
+  const { env } = database();
+  const elo = (await page(env)).db.collection("scores");
+  const nap = await page(env, OWNER, undefined, "other");
+  const scores = nap.db.collection("scores", { site: "elo" });
+
+  const saved = await scores.put("g1", { score: 7 }, { ifNew: true });
+  assert.equal(saved.version, 1);
+  assert.deepEqual((await elo.get("g1")).data, { score: 7 });
+  await scores.patch("g1", { score: 8 }, { ifVersion: 1 });
+  assert.deepEqual(
+    (await scores.list()).documents.map((d) => d.data.score),
+    [8],
+  );
+  assert.equal((await scores.changes()).changes.length, 1);
+
+  assert.throws(() => scores.subscribe(() => {}), /not available for another site/);
+  assert.throws(() => nap.db.collection("scores", { site: "Bad/../x" }), /Invalid Nap site/);
+  const error = await nap.db
+    .collection("games", { site: "elo" })
+    .list()
+    .catch((e) => e);
+  assert.equal(error.status, 403);
 });
 
 test("viewersAmong follows the same access rule as reads", async () => {
