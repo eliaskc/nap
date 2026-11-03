@@ -55,8 +55,18 @@ def matches(pattern: str, value: str) -> bool:
     return pattern == value or (pattern.endswith("*") and value.startswith(pattern[:-1]))
 
 
+def is_mac_metadata(name: str) -> bool:
+    """
+    Files macOS adds to a zip: AppleDouble "._" files, which ditto writes for extended
+    attributes, and the __MACOSX folder. Signed into an app, App Store Connect refuses it.
+    """
+    parts = [part for part in name.split("/") if part]
+    return any(part == "__MACOSX" or part.startswith("._") for part in parts)
+
+
 def safe_extract(archive: zipfile.ZipFile, root: str):
-    for member in archive.infolist():
+    members = [m for m in archive.infolist() if not is_mac_metadata(m.filename)]
+    for member in members:
         target = os.path.realpath(os.path.join(root, member.filename))
         if not target.startswith(os.path.realpath(root) + os.sep):
             raise BuildError(f"Unsafe path in the zip: {member.filename}")
@@ -64,7 +74,7 @@ def safe_extract(archive: zipfile.ZipFile, root: str):
         # have none, so refuse them rather than follow one out of the bundle.
         if (member.external_attr >> 16) & 0o170000 == 0o120000:
             raise BuildError(f"Symlinks are not allowed: {member.filename}")
-    archive.extractall(root)
+    archive.extractall(root, members)
 
 
 def check_executable(path: str):
