@@ -28,6 +28,7 @@ import { createSource, describeSource, mintSourceToken, SOURCE_BRANCH } from "~/
 import { listVersions, restoreVersion } from "~/lib/versions";
 import { handleAppsApi } from "~/lib/apps";
 import { handleSiteDataRequest } from "~/lib/site-data";
+import { peopleResponse } from "~/lib/welcome";
 import { handleLiveRequest, publishChange } from "~/lib/site-live";
 import { handleChannelRequest } from "~/lib/site-channel";
 import { handleRtcRequest } from "~/lib/site-rtc";
@@ -131,6 +132,10 @@ export const handleAgentApi = Effect.fn("handleAgentApi")(function* (request: Re
       { headers: noStore },
     );
   }
+
+  // Everyone on Nap with their name and look, like /_nap/people on a nap's host. For native
+  // apps that draw people the way their site does.
+  if (path === "/people" && method === "GET") return yield* peopleResponse(request);
 
   // The person's own naps and naps shared with them by name. Naps shared with everyone are not
   // listed, but an agent can still read and update one by id.
