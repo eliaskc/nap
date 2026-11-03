@@ -180,14 +180,39 @@ export function serveToolbarScript() {
 
 // The artifact viewer. It starts the sandboxed frame (with the hash, which the server never
 // sees) and keeps the address bar and the tab title in step with the frame's messages. The frame
-// has an opaque origin, so this page cannot read its location. Keep this source free of
-// backticks and "${".
+// has an opaque origin, so this page cannot read its location.
+//
+// It also keeps the frame token alive while the page is open, so a dashboard on a TV keeps its
+// data. Renewing goes through this page, which Access protects, so someone Access no longer lets
+// in loses the frame when the token runs out. A token that already ran out (a laptop that slept)
+// reloads the page for a new one. Keep this source free of backticks and "${".
 const VIEWER_SOURCE = String.raw`(() => {
   const frame = document.querySelector("iframe[data-nap-content]");
   if (!frame) return;
   const base = frame.dataset.base;
   const baseTitle = document.title;
   frame.src = frame.dataset.src + location.hash;
+
+  const token = (frame.dataset.src.match(/^\/_nap\/frame\/([A-Za-z0-9_-]+)\//) || [])[1];
+  let lastRenew = Date.now();
+  async function renew() {
+    if (!token || Date.now() - lastRenew < 30 * 60 * 1000) return;
+    lastRenew = Date.now();
+    try {
+      const response = await fetch(base + "/_nap/frame", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ token: token }),
+      });
+      if (response.status === 404) location.reload();
+    } catch (error) {
+      // Offline, or Access wants a new login. The next try or a reload sorts it out.
+    }
+  }
+  setInterval(renew, 5 * 60 * 1000);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") renew();
+  });
 
   window.addEventListener("message", (event) => {
     if (event.source !== frame.contentWindow) return;

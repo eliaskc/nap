@@ -163,6 +163,17 @@ try {
   const artifactPath = `/artifact/${artifact.slug}`;
   const viewer = (email, path = artifactPath) =>
     call(path, { host: ROOT, headers: { ...signedIn(email), "sec-fetch-dest": "document" } });
+  // People without a name go to the welcome page first.
+  for (const email of [OWNER, OTHER, "x@example.com"]) {
+    await call("/api/me", { host: ROOT, method: "GET", headers: signedIn(email) });
+    const named = await call("/api/me", {
+      host: ROOT,
+      method: "PATCH",
+      headers: { ...signedIn(email), "content-type": "application/json" },
+      body: JSON.stringify({ displayName: email.split("@")[0] }),
+    });
+    assert.equal(named.status, 200, named.text);
+  }
   const page = await viewer(OWNER);
   assert.equal(page.status, 200, page.text);
   const frameSrc = page.text.match(/data-src="(\/_nap\/frame\/[A-Za-z0-9_-]+)\/"/)?.[1];
@@ -238,6 +249,21 @@ try {
   assert.equal(await upgradeStatus("/_nap/live"), 101, "artifact frames get live updates");
   assert.equal(await upgradeStatus("/_nap/channel/lobby"), 101, "artifact frames get channels");
 
+  // The viewer keeps its token alive through the Access-protected artifact page.
+  const token = frameSrc.split("/").pop();
+  const renew = (email, body = { token }) =>
+    call(`${artifactPath}/_nap/frame`, {
+      host: ROOT,
+      method: "POST",
+      headers: { ...signedIn(email), "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  const renewed = await renew(OWNER);
+  assert.equal(renewed.status, 200, renewed.text);
+  assert.equal(renewed.json.renewed, true);
+  assert.equal((await renew(OTHER)).status, 404, "only the token's own viewer renews it");
+  assert.equal((await renew(OWNER, { token: "x".repeat(43) })).status, 404);
+
   const asOther = await viewer(OTHER);
   assert.equal(asOther.status, 200, "invited people can open it");
   assert.doesNotMatch(asOther.text, /share\.js/, "viewers do not get the share button");
@@ -300,8 +326,8 @@ try {
     403,
     "only the owner changes access",
   );
-  // Dashboard lists: other people's artifacts are never listed, even for invited people.
-  assert.equal(await listed(OTHER), undefined, "artifacts are shared by link, not listed");
+  // Dashboard lists: invited people see other people's artifacts under Shared with me.
+  assert.equal((await listed(OTHER))?.invited, true, "invited people see the artifact");
   const settings = (value, email = OWNER) =>
     call(`/api/sites/${artifact.slug}/settings`, {
       method: "PATCH",

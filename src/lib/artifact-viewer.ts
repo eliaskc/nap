@@ -52,6 +52,7 @@ import COMMENTS_FRAME_SOURCE from "virtual:nap-comments-frame";
  *   /artifact/<slug>/_nap/access        the share button's API (Access)
  *   /artifact/<slug>/_nap/comments      the comments API for the Nap bar (Access)
  *   /artifact/<slug>/_nap/versions      the history button's API (Access)
+ *   /artifact/<slug>/_nap/frame         renews the frame token while the page is open (Access)
  *   /_nap/frame/<token>/<path>          the artifact's files (token)
  *   /_nap/frame/<token>/_nap/version/<id>/<path>
  *                                       an earlier version's files, for the history preview
@@ -91,6 +92,7 @@ export const handleArtifactPage = Effect.fn("handleArtifactPage")(function* (
     return yield* handleSiteCommentsRequest(slug, request, rest.slice("/_nap/comments".length));
   }
   if (rest === "/_nap/versions") return yield* handleArtifactVersionsRequest(slug, request);
+  if (rest === "/_nap/frame") return yield* renewFrameToken(slug, request);
   if (rest.startsWith("/_nap/")) return yield* failText(404, "Not found");
   if (request.method !== "GET" && request.method !== "HEAD") {
     return yield* failText(405, "Method not allowed", { allow: "GET, HEAD" });
@@ -153,6 +155,37 @@ export const handleArtifactPage = Effect.fn("handleArtifactPage")(function* (
       versionsPath: `${ARTIFACT_PATH}/${slug}/_nap/versions`,
     },
   });
+});
+
+/**
+ * POST <root>/artifact/<slug>/_nap/frame with { token }: the viewer keeps its frame token alive.
+ * Access protects this path, so only someone Access still lets in, who can still view the
+ * artifact, extends their own token. 404 when it already ran out: the viewer reloads.
+ */
+const renewFrameToken = Effect.fn("renewFrameToken")(function* (slug: string, request: Request) {
+  if (request.method !== "POST") {
+    return yield* fail(405, "Method not allowed", {}, { allow: "POST" });
+  }
+  yield* requireSameSite(request);
+  yield* requireJsonBody(request);
+  const body = yield* readJsonObject(request);
+  const token = typeof body.token === "string" ? body.token : "";
+  if (!/^[A-Za-z0-9_-]{32,64}$/.test(token)) return yield* fail(400, "Pass the frame token");
+  const identity = getIdentity(request);
+  const access = yield* findViewableNap(slug, identity.email);
+  if (access.status !== "allowed") return yield* fail(404, "Artifact not found");
+  const db = yield* Database;
+  const { changes } = yield* db.run(
+    `UPDATE artifact_frames
+     SET expires_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '+${FRAME_TOKEN_HOURS} hours')
+     WHERE token_hash = ? AND site_slug = ? AND lower(email) = lower(?)
+       AND expires_at > strftime('%Y-%m-%dT%H:%M:%fZ', 'now')`,
+    yield* sha256Hex(token),
+    slug,
+    identity.email,
+  );
+  if (!changes) return yield* fail(404, "This artifact view has expired");
+  return json({ renewed: true }, { headers: noStore });
 });
 
 /**
