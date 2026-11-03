@@ -53,6 +53,14 @@ export const Sites = Cloudflare.R2.Bucket(
             condition: { type: "Age" as const, maxAge: 60 * 60 * 24 * 2 },
           },
         },
+        {
+          // Extensions' caches (nap.extension.ts). They decide themselves how old is too old.
+          id: "delete-extension-caches",
+          prefix: "extension-cache/",
+          deleteObjectsTransition: {
+            condition: { type: "Age" as const, maxAge: 60 * 60 * 24 * 7 },
+          },
+        },
       ],
     };
   }),
@@ -211,6 +219,10 @@ export class NapWorker extends Cloudflare.Website.Vite<NapWorker>()(
     // Voice and video between the people on a nap (/_nap/rtc): a Cloudflare Realtime TURN key.
     // Optional on every stage; without it, pages get STUN only, which fails on some networks.
     const turnKeyToken = yield* optional("NAP_TURN_KEY_API_TOKEN");
+    // The deployment's extension secrets (nap.extension.ts): one JSON object of strings, such as
+    // {"AMPLITUDE_API_KEY": "..."}. Optional on every stage; an extension without its secrets
+    // answers that it is not set up.
+    const extensionSecrets = yield* optional("NAP_EXTENSION_SECRETS");
     return {
       name: production ? "nap" : `nap-${stage}`,
       main: "./src/worker.ts",
@@ -273,6 +285,7 @@ export class NapWorker extends Cloudflare.Website.Vite<NapWorker>()(
         NAP_ASC_ISSUER_ID: yield* plain("NAP_ASC_ISSUER_ID"),
         NAP_TURN_KEY_ID: yield* plain("NAP_TURN_KEY_ID"),
         NAP_TURN_KEY_API_TOKEN: turnKeyToken,
+        NAP_EXTENSION_SECRETS: extensionSecrets,
       },
       observability: { enabled: true },
     };

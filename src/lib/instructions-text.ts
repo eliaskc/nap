@@ -10,11 +10,13 @@ export const OPTIONAL_TOPICS: Record<string, (config: NapConfig) => boolean> = {
  * Fills in one instructions page for a deployment. Text between <!-- if <flag> --> and
  * <!-- /if --> shows only when the flag is on: "apps" when apps are on, "adhoc" and "testflight"
  * for how people install them, and "private" or "everyone" for the default access.
+ * {{extensionTopics}} on a line of its own becomes the deployment's extension topics.
  */
 export function renderInstructions(
   text: string,
   config: NapConfig,
   rootDomain = config.rootDomain,
+  extensionTopics: ReadonlyArray<{ name: string; summary: string }> = [],
 ) {
   const flags: Record<string, boolean> = {
     apps: Boolean(config.apps),
@@ -30,7 +32,14 @@ export function renderInstructions(
       return flags[flag] ? inner : "";
     },
   );
-  return fillDeploymentText(shown.replace(/\n{3,}/g, "\n\n"), { ...config, rootDomain }).replaceAll(
+  const topics = extensionTopics
+    .map((topic) => `- \`${topic.name}\`: ${topic.summary} (\`nap.${topic.name}\`).\n`)
+    .join("");
+  const withTopics = shown.replace(/^\{\{extensionTopics\}\}\n/m, topics);
+  return fillDeploymentText(withTopics.replace(/\n{3,}/g, "\n\n"), {
+    ...config,
+    rootDomain,
+  }).replaceAll(
     "{{testFlightApp}}",
     config.apps?.testFlight?.app ?? "",
   );

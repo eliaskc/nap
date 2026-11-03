@@ -30,6 +30,8 @@ export class Settings extends Context.Service<
     readonly signerUrl: string | null;
     /** /_nap/rtc: the TURN key. Null without one; pages then get STUN only. */
     readonly turn: TurnKey | null;
+    /** The deployment's extension secrets by name (NAP_EXTENSION_SECRETS, a JSON object). */
+    readonly extensionSecrets: Readonly<Record<string, string>>;
   }
 >()("nap/Settings") {}
 
@@ -45,6 +47,7 @@ export type SettingsEnv = {
   NAP_SIGNER_URL?: string;
   NAP_TURN_KEY_ID?: string;
   NAP_TURN_KEY_API_TOKEN?: string;
+  NAP_EXTENSION_SECRETS?: string;
 };
 
 export function settingsFromEnv(env: SettingsEnv, rootDomain: string): Settings["Service"] {
@@ -67,7 +70,22 @@ export function settingsFromEnv(env: SettingsEnv, rootDomain: string): Settings[
     appStoreConnect: keyId && issuerId && privateKey ? { keyId, issuerId, privateKey } : null,
     signerUrl: text(env.NAP_SIGNER_URL) || null,
     turn: turnKeyId && turnToken ? { keyId: turnKeyId, token: turnToken } : null,
+    extensionSecrets: parseExtensionSecrets(text(env.NAP_EXTENSION_SECRETS)),
   });
+}
+
+/** A JSON object of strings. Anything else counts as no secrets, so pages still load. */
+export function parseExtensionSecrets(value: string): Record<string, string> {
+  if (!value) return {};
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    return Object.fromEntries(
+      Object.entries(parsed).filter((entry): entry is [string, string] => typeof entry[1] === "string"),
+    );
+  } catch {
+    return {};
+  }
 }
 
 /**

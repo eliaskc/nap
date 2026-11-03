@@ -62,6 +62,7 @@ Read one with `curl -fsSL https://{{rootDomain}}/_nap/api/instructions/<topic>`.
 - `fetch`: reading public APIs from other origins (`nap.fetch`).
 - `api`: the HTTP API without the script: sign-in, publishing, files, versions, restore, comments, and limits.
 - `drafts`: publishing without a token through a claim link the user opens.
+{{extensionTopics}}
 <!-- if apps -->
 - `apps`: native iOS prototypes in SwiftUI that people install on their iPhones. Use them only when the user asks for an app on the phone.
 <!-- /if -->

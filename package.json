@@ -8,7 +8,7 @@
     "dev": "env -u npm_execpath -u npm_config_user_agent CI=1 CLOUDFLARE_API_TOKEN=local node node_modules/alchemy/bin/cli.js dev --stage local",
     "dev:remote": "alchemy dev --profile ${ALCHEMY_PROFILE:-nap}",
     "infra:login": "alchemy profile edit --profile ${ALCHEMY_PROFILE:-nap}",
-    "test": "node --test tests/*.test.mjs",
+    "test": "node --test 'tests/*.test.mjs' 'instance/extensions/*/*.test.mjs'",
     "build": "vite build && tsc --noEmit",
     "preview": "vite preview",
     "deploy": "bun scripts/infra/run.mjs deploy",

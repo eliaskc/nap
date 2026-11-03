@@ -1,5 +1,9 @@
 import { client, voice, voiceVersion } from "virtual:nap-client";
 import CLIENT_TYPES from "~/client/api.d.ts?raw";
+import { EXTENSIONS } from "~/lib/extension-registry";
+import { clientTypesWithExtensions } from "~/lib/extensions";
+
+const TYPES = clientTypesWithExtensions(CLIENT_TYPES, EXTENSIONS);
 
 const headers = {
   "cache-control": "public, max-age=300",
@@ -30,9 +34,9 @@ export function serveVoiceEngine(request: Request) {
   });
 }
 
-/** /_nap/client.d.ts: its types, for sites written in TypeScript. */
+/** /_nap/client.d.ts: its types, with the extensions', for sites written in TypeScript. */
 export function serveClientTypes() {
-  return new Response(CLIENT_TYPES, {
+  return new Response(TYPES, {
     headers: { "content-type": "text/plain; charset=utf-8", ...headers },
   });
 }

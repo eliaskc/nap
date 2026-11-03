@@ -20,6 +20,8 @@ import { handleLiveRequest, publishChange } from "~/lib/site-live";
 import { handleChannelRequest } from "~/lib/site-channel";
 import { handleRtcRequest } from "~/lib/site-rtc";
 import { handleSiteFetch } from "~/lib/site-fetch";
+import { EXTENSIONS } from "~/lib/extension-registry";
+import { handleExtensionRequest } from "~/lib/extensions";
 import { resolveHost, serveUploadedSite } from "~/lib/site-serving";
 import { serveShareWidget } from "~/lib/share-widget";
 import { meResponse, peopleResponse, welcomeRedirect } from "~/lib/welcome";
@@ -132,6 +134,17 @@ const routeRequest = Effect.fn("routeRequest")(function* (
     if (localRtcMatch) {
       return yield* handleRtcRequest(localRtcMatch[1], request, getIdentity(request));
     }
+    const localExtensionMatch = url.pathname.match(/^\/s\/([^/]+)\/_nap\/ext\/(.+)$/);
+    if (localExtensionMatch) {
+      const [, localSlug, path] = localExtensionMatch;
+      return yield* handleExtensionRequest(
+        EXTENSIONS,
+        localSlug,
+        request,
+        getIdentity(request),
+        path,
+      );
+    }
     const localFetchMatch = url.pathname.match(/^\/s\/([^/]+)\/_nap\/fetch$/);
     if (localFetchMatch) {
       return yield* handleSiteFetch(localFetchMatch[1], request, getIdentity(request).email);
@@ -192,6 +205,10 @@ const routeRequest = Effect.fn("routeRequest")(function* (
     }
     if (url.pathname === "/_nap/fetch") {
       return yield* handleSiteFetch(slug, request, getIdentity(request).email);
+    }
+    if (url.pathname.startsWith("/_nap/ext/")) {
+      const path = url.pathname.slice("/_nap/ext/".length);
+      return yield* handleExtensionRequest(EXTENSIONS, slug, request, getIdentity(request), path);
     }
     const toWelcome = yield* welcome();
     if (toWelcome) return toWelcome;

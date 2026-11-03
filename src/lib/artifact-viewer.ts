@@ -12,6 +12,8 @@ import { handleLiveRequest, publishChange } from "~/lib/site-live";
 import { handleChannelRequest } from "~/lib/site-channel";
 import { handleRtcRequest } from "~/lib/site-rtc";
 import { handleSiteFetch } from "~/lib/site-fetch";
+import { EXTENSIONS } from "~/lib/extension-registry";
+import { handleExtensionRequest } from "~/lib/extensions";
 import { fileHeaders, findViewableNap, getNapFile, normalizeRequestPath } from "~/lib/site-serving";
 import { serveShareWidget } from "~/lib/share-widget";
 import { findVersion, listVersions, restoreVersion } from "~/lib/versions";
@@ -54,6 +56,8 @@ import COMMENTS_FRAME_SOURCE from "virtual:nap-comments-frame";
  *   /artifact/<slug>/_nap/versions      the history button's API (Access)
  *   /artifact/<slug>/_nap/frame         renews the frame token while the page is open (Access)
  *   /_nap/frame/<token>/<path>          the artifact's files (token)
+ *   /_nap/frame/<token>/_nap/ext/<name>/<path>
+ *                                       the deployment's extensions (token)
  *   /_nap/frame/<token>/_nap/version/<id>/<path>
  *                                       an earlier version's files, for the history preview
  */
@@ -297,6 +301,14 @@ export const handleFrameRequest = Effect.fn("handleFrameRequest")(function* (req
   if (rest === "/_nap/fetch") {
     return withCors(
       yield* recoverHttpError(handleSiteFetch(frame.slug, request, frame.email, { frame: true })),
+    );
+  }
+  if (rest.startsWith("/_nap/ext/")) {
+    const path = rest.slice("/_nap/ext/".length);
+    return withCors(
+      yield* recoverHttpError(
+        handleExtensionRequest(EXTENSIONS, frame.slug, request, identity, path, { frame: true }),
+      ),
     );
   }
   if (rest.startsWith("/_nap/")) return withCors(new Response("Not found", { status: 404 }));

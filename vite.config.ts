@@ -6,6 +6,7 @@ import viteReact from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import { napConfig } from "./nap.config.ts";
 import { bundleClient } from "./scripts/lib/client-bundle.ts";
+import { extensionFiles, findExtensions, serverModuleSource } from "./scripts/lib/extensions.ts";
 
 /**
  * Builds part of the artifact comments (src/comments) as one self-contained file. They load
@@ -98,12 +99,31 @@ function napClientModule(): Plugin {
     async load(resolved) {
       if (resolved !== `\0${id}`) return;
       for (const file of readdirSync("src/client")) this.addWatchFile(`src/client/${file}`);
+      for (const file of extensionFiles(findExtensions())) this.addWatchFile(file);
       const { client, voice, voiceVersion } = await bundleClient();
       return [
         `export const client = ${JSON.stringify(client)};`,
         `export const voice = ${JSON.stringify(voice)};`,
         `export const voiceVersion = ${JSON.stringify(voiceVersion)};`,
       ].join("\n");
+    },
+  };
+}
+
+/**
+ * `virtual:nap-extensions`: the deployment's extensions from instance/extensions (see
+ * nap.extension.ts), for the Worker: their server modules, types, and instructions.
+ */
+function napExtensionsModule(): Plugin {
+  const id = "virtual:nap-extensions";
+  return {
+    name: "nap-extensions",
+    resolveId: (source) => (source === id ? `\0${id}` : undefined),
+    load(resolved) {
+      if (resolved !== `\0${id}`) return;
+      const extensions = findExtensions();
+      for (const file of extensionFiles(extensions)) this.addWatchFile(file);
+      return serverModuleSource(extensions);
     },
   };
 }
@@ -134,5 +154,6 @@ export default defineConfig({
     commentsDev(),
     commentsFrameModule(),
     napClientModule(),
+    napExtensionsModule(),
   ],
 });

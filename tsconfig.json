@@ -3,6 +3,8 @@
     "src/**/*.ts",
     "src/**/*.tsx",
     "nap.config.ts",
+    "nap.extension.ts",
+    "instance/**/*.ts",
     "vite.config.ts",
     "alchemy.run.ts",
     "scripts/infra/*.ts",

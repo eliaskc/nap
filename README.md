@@ -109,6 +109,9 @@ the secrets and a deploy workflow that deploys this code with them.
    `cf realtime turn keys create --name nap`. Its `uid` is the variable
    `NAP_TURN_KEY_ID` and its `secret` is the secret `NAP_TURN_KEY_API_TOKEN`.
    Without them, calls use STUN only and fail on some networks.
+9. **Extensions (optional).** Add APIs of your own to the kit pages get, in
+   `instance/extensions/<name>/` (see "Extensions" below). Their secrets go in
+   one secret, `NAP_EXTENSION_SECRETS`, as a JSON object.
 
 To stay on a release instead of `main`, set the config repository variable
 `NAP_REF` to a tag of this repository. To add someone, put their email in
@@ -258,6 +261,27 @@ files and the `/_nap/*` data endpoints from `/_nap/frame/<token>/`. Access
 bypasses that path, so the Worker checks the token and the person's current
 access on each request. The token is the credential: it appears only in the
 frame URL and is not sent in the referrer.
+
+Tokens last 12 hours. While the page is open, the Nap bar renews its token
+through `/artifact/<slug>/_nap/frame`, which Access protects, so a dashboard
+left open on a screen keeps working, and someone Access no longer lets in
+loses the frame when the token runs out.
+
+### Extensions
+
+A deployment can add APIs to the kit without changing Nap: each folder in
+`instance/extensions/<name>/` becomes `nap.<name>` for pages, an endpoint at
+`/_nap/ext/<name>/*`, and an instructions topic. The contract is in
+`nap.extension.ts`; the build bundles extensions into the Worker and
+`client.js` (`scripts/lib/extensions.ts`). Nap routes requests from sites,
+artifact frames, and local dev servers (`src/lib/extensions.ts`), checks that
+the person can view the page, and gives the extension only the secrets it
+declares from `NAP_EXTENSION_SECRETS`, and a cache of its own in the bucket
+(`extension-cache/<name>/`, deleted after a week; the Workers Cache API does not
+work behind Access). An extension is server code with the
+deployment's secrets, so it is reviewed like Nap's own; pages still hold no
+secrets and run no server code. Tests next to an extension
+(`instance/extensions/*/*.test.mjs`) run with `pnpm test`.
 
 ### Comments
 
