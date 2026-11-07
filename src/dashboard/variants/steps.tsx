@@ -1,6 +1,6 @@
 import type * as React from "react";
 import { PanelLeftIcon } from "lucide-react";
-import { Group, GroupButton } from "~/dashboard/controls";
+import { GroupButton } from "~/dashboard/controls";
 import { FilterBar, NapMark, UploadError } from "~/dashboard/chrome";
 import { ExampleDots, ExampleText, PromptButtons, useExample } from "~/dashboard/connect";
 import { useStored } from "~/dashboard/data";
@@ -35,10 +35,10 @@ export function StepsLayout({ view, loading, bar }: VariantProps) {
         <aside className="dark sticky top-0 flex h-dvh w-[min(560px,42vw)] shrink-0 flex-col gap-9 overflow-y-auto border-r bg-sidebar px-8 pb-10 text-sidebar-foreground max-md:hidden lg:px-12">
           {/* The same group as in the bar when the sidebar is folded, in the same place. */}
           <div className="-mx-3 flex h-15 shrink-0 items-center lg:-mx-7">
-            <Group className="pl-1 text-foreground">
+            <div data-flat className="flex items-center gap-1 text-foreground">
               {toggle}
-              <NapMark className="pr-2" />
-            </Group>
+              <NapMark />
+            </div>
           </div>
           <h1 className="text-[2rem] leading-[1.1] font-semibold tracking-[-0.03em] text-balance">
             You describe it.
@@ -67,13 +67,13 @@ export function StepsLayout({ view, loading, bar }: VariantProps) {
           left: collapsed ? (
             <>
               {toggle}
-              <NapMark className="pr-2" />
+              <NapMark />
             </>
           ) : (
             <NapMark />
           ),
           // With the sidebar open, Nap is already on it.
-          leftClassName: collapsed ? "pr-1 pl-1" : "md:hidden",
+          leftClassName: collapsed ? undefined : "md:hidden",
         })}
         <main
           className={cn(

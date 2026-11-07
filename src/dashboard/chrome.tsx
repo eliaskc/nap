@@ -51,16 +51,18 @@ import { cn } from "~/lib/utils";
 import { napConfig } from "~/nap.config";
 
 /**
- * Nap's mark in the top bar: the instance's icon (Nap's own unless instance/icon replaces it) and
- * its name. On a phone just the icon, which leaves the bar room for the rest.
+ * Nap's mark, on its own in the top-left with no surface behind it: the instance's icon (Nap's
+ * own unless instance/icon replaces it) and its name as a wordmark. On a phone just a larger icon,
+ * which leaves the bar room for the rest.
  */
 export function NapMark({ className }: { className?: string }) {
-  const icon = "size-6 shrink-0 rounded-[22.5%]";
+  const icon =
+    "size-10 shrink-0 rounded-[22.5%] shadow-sm ring-1 ring-foreground/5 sm:size-8 dark:ring-foreground/10";
   return (
-    <span className={cn("inline-flex items-center gap-2", className)}>
+    <span className={cn("inline-flex items-center gap-2.5", className)}>
       <img src={iconUrl("app-icon.png")} alt="" className={cn(icon, "dark:hidden")} />
       <img src={iconUrl("app-icon-dark.png")} alt="" className={cn(icon, "hidden dark:block")} />
-      <span className="text-[0.95rem] font-semibold tracking-[-0.02em] whitespace-nowrap max-sm:sr-only">
+      <span className="text-[1.3rem] leading-none font-bold tracking-[-0.045em] whitespace-nowrap text-foreground max-sm:sr-only">
         {napConfig.orgName}
       </span>
     </span>
@@ -97,9 +99,9 @@ export function TopBar({
       )}
     >
       <div className="flex min-w-0">
-        <Group floating className={cn("px-3 text-foreground", leftClassName)}>
+        <div data-flat className={cn("pointer-events-auto flex items-center gap-1", leftClassName)}>
           {left ?? <NapMark />}
-        </Group>
+        </div>
       </div>
       <div className="pointer-events-auto">
         <VariantSwitch

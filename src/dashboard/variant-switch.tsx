@@ -167,6 +167,8 @@ export function VariantSwitch({
               <GroupTab
                 key={group.mode}
                 value={group.mode}
+                // On a phone the icons alone, so the instance's mark has room.
+                className="max-sm:px-2.5"
                 onClick={(event) => {
                   if (held.current) {
                     held.current = false;
@@ -177,7 +179,7 @@ export function VariantSwitch({
                 }}
               >
                 {group.mode === "tidy" ? <ListIcon /> : <CircleDotDashedIcon />}
-                {group.label}
+                <span className="max-sm:sr-only">{group.label}</span>
               </GroupTab>
             ))}
           </GroupTabs>

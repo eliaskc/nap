@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { ArrowLeftIcon } from "lucide-react";
 import { NapMark } from "~/dashboard/chrome";
-import { Group, GroupButton } from "~/dashboard/controls";
+import { GroupButton } from "~/dashboard/controls";
 import { AppIcon, InstallPanel, InstallProvider, TESTFLIGHT_ENABLED } from "~/dashboard/install";
 import { napConfig } from "~/nap.config";
 
@@ -20,7 +20,7 @@ function AppPage() {
     <div className="relative flex min-h-dvh flex-col overflow-x-clip">
       <div className="nap-dot-field" />
       <header className="relative z-10 flex h-15 items-center px-4 sm:px-5">
-        <Group floating className="pr-3 pl-1 text-foreground">
+        <div data-flat className="flex items-center gap-1 text-foreground">
           <GroupButton
             icon
             nativeButton={false}
@@ -31,7 +31,7 @@ function AppPage() {
             <ArrowLeftIcon />
           </GroupButton>
           <NapMark />
-        </Group>
+        </div>
       </header>
       <main className="relative z-10 mx-auto flex w-full max-w-md flex-1 flex-col items-center gap-6 px-4 pt-6 pb-16 sm:justify-center sm:pt-0 sm:pb-24">
         <div className="flex flex-col items-center gap-4 text-center">
