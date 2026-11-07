@@ -28,7 +28,7 @@ import { napConfig } from "~/nap.config";
  * the same panel. Only on a Nap with napConfig.apps.testFlight.
  */
 
-export const TESTFLIGHT_ENABLED = Boolean(napConfig.apps?.testFlight);
+export const TESTFLIGHT_ENABLED = Boolean(napConfig.apps?.testFlight.appStoreId);
 /** The TestFlight app on the App Store. */
 const TESTFLIGHT_STORE_URL = "https://apps.apple.com/app/testflight/id899247664";
 /** The page with the same flow, to send people a link to, and where QR codes go. */

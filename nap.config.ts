@@ -33,8 +33,11 @@ export type NapConfig = {
     /** The Apple developer team that owns the certificate and profiles. */
     teamId: string;
     testFlight: {
-      /** The app record's Apple ID (App Store Connect → the app → App Information). */
-      appStoreId: string;
+      /**
+       * The app record's Apple ID (App Store Connect → the app → App Information). null until
+       * the app record exists: agents can work on the app, and publishing waits for it.
+       */
+      appStoreId: string | null;
       /** The app record's bundle id, an explicit App ID such as com.example.nap. */
       bundleId: string;
       /** The App Store provisioning profile for that bundle id, by its name. */

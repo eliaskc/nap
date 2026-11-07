@@ -108,8 +108,13 @@ export const MAX_APP_BYTES = 95 * 1024 * 1024;
 const now = () => new Date().toISOString();
 
 export const appsEnabled = () => napConfig.apps !== null;
-/** The app record, and which app's launcher goes there. Null when apps are off. */
-export const testFlightConfig = () => napConfig.apps?.testFlight ?? null;
+/** The one app on Nap, and the app record its launcher goes to. Null when apps are off. */
+const appConfig = () => napConfig.apps?.testFlight ?? null;
+/** The app record, once it exists (appStoreId is set). Null until then, or when apps are off. */
+export const testFlightConfig = () => {
+  const config = appConfig();
+  return config?.appStoreId ? { ...config, appStoreId: config.appStoreId } : null;
+};
 /** Opens the app in the TestFlight app on an iPhone. */
 export const testFlightUrl = (appStoreId: string) =>
   `itms-beta://beta.itunes.apple.com/v1/app/${appStoreId}`;
@@ -196,7 +201,7 @@ const createApp = Effect.fnUntraced(function* (
     return yield* failNoStore(400, "slug is required: lowercase letters, numbers, and hyphens");
   }
   const title = rawTitle.trim().slice(0, 120) || slug;
-  const testFlight = testFlightConfig();
+  const testFlight = appConfig();
   if (testFlight && slug !== testFlight.app) {
     return yield* failNoStore(
       409,
@@ -250,12 +255,19 @@ const publishBuild = Effect.fnUntraced(function* (
   const target = (url.searchParams.get("target") ?? "").trim() || LAUNCHER;
   const commit = (url.searchParams.get("sourceCommit") ?? "").trim().toLowerCase();
   const notes = (url.searchParams.get("notes") ?? "").trim().slice(0, 2000);
-  const testFlight = testFlightConfig()!;
+  const testFlight = appConfig()!;
   if (app.slug !== testFlight.app || target !== LAUNCHER) {
     return yield* failNoStore(
       400,
       `This Nap only publishes the launcher of ${testFlight.app}, to TestFlight. Add your app to that launcher and publish the launcher.`,
       { code: "not_distributed" },
+    );
+  }
+  if (!testFlightConfig()) {
+    return yield* failNoStore(
+      503,
+      `The app record in App Store Connect is not set up yet, so ${testFlight.app} cannot be published. Ask ${napConfig.admin}.`,
+      { code: "testflight_unavailable" },
     );
   }
   const size = Number(request.headers.get("content-length"));
@@ -715,7 +727,7 @@ const describeApp = Effect.fnUntraced(function* (app: AppRow, _origin: string) {
     updatedAt: app.updatedAt,
     targets: targets.map((target, index) => ({
       target: target.target,
-      bundleId: testFlightConfig()?.bundleId ?? target.bundleId,
+      bundleId: appConfig()?.bundleId ?? target.bundleId,
       title: target.title || target.target,
       live: builds[index] ? describeBuild(builds[index]!) : null,
     })),

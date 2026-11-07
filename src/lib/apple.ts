@@ -195,9 +195,10 @@ export const regenerateProfile = Effect.fn("regenerateProfile")(function* () {
 
 const testFlightApp = Effect.suspend(() => {
   const testFlight = napConfig.apps?.testFlight;
-  return testFlight
-    ? Effect.succeed(testFlight)
-    : Effect.fail(new AppleError({ message: "Apps are off on this Nap" }));
+  const appStoreId = testFlight?.appStoreId;
+  return testFlight && appStoreId
+    ? Effect.succeed({ ...testFlight, appStoreId })
+    : Effect.fail(new AppleError({ message: "The app record in App Store Connect is not set up" }));
 });
 
 type VersionList = { data: Array<{ attributes: { version?: string; cfBundleVersion?: string } }> };
