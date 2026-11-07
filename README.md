@@ -428,18 +428,23 @@ became ordinary sites in migration 0016 and move in the same way.
 Native apps. A Nap has one app (`napConfig.apps.app`): an Artifacts repo
 (`app-<slug>`, in `SOURCES`) with a folder per platform. Each platform is a
 target of the app, with its own builds, build numbers, and live build, and a
-launcher that holds every app made for it. Today the only platform is iOS:
-SwiftUI apps in one launcher that people install from TestFlight
-(`napConfig.apps.ios`). Nap never builds apps:
+launcher that holds every app made for it. The platforms are iOS, SwiftUI
+apps in one launcher that people install from TestFlight (`napConfig.apps.ios`),
+and reMarkable, QML apps in one AppLoad launcher for the reMarkable 2 tablet
+(`napConfig.apps.remarkable`). Nap never builds apps:
 
 ```text
 agent → app repo (Artifacts) → ios/: Tuist project → xcodebuild without signing on a Mac
 agent → upload the platform's zip with sourceCommit → Nap checks the commit
 Nap (iOS) → signer container (rcodesign) → App Store .ipa in R2 → App Store Connect → TestFlight
+Nap (reMarkable) → the zip as it came, with its SHA-256 → tablet (Nap token) → update itself
 ```
 
 - **Repo.** `ios/` holds the iOS launcher (`ios/Launcher/`) and one module per
-  app (`ios/Apps/<slug>/`). Everyone who can sign in can push to the repo and
+  app (`ios/Apps/<slug>/`); `remarkable/` holds the reMarkable launcher
+  (`remarkable/launcher/`, QML and a Go backend) and one folder per app
+  (`remarkable/apps/<slug>/`). The template leaves out the platforms a Nap has
+  off. Everyone who can sign in can push to the repo and
   publish every platform.
 - **Publishing.** A build names its platform and its commit, which must be
   the head of `main` and contain the commit of that platform's live build, as
@@ -460,6 +465,13 @@ Nap (iOS) → signer container (rcodesign) → App Store .ipa in R2 → App Stor
   Apple how far it got when someone looks at `/apps`, at most every few
   seconds per build, and keeps the state on the build. TestFlight builds need
   an app icon and `ITSAppUsesNonExemptEncryption`; the template has both.
+- **reMarkable.** Nap keeps the zipped AppLoad folder as it was uploaded
+  and records its SHA-256 (`app_builds.sha256`). The first install on a
+  tablet is over USB from the repo (`remarkable/scripts/install`); the tablet
+  needs xovi and AppLoad. After that the launcher signs in with the device
+  flow, asks `GET /_nap/api/apps/<app>/targets/remarkable` for the live build
+  when it opens, and downloads it from `…/targets/remarkable/builds/<id>/download`
+  with its token, checking the SHA-256.
 - **Apple's side.** Nap uploads builds, reads the App Store profile, turns
   capabilities on, and adds testers. The App ID, the profile, and the app
   record are made by hand; Nap never creates them.

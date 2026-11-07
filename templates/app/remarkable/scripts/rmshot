@@ -1,0 +1,24 @@
+#!/bin/sh
+# A screenshot of a reMarkable 2 plugged in by USB, for testing on the device.
+#   scripts/rmshot out.png [scale]
+# Reads the screen from xochitl's memory: the frame sits in the mapping after /dev/fb0 (firmware 3.x).
+set -eu
+out=${1:?usage: scripts/rmshot out.png [scale]}
+scale=${2:-0.5}
+host=${REMARKABLE:-root@10.11.99.1}
+raw=$(mktemp -t rmshot)
+ssh "$host" 'pid=$(pidof xochitl); line=$(grep -A1 "/dev/fb0" /proc/$pid/maps | tail -1); start=${line%%-*}; end=${line#*-}; end=${end%% *}; dd if=/proc/$pid/mem bs=4096 skip=$((0x$start/4096)) count=$(((0x$end-0x$start)/4096)) 2>/dev/null' > "$raw"
+uv run -q --no-project --with "PySide6-Essentials==6.10.3" python - "$raw" "$out" "$scale" <<'PY'
+import sys
+from PySide6.QtGui import QImage
+raw = open(sys.argv[1], "rb").read()
+w, h = 1404, 1872
+off = 2629640  # firmware 3.29
+if len(raw) < off + w * h * 4:
+    sys.exit("unexpected framebuffer layout")
+img = QImage(raw[off:off + w * h * 4], w, h, w * 4, QImage.Format_RGB32).copy()
+s = float(sys.argv[3])
+img.scaled(int(w * s), int(h * s)).save(sys.argv[2])
+PY
+rm -f "$raw"
+echo "$out"

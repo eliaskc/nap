@@ -7,6 +7,13 @@ launcher that holds every app made for it, and Nap publishes each platform on it
   `ios/AGENTS.md` before you change it.
 - `nap.json` names the app on Nap.
 
+<!-- if remarkable -->
+
+- `remarkable/`: QML apps in one launcher for the reMarkable 2 tablet (AppLoad), installed over
+  USB once and updated from Nap after that. Read `remarkable/AGENTS.md` before you change it.
+
+<!-- /if -->
+
 An app can exist on one platform or several. On each, it is a folder named after its slug, so the
 same slug means the same app everywhere.
 

@@ -1,0 +1,48 @@
+#!/bin/sh
+# Builds the launcher for the reMarkable: build/app/ (an AppLoad app folder) and
+# build/remarkable.zip, the file scripts/publish uploads to Nap.
+#   scripts/build            for the tablet (32-bit ARM)
+#   scripts/build --mac      also a backend for this Mac, for scripts/preview
+# Needs Go (mise install) and uv (for Qt's resource compiler, from PySide6).
+set -eu
+cd "$(dirname "$0")/.."
+root=$(pwd)
+mac=false
+[ "${1:-}" = "--mac" ] && mac=true
+
+out=build/app
+rm -rf "$out" build/remarkable.zip
+mkdir -p "$out/backend"
+
+# Which Nap the build talks to, the app on it (../nap.json), and the commit it is built from.
+origin=${NAP_URL:-https://{{rootDomain}}}
+app=$(python3 -c 'import json; print(json.load(open("../nap.json"))["app"])')
+commit=$(git rev-parse HEAD 2>/dev/null || echo "")
+dirty=""
+[ -n "$(git -C .. status --porcelain 2>/dev/null)" ] && dirty="-dirty"
+python3 - "$out/build.json" "$app" "$origin" "$commit$dirty" <<'EOF'
+import json, sys, datetime
+path, app, origin, commit = sys.argv[1:]
+json.dump({"app": app, "origin": origin, "commit": commit,
+           "builtAt": datetime.datetime.now(datetime.timezone.utc).isoformat()}, open(path, "w"), indent=2)
+EOF
+
+# The apps: a registry for the launcher, and a resource file with every QML and asset.
+python3 scripts/lib/resources.py build/resources.qrc launcher/ui/apps.js
+
+rcc=${RCC:-}
+if [ -z "$rcc" ]; then
+  rcc=$(uv run -q --no-project --with "PySide6-Essentials==6.10.3" python -c \
+    'import PySide6, os; print(os.path.join(os.path.dirname(PySide6.__file__), "Qt", "libexec", "rcc"))')
+fi
+"$rcc" --binary -o "$out/resources.rcc" build/resources.qrc
+
+cp launcher/manifest.json launcher/icon.png "$out/"
+cp launcher/pen/letters.bin "$out/backend/"
+(cd backend && GOOS=linux GOARCH=arm GOARM=7 CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o "$root/$out/backend/entry" .)
+if $mac; then
+  (cd backend && go build -o "$root/build/entry-mac" .)
+fi
+
+(cd "$out" && zip -qr -X "$root/build/remarkable.zip" .)
+echo "$root/build/remarkable.zip"

@@ -51,6 +51,11 @@ import { Storage } from "~/server/storage";
  * to App Store Connect before it goes live. Apple processes it for a few minutes; Nap asks Apple
  * how far it got when someone looks at the apps.
  *
+ * reMarkable: the upload is the zipped AppLoad folder, and Nap keeps it as it is with its
+ * SHA-256. The launcher on the tablet asks for the live build with its Nap token and downloads
+ * it from GET /_nap/api/apps/<app>/targets/remarkable/builds/<id>/download. The first install
+ * is over USB, from the repo.
+ *
  * Every person who can sign in can push to and publish the app, and install it.
  */
 
@@ -90,6 +95,7 @@ type BuildRow = {
   testflightUpload: string | null;
   testflightKey: string | null;
   testflightCheckedAt: string | null;
+  sha256: string | null;
   createdByEmail: string;
   client: string;
   createdAt: string;
@@ -104,7 +110,7 @@ const BUILD_COLUMNS = `id, app_slug AS appSlug, target, build_number AS buildNum
   short_version AS shortVersion, xcode, signed_bytes AS signedBytes,
   testflight_state AS testflightState, testflight_error AS testflightError,
   testflight_upload AS testflightUpload, testflight_key AS testflightKey,
-  testflight_checked_at AS testflightCheckedAt,
+  testflight_checked_at AS testflightCheckedAt, sha256,
   created_by_email AS createdByEmail, client, created_at AS createdAt`;
 
 /** Workers take request bodies up to 100 MB. Launchers are far smaller. */
@@ -121,12 +127,15 @@ export const testFlightConfig = () => {
 };
 
 /** The platforms Nap knows. A Nap has the ones its config turns on. */
-export type PlatformName = "ios";
+export type PlatformName = "ios" | "remarkable";
 /** Older scripts publish the iOS launcher as the target "launcher". */
 const TARGET_ALIASES: Record<string, PlatformName> = { launcher: "ios" };
-const PLATFORM_LABELS: Record<PlatformName, string> = { ios: "iOS" };
+const PLATFORM_LABELS: Record<PlatformName, string> = { ios: "iOS", remarkable: "reMarkable" };
 /** The platforms this Nap has on, in order. */
-export const platformsOn = (): Array<PlatformName> => (napConfig.apps?.ios ? ["ios"] : []);
+export const platformsOn = (): Array<PlatformName> => [
+  ...(napConfig.apps?.ios ? (["ios"] as const) : []),
+  ...(napConfig.apps?.remarkable ? (["remarkable"] as const) : []),
+];
 export const platformLabel = (name: string) => PLATFORM_LABELS[name as PlatformName] ?? name;
 /** Opens the app in the TestFlight app on an iPhone. */
 export const testFlightUrl = (appStoreId: string) =>
@@ -201,6 +210,38 @@ export const handleAppsApi = Effect.fn("handleAppsApi")(function* (
       return yield* failNoStore(404, "This target has no live build", { code: "no_live_build" });
     }
     return json({ build: describeBuild(live) }, { headers: noStore });
+  }
+  // A reMarkable build as it was uploaded: the tablet downloads it with its token.
+  const download = rest.match(/^\/targets\/remarkable\/builds\/([0-9a-f-]{36})\/download$/);
+  if (download && (method === "GET" || method === "HEAD")) {
+    if (!platformsOn().includes("remarkable")) return yield* failNoStore(404, "Not found");
+    const build = yield* getBuild(download[1]);
+    if (!build || build.appSlug !== app.slug || build.target !== "remarkable") {
+      return yield* failNoStore(404, "Build not found");
+    }
+    if (build.status !== "ready") return yield* failNoStore(409, "The build is not ready");
+    const storage = yield* Storage;
+    const object =
+      method === "HEAD"
+        ? yield* storage.head(uploadKey(app.slug, build.id))
+        : yield* storage.get(uploadKey(app.slug, build.id));
+    if (!object) return yield* failNoStore(404, "The build is missing");
+    if (method === "GET") {
+      yield* logAppEvent(agent, app.slug, "download", {
+        target: build.target,
+        buildNumber: build.buildNumber,
+      });
+    }
+    return new Response(method === "GET" ? (object as R2ObjectBody).body : null, {
+      headers: {
+        ...noStore,
+        "content-type": "application/zip",
+        "content-length": String(object.size),
+        "content-disposition": `attachment; filename="${app.slug}-remarkable-${build.buildNumber}.zip"`,
+        "x-nap-build-number": String(build.buildNumber),
+        ...(build.sha256 ? { "x-nap-sha256": build.sha256 } : {}),
+      },
+    });
   }
   return yield* failNoStore(404, "Not found");
 });
@@ -450,6 +491,38 @@ type Platform = {
 };
 
 const PLATFORMS: Record<PlatformName, Platform> = {
+  remarkable: {
+    ready: () => Effect.void,
+    targetId: (app) => `${app}.remarkable`,
+    lowestBuildNumber: () => Effect.succeed(1),
+    // Kept as it came. Nap only checks that it is a zip and records its SHA-256, which the
+    // tablet checks after downloading.
+    process: ({ app, build, failBuild }) =>
+      Effect.gen(function* () {
+        const storage = yield* Storage;
+        const stored = yield* storage.get(uploadKey(app, build));
+        if (!stored) return yield* failBuild(500, "The upload is missing");
+        const bytes = new Uint8Array(yield* Effect.promise(() => stored.arrayBuffer()));
+        if (bytes[0] !== 0x50 || bytes[1] !== 0x4b || bytes[2] !== 0x03 || bytes[3] !== 0x04) {
+          return yield* failBuild(400, "The build is not a zip of the AppLoad folder");
+        }
+        const digest = yield* Effect.promise(() => crypto.subtle.digest("SHA-256", bytes));
+        const sha256 = [...new Uint8Array(digest)]
+          .map((byte) => byte.toString(16).padStart(2, "0"))
+          .join("");
+        const db = yield* Database;
+        yield* db.run("UPDATE app_builds SET sha256 = ? WHERE id = ?", sha256, build);
+        return {
+          name: "reMarkable launcher",
+          version: "",
+          toolchain: "",
+          bytes: bytes.byteLength,
+          response: { sha256 },
+          message: (number: number) =>
+            `Build ${number} of the reMarkable launcher is live. Tablets pick it up the next time the launcher opens, or with Check for updates. The first install on a tablet is over USB: remarkable/scripts/install.`,
+        };
+      }),
+  },
   ios: {
     ready: () =>
       Effect.gen(function* () {
@@ -788,6 +861,11 @@ function describeBuild(build: BuildRow) {
     version: build.shortVersion,
     xcode: build.xcode,
     bytes: build.signedBytes,
+    sha256: build.sha256,
+    download:
+      build.target === "remarkable" && build.status === "ready"
+        ? `/_nap/api/apps/${build.appSlug}/targets/remarkable/builds/${build.id}/download`
+        : null,
     testFlight: build.testflightState
       ? { state: build.testflightState, error: build.testflightError }
       : null,

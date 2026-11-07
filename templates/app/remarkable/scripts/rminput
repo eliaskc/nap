@@ -1,0 +1,15 @@
+#!/bin/sh
+# Taps and pen strokes on a reMarkable 2 plugged in by USB, for testing on the device. Builds
+# tools/rminput for the tablet and copies it over the first time.
+#   scripts/rminput tap <x> <y>
+#   scripts/rminput pen <x,y> <x,y> ...      one pen stroke through the points
+#   scripts/rminput swipe <x1> <y1> <x2> <y2>
+# Screen pixels, 1404 × 1872, portrait. Taps are the touchscreen (fingers), strokes the digitizer.
+set -eu
+cd "$(dirname "$0")/.."
+host=${REMARKABLE:-root@10.11.99.1}
+if ! ssh "$host" test -x /home/root/rminput; then
+  (cd tools/rminput && GOOS=linux GOARCH=arm GOARM=7 CGO_ENABLED=0 go build -trimpath -o ../../build/rminput .)
+  scp -q build/rminput "$host:/home/root/rminput"
+fi
+ssh "$host" /home/root/rminput "$@"

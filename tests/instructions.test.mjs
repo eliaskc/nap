@@ -68,3 +68,13 @@ test("the apps topic names the one app, and iOS goes to TestFlight", () => {
   assert.doesNotMatch(text, /\{\{/);
   assert.doesNotMatch(text, /ad hoc|standalone|prototype/i);
 });
+
+test("reMarkable shows in the apps topic only when the Nap has it", () => {
+  const off = renderInstructions(read("apps"), config());
+  assert.doesNotMatch(off, /remarkable/i);
+  const on = renderInstructions(read("apps"), config({ apps: { app: "nap", remarkable: {} } }));
+  assert.match(on, /remarkable\/scripts\/publish/);
+  assert.match(on, /targets\/remarkable/);
+  assert.doesNotMatch(on, /ios\/scripts\/publish/);
+  assert.doesNotMatch(on, /<!--|\{\{/);
+});

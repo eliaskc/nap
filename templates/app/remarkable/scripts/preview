@@ -1,0 +1,15 @@
+#!/bin/sh
+# The launcher on this Mac, with the same backend as on the tablet, against a Nap.
+#   scripts/preview [--app <slug>] [--shot out.png] [--steps steps.json]
+# NAP_URL picks the Nap (default: the one scripts/build names). The preview keeps its own sign-in and files
+# in .preview/, apart from the tablet's.
+set -eu
+cd "$(dirname "$0")/.."
+scripts/build --mac >/dev/null
+mkdir -p .preview/data
+sock=$(mktemp -u /tmp/nap-preview.XXXXXX)
+NAP_ORIGIN=${NAP_URL:-} NAP_DATA=.preview/data NAP_APP_DIR=build/app build/entry-mac --dev "$sock" 2>.preview/backend.log &
+pid=$!
+trap 'kill $pid 2>/dev/null; rm -f "$sock"' EXIT INT TERM
+for _ in 1 2 3 4 5 6 7 8 9 10; do [ -S "$sock" ] && break; sleep 0.2; done
+uv run -q --no-project --with "PySide6-Essentials==6.10.3" python scripts/lib/preview.py --socket "$sock" "$@"

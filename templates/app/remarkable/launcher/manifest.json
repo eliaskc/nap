@@ -1,0 +1,9 @@
+{
+    "name": "{{title}}",
+    "id": "nap",
+    "entry": "/launcher/ui/Main.qml",
+    "loadsBackend": true,
+    "supportsScaling": false,
+    "canHaveMultipleFrontends": false,
+    "aspectRatio": "original"
+}

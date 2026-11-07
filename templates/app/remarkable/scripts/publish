@@ -1,0 +1,21 @@
+#!/bin/sh
+# Builds the reMarkable launcher and publishes it to Nap: pushes HEAD to main of the source repo,
+# uploads the zip with that commit, and Nap makes it the live build of the reMarkable target.
+# Tablets pick it up the next time the launcher opens.
+#   scripts/publish ["what changed"]
+# Commit first: Nap only takes builds of the pushed head of main.
+set -eu
+cd "$(dirname "$0")/.."
+notes=${1:-}
+root=$(git rev-parse --show-toplevel)
+app=$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["app"])' "$root/nap.json")
+nap=${NAP_URL:-https://{{rootDomain}}}
+
+if [ -n "$(git -C "$root" status --porcelain)" ]; then
+  echo "Commit your changes first: Nap publishes the commit you built." >&2
+  exit 1
+fi
+zip=$(scripts/build)
+script=$(mktemp -t nap-publish).mjs
+curl -fsSL "$nap/_nap/api/publish.mjs" -o "$script"
+node "$script" app publish "$app" "$zip" --target remarkable --source "$root" --notes "$notes"

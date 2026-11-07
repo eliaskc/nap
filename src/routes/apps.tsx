@@ -6,6 +6,7 @@ import {
   DownloadIcon,
   ExternalLinkIcon,
   SmartphoneIcon,
+  TabletIcon,
 } from "lucide-react";
 import * as React from "react";
 import { Badge } from "~/components/ui/badge";
@@ -17,7 +18,8 @@ import { napConfig } from "~/nap.config";
 
 /**
  * /apps — the native app, one row per platform. The iOS launcher goes to TestFlight, and this
- * page shows Apple processing each build.
+ * page shows Apple processing each build. The reMarkable launcher is installed over USB once and
+ * then updates itself.
  */
 export const Route = createFileRoute("/apps")({
   component: AppsPage,
@@ -171,7 +173,11 @@ function AppsPage() {
             <CardContent className="flex flex-col divide-y p-0">
               {app.targets.map((target) => (
                 <div key={target.target} className="flex items-center gap-3 px-6 py-3">
-                  <SmartphoneIcon className="size-5 shrink-0 text-muted-foreground" />
+                  {target.target === "remarkable" ? (
+                    <TabletIcon className="size-5 shrink-0 text-muted-foreground" />
+                  ) : (
+                    <SmartphoneIcon className="size-5 shrink-0 text-muted-foreground" />
+                  )}
                   <div className="flex min-w-0 flex-1 flex-col gap-0.5">
                     <div className="flex items-center gap-2">
                       <span className="truncate font-medium">
@@ -194,6 +200,12 @@ function AppsPage() {
                       </span>
                     ) : (
                       <span className="text-xs text-muted-foreground">No build yet</span>
+                    )}
+                    {target.target === "remarkable" && (
+                      <span className="text-xs text-muted-foreground">
+                        Install on a tablet once over USB (remarkable/scripts/install in the repo);
+                        it updates itself after that.
+                      </span>
                     )}
                   </div>
                 </div>

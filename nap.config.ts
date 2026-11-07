@@ -25,7 +25,7 @@ export type NapConfig = {
   /**
    * Native apps. null turns them off. A Nap has one app: one source repo (app-<app>) with a
    * folder per platform, and each platform it has on gets a launcher that holds every app.
-   * Today the only platform is iOS.
+   * The platforms are iOS and reMarkable.
    */
   apps: {
     /** The app's slug on Nap. Its repo is app-<app>. */
@@ -56,6 +56,12 @@ export type NapConfig = {
        */
       capabilities?: Array<AutomaticCapability>;
     };
+    /**
+     * reMarkable: a launcher for the reMarkable 2 tablet, run by AppLoad. Leave it out for no
+     * reMarkable. Nap stores the zipped AppLoad folder as it is uploaded; tablets sign in with a
+     * Nap token and update themselves from it. Nothing to set up: `{}` turns it on.
+     */
+    remarkable?: Record<string, never>;
   } | null;
   /**
    * Example requests the dashboard rotates through under "Ask your agent", such as
