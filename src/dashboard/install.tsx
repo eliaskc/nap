@@ -12,12 +12,12 @@ import { renderSVG } from "uqr";
 import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";
 import {
-  Sheet,
-  SheetClose,
-  SheetContent,
-  SheetDescription,
-  SheetTitle,
-} from "~/components/ui/sheet";
+  Drawer,
+  DrawerClose,
+  DrawerContent,
+  DrawerDescription,
+  DrawerTitle,
+} from "~/components/ui/drawer";
 import { Skeleton } from "~/components/ui/skeleton";
 import { Spinner } from "~/components/ui/spinner";
 import { GroupButton, GroupTab, GroupTabs } from "~/dashboard/controls";
@@ -28,7 +28,7 @@ import { napConfig } from "~/nap.config";
 
 /**
  * Get the app: the instance's one Nap app, on each platform it has (iPhone through TestFlight,
- * reMarkable over USB once). It all happens in one sheet that comes up from the bottom: the bar's
+ * reMarkable over USB once). It all happens in one sheet (Base UI's Drawer) that comes up from the bottom: the bar's
  * button opens it, and so do the nudge above the list, the playful layouts' QR spots, and any
  * link to /app (which lands on the dashboard as #app). The bar button says your next step.
  */
@@ -773,50 +773,46 @@ function AppSheetView() {
   // Opening with a click focuses the page, not the close button (which would show its ring).
   const scroller = React.useRef<HTMLDivElement>(null);
   return (
-    <Sheet open={install.open} onOpenChange={install.setOpen}>
-      <SheetContent
-        side="bottom"
-        showCloseButton={false}
+    // Base UI's Drawer: swipe it down to close on a touch screen, or ×.
+    <Drawer open={install.open} onOpenChange={install.setOpen}>
+      <DrawerContent
         initialFocus={(type) => (type === "keyboard" ? true : scroller.current)}
         className={cn(
-          "gap-0 overflow-hidden border-0 bg-background p-0 shadow-[0_-10px_60px_rgb(0_0_0/0.25)]",
-          "rounded-t-[22px] data-[side=bottom]:h-[calc(100dvh-3.5rem)] sm:rounded-t-[28px] sm:data-[side=bottom]:h-[calc(100dvh-2.25rem)]",
-          "sm:data-[side=bottom]:inset-x-auto sm:data-[side=bottom]:left-1/2 sm:w-[min(900px,calc(100vw-2rem))] sm:-translate-x-1/2",
-          "duration-500 ease-[cubic-bezier(0.32,0.72,0,1)] data-[side=bottom]:data-ending-style:translate-y-full data-[side=bottom]:data-starting-style:translate-y-full",
+          "overflow-hidden border-0 bg-background shadow-[0_-10px_60px_rgb(0_0_0/0.25)]",
+          "h-[calc(100dvh-3.5rem)] max-h-none rounded-t-[22px] data-[swipe-direction=down]:rounded-t-[22px]",
+          "sm:mx-auto sm:h-[calc(100dvh-2.25rem)] sm:w-[min(900px,calc(100vw-2rem))] sm:data-[swipe-direction=down]:rounded-t-[28px]",
         )}
       >
-        <SheetClose
-          render={
-            <Button
-              variant="secondary"
-              size="icon"
-              className="absolute top-4 right-4 z-10 size-9 rounded-full sm:top-4 sm:right-[18px]"
-            />
-          }
-        >
-          <XIcon />
-          <span className="sr-only">Close</span>
-        </SheetClose>
+        {/* One row, over the scrolling page: the handle (phones) and ×, on the same line. */}
+        <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex h-14 items-center justify-center">
+          <span aria-hidden className="h-[5px] w-10 rounded-full bg-foreground/15 sm:hidden" />
+          <DrawerClose
+            render={
+              <Button
+                variant="secondary"
+                size="icon"
+                className="pointer-events-auto absolute top-1/2 right-3 size-9 -translate-y-1/2 rounded-full sm:right-4"
+              />
+            }
+          >
+            <XIcon />
+            <span className="sr-only">Close</span>
+          </DrawerClose>
+        </div>
         <div
           ref={scroller}
           tabIndex={-1}
-          className="min-h-0 flex-1 overflow-y-auto bg-muted/40 outline-none"
+          className="min-h-0 flex-1 overflow-y-auto overscroll-contain bg-muted/40 outline-none"
         >
-          <button
-            type="button"
-            aria-label="Close"
-            onClick={() => install.setOpen(false)}
-            className="mx-auto mt-2 block h-[5px] w-10 rounded-full bg-foreground/15 sm:hidden"
-          />
-          <div className="mx-auto flex w-full max-w-[760px] flex-col gap-6 px-4 pt-6 pb-12 sm:gap-[26px] sm:px-6 sm:pt-10">
+          <div className="mx-auto flex w-full max-w-[760px] flex-col gap-6 px-4 pt-12 pb-12 sm:gap-[26px] sm:px-6 sm:pt-10">
             <div className="flex flex-col items-center gap-2.5 text-center">
               <AppIcon className="size-[72px] shadow-md sm:size-[88px]" />
-              <SheetTitle className="mt-1.5 text-3xl font-semibold tracking-[-0.03em] sm:text-[38px]">
+              <DrawerTitle className="mt-1.5 text-3xl font-semibold tracking-[-0.03em] sm:text-[38px]">
                 {title}
-              </SheetTitle>
-              <SheetDescription className="mb-2 text-balance text-muted-foreground sm:text-[15px]">
+              </DrawerTitle>
+              <DrawerDescription className="mb-2 text-balance text-muted-foreground sm:text-[15px]">
                 {tagline(app)}
-              </SheetDescription>
+              </DrawerDescription>
               {TARGETS.length > 1 && (
                 <GroupTabs value={target} onValueChange={install.setTarget} label="Platform">
                   {TARGETS.map((name) => {
@@ -862,8 +858,8 @@ function AppSheetView() {
             </div>
           </div>
         </div>
-      </SheetContent>
-    </Sheet>
+      </DrawerContent>
+    </Drawer>
   );
 }
 
