@@ -3,6 +3,7 @@ import { LoaderCircle } from "lucide-react";
 import * as React from "react";
 import { Avatar } from "~/components/avatar";
 import { captureScreen } from "~/components/welcome/capture";
+import { NapMark } from "~/dashboard/chrome";
 import { CARD, canRunDust, cardTheme, runDust } from "~/components/welcome/dust";
 import {
   COLOR_VALUES,
@@ -232,7 +233,10 @@ function Welcome() {
         className="absolute inset-0 overflow-y-auto bg-background"
       >
         <div className="mx-auto flex min-h-full w-full max-w-[460px] flex-col px-6 pt-5 pb-[max(2.5rem,env(safe-area-inset-bottom))] sm:justify-center sm:py-20">
-          <div className="text-sm font-bold tracking-tight sm:fixed sm:top-6 sm:left-8">nap</div>
+          {/* Where the dashboard's top-left mark sits, so it stays put when the dashboard comes in. */}
+          <div className="flex h-10 items-center sm:fixed sm:top-2.5 sm:left-5">
+            <NapMark />
+          </div>
           <div className="mt-auto pt-10 sm:mt-0 sm:pt-0">
             {loadError ? (
               <p className="text-sm text-destructive">{loadError}</p>
