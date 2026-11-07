@@ -199,7 +199,7 @@ def sign(
         ).get("CFBundleIconName"):
             raise BuildError(
                 "TestFlight builds need an app icon: an AppIcon set in an asset catalog of the "
-                "launcher (the app template has one in Apps/Launcher/Resources)."
+                "launcher (the app template has one in ios/Launcher/Resources)."
             )
 
         info["CFBundleIdentifier"] = bundle_id

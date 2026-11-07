@@ -1,13 +1,13 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { Effect } from "effect";
-import { appsEnabled, listApps, testFlightConfig, testFlightUrl } from "~/lib/apps";
+import { appsEnabled, listApps, napApp, testFlightConfig, testFlightUrl } from "~/lib/apps";
 import { signedIn } from "~/lib/nap-server";
 import { json, noStore } from "~/server/http";
 import { route } from "~/server/route";
 
 /**
- * GET /api/apps — the app with its launcher's live build, and its TestFlight link. Everyone who
- * can sign in.
+ * GET /api/apps — the app with each platform's live build, and the iOS TestFlight link. Everyone
+ * who can sign in.
  */
 export const Route = createFileRoute("/api/apps")({
   server: {
@@ -27,8 +27,8 @@ export const Route = createFileRoute("/api/apps")({
                 enabled: true,
                 testFlight: testFlight
                   ? {
-                      app: testFlight.app,
-                      target: "launcher",
+                      app: napApp(),
+                      target: "ios",
                       url: testFlightUrl(testFlight.appStoreId),
                     }
                   : null,

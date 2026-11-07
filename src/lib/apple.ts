@@ -86,10 +86,10 @@ type ProfileList = {
 export type SigningProfile = { id: string; bytes: Uint8Array };
 
 const profileName = Effect.suspend(() => {
-  const name = napConfig.apps?.testFlight.profileName;
+  const name = napConfig.apps?.ios?.profileName;
   return name
     ? Effect.succeed(name)
-    : Effect.fail(new AppleError({ message: "Apps are off on this Nap" }));
+    : Effect.fail(new AppleError({ message: "iOS is off on this Nap" }));
 });
 
 /**
@@ -194,10 +194,10 @@ export const regenerateProfile = Effect.fn("regenerateProfile")(function* () {
 // ---- TestFlight ----
 
 const testFlightApp = Effect.suspend(() => {
-  const testFlight = napConfig.apps?.testFlight;
-  const appStoreId = testFlight?.appStoreId;
-  return testFlight && appStoreId
-    ? Effect.succeed({ ...testFlight, appStoreId })
+  const ios = napConfig.apps?.ios;
+  const appStoreId = ios?.appStoreId;
+  return ios && appStoreId
+    ? Effect.succeed({ ...ios, appStoreId })
     : Effect.fail(new AppleError({ message: "The app record in App Store Connect is not set up" }));
 });
 

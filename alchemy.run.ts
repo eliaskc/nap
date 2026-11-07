@@ -171,13 +171,13 @@ export class NapWorker extends Cloudflare.Website.Vite<NapWorker>()(
       ? yield* secret("NAP_R2_SECRET_ACCESS_KEY")
       : yield* local("NAP_R2_SECRET_ACCESS_KEY");
     const devPort = Number(yield* local("NAP_DEV_PORT")) || undefined;
-    // Apps (napConfig.apps): the Apple Distribution key and certificate (one PEM) that the
+    // iOS apps (napConfig.apps.ios): the Apple Distribution key and certificate (one PEM) that the
     // signer container signs with, and the App Store Connect team key that reads the profile.
     // Production reads them from the environment. Other stages may set them; without them,
     // publishing a build fails with a clear error.
     const optional = (name: string) =>
       Effect.orDie(Config.Redacted(name).pipe(Config.withDefault(Redacted.make(""))));
-    const appsInProduction = production && napConfig.apps !== null;
+    const appsInProduction = production && Boolean(napConfig.apps?.ios);
     const plain = (name: string) => Effect.orDie(Config.String(name).pipe(Config.withDefault("")));
     const appSigningPem = appsInProduction
       ? yield* secret("NAP_APPLE_SIGNING_PEM")
@@ -219,8 +219,10 @@ export class NapWorker extends Cloudflare.Website.Vite<NapWorker>()(
         // The app signer: a container that signs unsigned iOS builds with rcodesign
         // (containers/signer). One instance that sleeps when idle; it has no internet access.
         // standard-1 (half a CPU, 4 GB): lite took two minutes to sign a 19 MB app.
-        // Only with apps on (napConfig.apps): containers need the Workers Paid plan and Docker.
-        ...(napConfig.apps
+        // Only with iOS on (napConfig.apps.ios): containers need the Workers Paid plan and Docker.
+        // Turning iOS off on a Nap that had it fails to deploy while the Worker still exports
+        // AppSigner (Cloudflare refuses the deleted class).
+        ...(napConfig.apps?.ios
           ? {
               SIGNER: Cloudflare.Container<AppSigner>("SIGNER", {
                 className: "AppSigner",

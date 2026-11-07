@@ -64,7 +64,7 @@ Read one with `curl -fsSL https://{{rootDomain}}/_nap/api/instructions/<topic>`.
 - `drafts`: publishing without a token through a claim link the user opens.
 {{extensionTopics}}
 <!-- if apps -->
-- `apps`: native iOS apps in SwiftUI that people install on their iPhones from TestFlight. Use them only when the user asks for an app on the phone.
+- `apps`: native apps, one repo with a folder per platform (iOS: SwiftUI, installed from TestFlight). Use them only when the user asks for an app on the phone.
 <!-- /if -->
 
 When Nap cannot do something (custom domains, passwords, server logic, scheduled jobs), do not work around it. Tell the user to ask {{admin}}.

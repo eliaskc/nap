@@ -25,10 +25,10 @@ import { napConfig } from "~/nap.config";
  * Get the app: the instance's one Nap app, from TestFlight. The bar has a Get the app button with
  * a popover (a sheet on phones); Steps, Canvas, and Vending each have a spot of their own with a
  * QR code, and phones get a banner. All of them share one state, so opening any of them opens
- * the same panel. Only on a Nap with napConfig.apps.testFlight.
+ * the same panel. Only on a Nap with iOS on and its app record set (napConfig.apps.ios).
  */
 
-export const TESTFLIGHT_ENABLED = Boolean(napConfig.apps?.testFlight.appStoreId);
+export const TESTFLIGHT_ENABLED = Boolean(napConfig.apps?.ios?.appStoreId);
 /** The TestFlight app on the App Store. */
 const TESTFLIGHT_STORE_URL = "https://apps.apple.com/app/testflight/id899247664";
 /** The page with the same flow, to send people a link to, and where QR codes go. */

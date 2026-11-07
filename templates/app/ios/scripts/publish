@@ -1,6 +1,6 @@
 #!/bin/sh
-# Builds the launcher and publishes it to Nap: pushes HEAD to main of the source repo, uploads the
-# unsigned build with that commit, and Nap signs it and sends it to TestFlight.
+# Builds the iOS launcher and publishes it to Nap: pushes HEAD to main of the source repo, uploads
+# the unsigned build with that commit, and Nap signs it and sends it to TestFlight.
 #   scripts/publish ["notes for testers"]
 # Commit first: Nap only takes builds of the pushed head of main.
 set -eu
@@ -8,14 +8,15 @@ cd "$(dirname "$0")/.."
 # Older instructions named the target first: scripts/publish launcher "notes".
 if [ "${1:-}" = "launcher" ]; then shift; fi
 notes=${1:-}
-app=$(plutil -extract app raw -o - nap.json)
+root=$(git rev-parse --show-toplevel)
+app=$(plutil -extract app raw -o - "$root/nap.json")
 nap=${NAP_URL:-https://{{rootDomain}}}
 
-if [ -n "$(git status --porcelain)" ]; then
+if [ -n "$(git -C "$root" status --porcelain)" ]; then
   echo "Commit your changes first: Nap publishes the commit you built." >&2
   exit 1
 fi
 zip=$(./scripts/build)
 script=$(mktemp -t nap-publish).mjs
 curl -fsSL "$nap/_nap/api/publish.mjs" -o "$script"
-node "$script" app publish "$app" "$zip" --source . --notes "$notes"
+node "$script" app publish "$app" "$PWD/$zip" --target ios --source "$root" --notes "$notes"

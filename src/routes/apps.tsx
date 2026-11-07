@@ -16,8 +16,8 @@ import { Spinner } from "~/components/ui/spinner";
 import { napConfig } from "~/nap.config";
 
 /**
- * /apps — the native app. Its launcher goes to TestFlight, and this page shows Apple processing
- * each build.
+ * /apps — the native app, one row per platform. The iOS launcher goes to TestFlight, and this
+ * page shows Apple processing each build.
  */
 export const Route = createFileRoute("/apps")({
   component: AppsPage,
@@ -45,7 +45,13 @@ type App = {
   slug: string;
   title: string;
   updatedAt: string;
-  targets: Array<{ target: string; bundleId: string; title: string; live: Build | null }>;
+  targets: Array<{
+    target: string;
+    platform: string;
+    bundleId: string | null;
+    title: string;
+    live: Build | null;
+  }>;
 };
 
 function AppsPage() {
@@ -171,6 +177,7 @@ function AppsPage() {
                       <span className="truncate font-medium">
                         {target.live?.name || target.title}
                       </span>
+                      <Badge variant="outline">{target.platform}</Badge>
                       {target.live && (
                         <Badge variant="secondary">Build {target.live.buildNumber}</Badge>
                       )}

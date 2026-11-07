@@ -1,7 +1,8 @@
 import { napConfig } from "~/nap.config";
 
 /**
- * The starting point of an app's source repo: a Tuist project with a launcher and one app in it.
+ * The starting point of an app's source repo: a folder per platform (ios/: a Tuist project with a
+ * launcher and one app in it).
  * The files are in templates/app and bundled into the Worker. `node publish.mjs app init` writes
  * them, fills in the placeholders, and pushes the first commit.
  */
@@ -33,7 +34,7 @@ export function appTemplateFiles() {
         path: RENAMES[relative] ?? relative,
         content: content.replaceAll("{{rootDomain}}", napConfig.rootDomain),
         encoding: "utf8" as const,
-        executable: relative.startsWith("scripts/"),
+        executable: /(^|\/)scripts\//.test(relative),
       };
     })
     .sort((a, b) => a.path.localeCompare(b.path));

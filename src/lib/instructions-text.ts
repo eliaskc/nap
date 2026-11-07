@@ -36,5 +36,5 @@ export function renderInstructions(
   return fillDeploymentText(withTopics.replace(/\n{3,}/g, "\n\n"), {
     ...config,
     rootDomain,
-  }).replaceAll("{{testFlightApp}}", config.apps?.testFlight?.app ?? "");
+  }).replaceAll("{{napApp}}", config.apps?.app ?? "");
 }

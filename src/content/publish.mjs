@@ -14,7 +14,7 @@
 //   node publish.mjs app init <app> [dir] [--title "Name"]   Create an app from the template.
 //   node publish.mjs app clone <app> [dir]
 //   node publish.mjs app run <app> -- <command...>           git or jj with access to its repo.
-//   node publish.mjs app publish <app> <build.zip> --source <dir> [--notes "..."]
+//   node publish.mjs app publish <app> <build.zip> --target <platform> --source <dir> [--notes "..."]
 //                          Pushes HEAD of <dir> to main, uploads the unsigned build with that
 //                          commit, and Nap signs it and makes it live. The app's
 //                          scripts/publish runs this for you.
@@ -546,7 +546,7 @@ async function appCommand(options) {
     const head = git("rev-parse", "HEAD");
     pushSource({ dir, head }, created.data.source, `app run ${slug}`);
     console.log(`Created the app ${slug} in ${dir}. Its repo on Nap is the remote "nap".`);
-    console.log(`Next: cd ${dir} && scripts/publish "First build"`);
+    console.log(`Next: cd ${dir}/ios && scripts/publish "First build"`);
     return;
   }
   if (command === "clone") {
@@ -567,13 +567,14 @@ async function appCommand(options) {
     const app = appSlug(options);
     const zip = options._[3];
     if (!zip) throw new ExitError("Give the zipped .app, for example build/launcher.zip.");
-    const target = options.target || "launcher";
+    // Nap picks the platform when it has only one.
+    const target = options.target || "";
     if (!options.source) throw new ExitError("Give --source: the app's Git repo you built from.");
     const local = localSource(options.source);
     const source = await appSourceAccess(token, app);
     pushSource(local, source, `app run ${decodeURIComponent(app)}`);
     const size = (await stat(zip)).size;
-    console.log(`Uploading ${target} (${mb(size)}). Nap signs it...`);
+    console.log(`Uploading ${target || "the build"} (${mb(size)})...`);
     const query = new URLSearchParams({
       target,
       sourceCommit: local.head,

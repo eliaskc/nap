@@ -31,8 +31,8 @@ const PORT = 8798;
 const ORIGIN = `http://localhost:${PORT}`;
 const NAMESPACE = process.env.NAP_SOURCES_TEST_NAMESPACE || "nap-sites-test";
 if (NAMESPACE === "nap-sites") throw new Error("Never run this against the production namespace");
-const testFlight = napConfig.apps?.testFlight;
-if (!testFlight) throw new Error("instance/ must have apps on");
+const testFlight = napConfig.apps?.ios;
+if (!testFlight?.appStoreId) throw new Error("instance/ must have iOS on, with its app record");
 for (const name of [
   "NAP_APPLE_SIGNING_PEM",
   "NAP_ASC_PRIVATE_KEY",
@@ -46,7 +46,7 @@ for (const name of [
 const state = await mkdtemp(join(tmpdir(), "nap-testflight-test-"));
 const work = join(state, "work");
 await mkdir(work);
-const APP = testFlight.app;
+const APP = napConfig.apps.app;
 const gitIdentity = {
   GIT_AUTHOR_NAME: "Nap test",
   GIT_AUTHOR_EMAIL: "test@example.com",
@@ -190,9 +190,10 @@ function script(token, args, options = {}) {
 }
 
 function build(dir) {
-  const result = spawnSync(join(dir, "scripts/build"), [], { encoding: "utf8", cwd: dir });
+  const ios = join(dir, "ios");
+  const result = spawnSync(join(ios, "scripts/build"), [], { encoding: "utf8", cwd: ios });
   assert.equal(result.status, 0, `build\n${result.stdout}\n${result.stderr}`);
-  return join(dir, result.stdout.trim().split("\n").pop());
+  return join(ios, result.stdout.trim().split("\n").pop());
 }
 
 let nap;
@@ -224,7 +225,7 @@ try {
   step("the template app declares a permission, Info.plist keys, and capabilities in app.json");
   turnedOnWifi = !(await appIdCapabilities()).has("ACCESS_WIFI_INFORMATION");
   await writeFile(
-    join(dir, "Apps/hello/app.json"),
+    join(dir, "ios/Apps/hello/app.json"),
     JSON.stringify({
       title: "Hello",
       permissions: { NSMotionUsageDescription: "The TestFlight test asks for nothing." },
@@ -270,6 +271,8 @@ try {
     "publish",
     APP,
     build(dir),
+    "--target",
+    "ios",
     "--source",
     dir,
     "--notes",
@@ -282,17 +285,17 @@ try {
   assert.match(published.stdout, /iCloud needs an iCloud container/);
   assert.match(published.stdout, /teleport is not a capability Nap knows/);
   assert.doesNotMatch(published.stdout, /Wi-Fi information/);
-  const buildNumber = Number(published.stdout.match(/Build (\d+) of launcher/)[1]);
+  const buildNumber = Number(published.stdout.match(/Build (\d+) of the iOS app/)[1]);
   assert.ok(buildNumber > 1, "the build number goes above what App Store Connect has");
 
-  step("other targets are not published");
+  step("platforms this Nap does not have are not published");
   const other_ = script(
     token,
     ["app", "publish", APP, build(dir), "--target", "hello", "--source", dir],
     { allowFailure: true },
   );
   assert.notEqual(other_.status, 0);
-  assert.match(other_.stderr, /only publishes the launcher/);
+  assert.match(other_.stderr, /must be a platform this Nap has: ios/);
 
   step("the dashboard shows the build processing, then in TestFlight");
   const started = Date.now();

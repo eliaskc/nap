@@ -29,23 +29,29 @@ import {
 import { napConfig } from "~/nap.config";
 import { SignerBinding } from "~/server/bindings";
 import { Database } from "~/server/database";
+import type { NapServices } from "~/server/runtime";
 import { failNoStore, json, noStore, readParams } from "~/server/http";
 import { Storage } from "~/server/storage";
 
 /**
- * Native apps. See migrations/0018_apps.sql for the model.
+ * Native apps. See migrations/0018_apps.sql for the tables.
  *
- * A Nap has one app, napConfig.apps.testFlight.app: a launcher with one folder per app inside it.
+ * A Nap has one app, napConfig.apps.app: one source repo with a folder per platform. Each
+ * platform is a target of the app (app_targets), with its own builds, build numbers, and live
+ * build. A platform's launcher holds every app the repo has for it.
  *
  * 1. An agent creates the app once: Nap makes its source repo (Artifacts) and returns a Git token.
- * 2. The agent pushes the Xcode project to main, builds the launcher on a Mac without signing, and
- *    uploads the zipped .app with the commit it built: POST /_nap/api/apps/<app>/builds.
- * 3. Nap checks the commit like a site's (head of main, contains the live build's commit), stores
- *    the unsigned build, signs it with the App Store profile in the signer container, and uploads
- *    it to App Store Connect before it goes live. Apple processes it for a few minutes; Nap asks
- *    Apple how far it got when someone looks at the apps.
+ * 2. The agent pushes to main, builds a platform's launcher on its own machine, and uploads the
+ *    zip with the commit it built: POST /_nap/api/apps/<app>/builds?target=<platform>.
+ * 3. Nap checks the commit like a site's (head of main, contains that platform's live build's
+ *    commit), stores the upload, numbers the build, lets the platform process it, and makes it
+ *    live. What processing means is the platform's own (PLATFORMS below).
  *
- * Every person who can sign in can push to and publish the app, and install it from TestFlight.
+ * iOS: Nap signs the launcher with the App Store profile in the signer container and uploads it
+ * to App Store Connect before it goes live. Apple processes it for a few minutes; Nap asks Apple
+ * how far it got when someone looks at the apps.
+ *
+ * Every person who can sign in can push to and publish the app, and install it.
  */
 
 type AppRow = {
@@ -101,27 +107,35 @@ const BUILD_COLUMNS = `id, app_slug AS appSlug, target, build_number AS buildNum
   testflight_checked_at AS testflightCheckedAt,
   created_by_email AS createdByEmail, client, created_at AS createdAt`;
 
-/** The one target Nap publishes: the launcher. Builds name it, as older scripts do. */
-const LAUNCHER = "launcher";
 /** Workers take request bodies up to 100 MB. Launchers are far smaller. */
 export const MAX_APP_BYTES = 95 * 1024 * 1024;
 const now = () => new Date().toISOString();
 
 export const appsEnabled = () => napConfig.apps !== null;
-/** The one app on Nap, and the app record its launcher goes to. Null when apps are off. */
-const appConfig = () => napConfig.apps?.testFlight ?? null;
-/** The app record, once it exists (appStoreId is set). Null until then, or when apps are off. */
+/** The one app on Nap, or null when apps are off. */
+export const napApp = () => napConfig.apps?.app ?? null;
+/** iOS, with the app record once it exists (appStoreId is set). Null until then or without iOS. */
 export const testFlightConfig = () => {
-  const config = appConfig();
-  return config?.appStoreId ? { ...config, appStoreId: config.appStoreId } : null;
+  const ios = napConfig.apps?.ios;
+  return ios?.appStoreId ? { ...ios, appStoreId: ios.appStoreId } : null;
 };
+
+/** The platforms Nap knows. A Nap has the ones its config turns on. */
+export type PlatformName = "ios";
+/** Older scripts publish the iOS launcher as the target "launcher". */
+const TARGET_ALIASES: Record<string, PlatformName> = { launcher: "ios" };
+const PLATFORM_LABELS: Record<PlatformName, string> = { ios: "iOS" };
+/** The platforms this Nap has on, in order. */
+export const platformsOn = (): Array<PlatformName> => (napConfig.apps?.ios ? ["ios"] : []);
+export const platformLabel = (name: string) => PLATFORM_LABELS[name as PlatformName] ?? name;
 /** Opens the app in the TestFlight app on an iPhone. */
 export const testFlightUrl = (appStoreId: string) =>
   `itms-beta://beta.itunes.apple.com/v1/app/${appStoreId}`;
 /** How often Nap asks Apple about a build that is still processing. */
 const TESTFLIGHT_CHECK_MS = 10 * 1000;
 
-const unsignedKey = (app: string, build: string) => `apps/${app}/builds/${build}/unsigned.zip`;
+/** What the agent uploaded, on every platform. (iOS uploads are unsigned, hence the name.) */
+const uploadKey = (app: string, build: string) => `apps/${app}/builds/${build}/unsigned.zip`;
 /** The .ipa signed for the App Store (TestFlight), named after its profile. */
 const signedKey = (app: string, build: string, profile: string) =>
   `apps/${app}/builds/${build}/signed-appstore-${profile}.ipa`;
@@ -179,10 +193,10 @@ export const handleAppsApi = Effect.fn("handleAppsApi")(function* (
     );
     return json({ builds: results.map(describeBuild) }, { headers: noStore });
   }
-  // The live build of the launcher.
+  // The live build of a platform's launcher. Launchers ask this to update themselves.
   const targetMatch = rest.match(/^\/targets\/([a-z][a-z0-9-]{0,31})$/);
   if (targetMatch && method === "GET") {
-    const live = yield* liveBuild(app.slug, targetMatch[1]);
+    const live = yield* liveBuild(app.slug, TARGET_ALIASES[targetMatch[1]] ?? targetMatch[1]);
     if (!live) {
       return yield* failNoStore(404, "This target has no live build", { code: "no_live_build" });
     }
@@ -201,11 +215,11 @@ const createApp = Effect.fnUntraced(function* (
     return yield* failNoStore(400, "slug is required: lowercase letters, numbers, and hyphens");
   }
   const title = rawTitle.trim().slice(0, 120) || slug;
-  const testFlight = appConfig();
-  if (testFlight && slug !== testFlight.app) {
+  const only = napApp();
+  if (only && slug !== only) {
     return yield* failNoStore(
       409,
-      `This Nap has one app, ${testFlight.app}, which goes to TestFlight. Add yours to its launcher: node nap-publish.mjs app clone ${testFlight.app}`,
+      `This Nap has one app, ${only}. Add yours to it: node nap-publish.mjs app clone ${only}`,
       { code: "one_app" },
     );
   }
@@ -236,15 +250,16 @@ const createApp = Effect.fnUntraced(function* (
     {
       app: { slug, title },
       source: access,
-      next: "Start from the template (GET /_nap/api/apps/template), push it to main, then build the launcher and POST it to /_nap/api/apps/<slug>/builds.",
+      next: "Start from the template (GET /_nap/api/apps/template), push it to main, then build a platform's launcher and POST it to /_nap/api/apps/<slug>/builds?target=<platform>.",
     },
     { status: 201, headers: noStore },
   );
 });
 
 /**
- * POST /_nap/api/apps/<app>/builds?target=launcher&sourceCommit=<sha>&notes=<text>
- * Body: a zip of the unsigned .app (content-type application/zip).
+ * POST /_nap/api/apps/<app>/builds?target=<platform>&sourceCommit=<sha>&notes=<text>
+ * Body: a zip of the platform's launcher (content-type application/zip). target may be left out
+ * when the Nap has one platform.
  */
 const publishBuild = Effect.fnUntraced(function* (
   request: Request,
@@ -252,33 +267,33 @@ const publishBuild = Effect.fnUntraced(function* (
   agent: AgentIdentity,
   app: AppRow,
 ) {
-  const target = (url.searchParams.get("target") ?? "").trim() || LAUNCHER;
+  const on = platformsOn();
+  const asked = (url.searchParams.get("target") ?? "").trim();
+  const target = asked ? (TARGET_ALIASES[asked] ?? asked) : on.length === 1 ? on[0] : "";
   const commit = (url.searchParams.get("sourceCommit") ?? "").trim().toLowerCase();
   const notes = (url.searchParams.get("notes") ?? "").trim().slice(0, 2000);
-  const testFlight = appConfig()!;
-  if (app.slug !== testFlight.app || target !== LAUNCHER) {
+  if (app.slug !== napApp()) {
+    return yield* failNoStore(400, `This Nap only publishes the app ${napApp()}.`, {
+      code: "not_distributed",
+    });
+  }
+  if (!on.includes(target as PlatformName)) {
     return yield* failNoStore(
       400,
-      `This Nap only publishes the launcher of ${testFlight.app}, to TestFlight. Add your app to that launcher and publish the launcher.`,
+      on.length
+        ? `target must be a platform this Nap has: ${on.join(", ")}`
+        : "This Nap has no platforms on. Ask the admin.",
       { code: "not_distributed" },
     );
   }
-  if (!testFlightConfig()) {
-    return yield* failNoStore(
-      503,
-      `The app record in App Store Connect is not set up yet, so ${testFlight.app} cannot be published. Ask ${napConfig.admin}.`,
-      { code: "testflight_unavailable" },
-    );
-  }
+  const platform = PLATFORMS[target as PlatformName];
+  yield* platform.ready();
   const size = Number(request.headers.get("content-length"));
   const body = request.body;
   if (!body || !Number.isFinite(size) || size <= 0) {
-    return yield* failNoStore(411, "Send the zipped .app as the body, with a content-length");
+    return yield* failNoStore(411, "Send the zipped launcher as the body, with a content-length");
   }
-  if (size > MAX_APP_BYTES) return yield* failNoStore(413, "The app is larger than 95 MB");
-  if (!(yield* SignerBinding)) {
-    return yield* failNoStore(503, "The app signer is not set up", { code: "signer_unavailable" });
-  }
+  if (size > MAX_APP_BYTES) return yield* failNoStore(413, "The build is larger than 95 MB");
   const db = yield* Database;
   const storage = yield* Storage;
 
@@ -291,22 +306,17 @@ const publishBuild = Effect.fnUntraced(function* (
       `INSERT INTO app_targets (app_slug, target, bundle_id) VALUES (?, ?, ?) ON CONFLICT DO NOTHING`,
       app.slug,
       target,
-      testFlight.bundleId,
+      platform.targetId(app.slug),
     );
     targetRow = yield* getTarget(app.slug, target);
-    if (!targetRow) return yield* failNoStore(500, "Could not add the launcher");
+    if (!targetRow) return yield* failNoStore(500, `Could not add the ${target} target`);
   }
 
-  // Build numbers must go above every build App Store Connect has, from any source.
-  const latest = yield* latestTestFlightBuildNumber().pipe(
-    Effect.catchTag("AppleError", (error) =>
-      failNoStore(503, error.message, { code: "testflight_unavailable" }),
-    ),
-  );
+  const lowest = yield* platform.lowestBuildNumber();
   yield* db.run(
     `UPDATE app_targets SET next_build_number = MAX(next_build_number, ?)
      WHERE app_slug = ? AND target = ?`,
-    latest + 1,
+    lowest,
     app.slug,
     target,
   );
@@ -338,36 +348,20 @@ const publishBuild = Effect.fnUntraced(function* (
       .run("UPDATE app_builds SET status = 'failed', error = ? WHERE id = ?", error, id)
       .pipe(Effect.andThen(failNoStore(status, error, { code: "build_failed", buildId: id })));
 
-  yield* storage.put(unsignedKey(app.slug, id), fixedLength(body, size), {
+  yield* storage.put(uploadKey(app.slug, id), fixedLength(body, size), {
     httpMetadata: { contentType: "application/zip" },
   });
 
-  const catchSigning = Effect.catchTags({
-    SignError: (error: SignError) => failBuild(error.status, error.message),
-    AppleError: (error: AppleError) => failBuild(503, error.message),
-  });
-
-  // Sign for the App Store and upload before going live, so a build Apple refuses never does.
-  const signed = yield* signBuild(app.slug, id, testFlight.bundleId, buildNumber).pipe(
-    catchSigning,
-  );
-  const upload = yield* uploadToTestFlight(signed.key, signed.shortVersion, buildNumber).pipe(
-    Effect.catchTag("AppleError", (error) =>
-      failBuild(502, `Uploading to TestFlight failed: ${error.message}`),
-    ),
-  );
+  // The platform's own step, before the build goes live: a build it refuses never does.
+  const processed = yield* platform.process({ app: app.slug, build: id, buildNumber, failBuild });
   yield* db.run(
     `UPDATE app_builds SET status = 'ready', app_name = ?, short_version = ?, xcode = ?,
-                           signed_bytes = ?, testflight_state = 'processing',
-                           testflight_upload = ?, testflight_key = ?, testflight_checked_at = ?
+                           signed_bytes = ?
      WHERE id = ?`,
-    signed.appName,
-    signed.shortVersion,
-    signed.xcode,
-    signed.bytes,
-    upload,
-    signed.key,
-    now(),
+    processed.name,
+    processed.version,
+    processed.toolchain,
+    processed.bytes,
     id,
   );
 
@@ -378,7 +372,7 @@ const publishBuild = Effect.fnUntraced(function* (
       `UPDATE app_targets SET live_build = ?1, title = ?2, updated_at = ?3
        WHERE app_slug = ?4 AND target = ?5 AND live_build IS ?6`,
       id,
-      signed.appName || targetRow.title,
+      processed.name || targetRow.title,
       now(),
       app.slug,
       target,
@@ -393,7 +387,7 @@ const publishBuild = Effect.fnUntraced(function* (
     ) {
       return yield* failNoStore(
         409,
-        `Build ${currentBuild.buildNumber} of ${target} went live while this one was signing, and this build does not contain its commit. Pull, build again, and publish.`,
+        `Build ${currentBuild.buildNumber} of ${target} went live while this one was processed, and this build does not contain its commit. Pull, build again, and publish.`,
         { code: "source_not_descendant", buildId: id },
       );
     }
@@ -403,30 +397,130 @@ const publishBuild = Effect.fnUntraced(function* (
   yield* logAppEvent(agent, app.slug, "publish", { target, buildNumber, commit });
 
   const page = `${url.origin}/apps`;
-  const message = [
-    `Build ${buildNumber} of ${target} is uploaded to TestFlight. Apple processes it for a few minutes; then testers install or update it in the TestFlight app. ${page} shows when it is ready.`,
-    capabilityNote(signed),
-  ]
-    .filter(Boolean)
-    .join(" ");
   return json(
     {
       ok: true,
       app: app.slug,
       target,
-      bundleId: testFlight.bundleId,
       buildNumber,
       buildId: id,
       sourceCommit: commit,
       installPage: page,
-      testFlight: { state: "processing" },
-      capabilities: signed.capabilities,
-      capabilityWarnings: signed.capabilityWarnings,
-      message,
+      ...processed.response,
+      message: processed.message(buildNumber, page),
     },
     { status: 201, headers: noStore },
   );
 });
+
+/** What a platform's step gets: the stored upload is at uploadKey(app, build). */
+type ProcessInput = {
+  app: string;
+  build: string;
+  buildNumber: number;
+  /** Marks the build failed and fails the publish with this status and message. */
+  failBuild: (status: number, error: string) => Effect.Effect<never, unknown, NapServices>;
+};
+
+/**
+ * What differs between platforms. Everything else (commits, numbering, storage, going live) is
+ * the same for each.
+ */
+type Platform = {
+  /** Fails with an HttpError when the platform cannot publish yet, such as missing setup. */
+  ready: () => Effect.Effect<void, unknown, NapServices>;
+  /** app_targets.bundle_id: unique per target. */
+  targetId: (app: string) => string;
+  /** The lowest build number the next build may have. */
+  lowestBuildNumber: () => Effect.Effect<number, unknown, NapServices>;
+  /** The platform's own step before the build goes live. */
+  process: (input: ProcessInput) => Effect.Effect<
+    {
+      name: string;
+      version: string;
+      toolchain: string;
+      bytes: number;
+      /** Extra fields for the publish answer. */
+      response: Record<string, unknown>;
+      message: (buildNumber: number, page: string) => string;
+    },
+    unknown,
+    NapServices
+  >;
+};
+
+const PLATFORMS: Record<PlatformName, Platform> = {
+  ios: {
+    ready: () =>
+      Effect.gen(function* () {
+        if (!testFlightConfig()) {
+          return yield* failNoStore(
+            503,
+            `The app record in App Store Connect is not set up yet, so the iOS app cannot be published. Ask ${napConfig.admin}.`,
+            { code: "testflight_unavailable" },
+          );
+        }
+        if (!(yield* SignerBinding)) {
+          return yield* failNoStore(503, "The app signer is not set up", {
+            code: "signer_unavailable",
+          });
+        }
+      }),
+    targetId: () => napConfig.apps!.ios!.bundleId,
+    // Build numbers must go above every build App Store Connect has, from any source.
+    lowestBuildNumber: () =>
+      latestTestFlightBuildNumber().pipe(
+        Effect.map((latest) => latest + 1),
+        Effect.catchTag("AppleError", (error) =>
+          failNoStore(503, error.message, { code: "testflight_unavailable" }),
+        ),
+      ),
+    process: ({ app, build, buildNumber, failBuild }) =>
+      Effect.gen(function* () {
+        const { bundleId } = testFlightConfig()!;
+        const signed = yield* signBuild(app, build, bundleId, buildNumber).pipe(
+          Effect.catchTags({
+            SignError: (error: SignError) => failBuild(error.status, error.message),
+            AppleError: (error: AppleError) => failBuild(503, error.message),
+          }),
+        );
+        const upload = yield* uploadToTestFlight(signed.key, signed.shortVersion, buildNumber).pipe(
+          Effect.catchTag("AppleError", (error) =>
+            failBuild(502, `Uploading to TestFlight failed: ${error.message}`),
+          ),
+        );
+        const db = yield* Database;
+        yield* db.run(
+          `UPDATE app_builds SET testflight_state = 'processing', testflight_upload = ?,
+                                 testflight_key = ?, testflight_checked_at = ?
+           WHERE id = ?`,
+          upload,
+          signed.key,
+          now(),
+          build,
+        );
+        return {
+          name: signed.appName,
+          version: signed.shortVersion,
+          toolchain: signed.xcode,
+          bytes: signed.bytes,
+          response: {
+            bundleId,
+            testFlight: { state: "processing" },
+            capabilities: signed.capabilities,
+            capabilityWarnings: signed.capabilityWarnings,
+          },
+          message: (number: number, page: string) =>
+            [
+              `Build ${number} of the iOS app is uploaded to TestFlight. Apple processes it for a few minutes; then testers install or update it in the TestFlight app. ${page} shows when it is ready.`,
+              capabilityNote(signed),
+            ]
+              .filter(Boolean)
+              .join(" "),
+        };
+      }),
+  },
+};
 
 /** For the publish message: what the build may not use, which the launcher also shows. */
 function capabilityNote(signed: Signed) {
@@ -454,7 +548,7 @@ const signBuild = Effect.fnUntraced(function* (
   buildNumber: number,
 ) {
   const storage = yield* Storage;
-  const unsigned = yield* storage.get(unsignedKey(app, build));
+  const unsigned = yield* storage.get(uploadKey(app, build));
   if (!unsigned) {
     return yield* new SignError({ message: "The unsigned build is missing", status: 500 });
   }
@@ -469,7 +563,7 @@ const signBuild = Effect.fnUntraced(function* (
   // publishes are rare: ask Apple each time.
   const profile = yield* signingProfile({ fresh: true });
   const key = signedKey(app, build, profile.id);
-  const fresh = yield* storage.get(unsignedKey(app, build));
+  const fresh = yield* storage.get(uploadKey(app, build));
   if (!fresh) {
     return yield* new SignError({ message: "The unsigned build is missing", status: 500 });
   }
@@ -568,7 +662,7 @@ const inspectBuild = Effect.fnUntraced(function* (
 
 /** Turns on what a build asks for and can have, for the App ID, and says what it cannot. */
 const grantCapabilities = Effect.fnUntraced(function* (requests: CapabilityRequests) {
-  const allowed = napConfig.apps?.testFlight?.capabilities;
+  const allowed = napConfig.apps?.ios?.capabilities;
   const refuse = (name: AutomaticCapability) => {
     if (allowed && !allowed.includes(name)) {
       return "is not on this Nap's list of capabilities. Ask whoever runs Nap to add it";
@@ -668,9 +762,9 @@ export const liveBuild = Effect.fn("liveBuild")(function* (app: string, target: 
  * dashboard's Get the app shows. Null when TestFlight is off or nothing was published yet.
  */
 export const testFlightBuild = Effect.fn("testFlightBuild")(function* () {
-  const testFlight = testFlightConfig();
-  if (!testFlight) return null;
-  const build = yield* liveBuild(testFlight.app, LAUNCHER);
+  const app = napApp();
+  if (!testFlightConfig() || !app) return null;
+  const build = yield* liveBuild(app, "ios");
   if (!build) return null;
   const fresh = yield* refreshTestFlight(build);
   return {
@@ -727,7 +821,8 @@ const describeApp = Effect.fnUntraced(function* (app: AppRow, _origin: string) {
     updatedAt: app.updatedAt,
     targets: targets.map((target, index) => ({
       target: target.target,
-      bundleId: appConfig()?.bundleId ?? target.bundleId,
+      platform: platformLabel(target.target),
+      bundleId: target.target === "ios" ? (napConfig.apps?.ios?.bundleId ?? target.bundleId) : null,
       title: target.title || target.target,
       live: builds[index] ? describeBuild(builds[index]!) : null,
     })),

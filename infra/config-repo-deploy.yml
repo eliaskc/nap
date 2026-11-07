@@ -81,7 +81,7 @@ jobs:
           # S3 credentials of the R2 token that signs direct upload URLs (nap-sites objects only).
           NAP_R2_ACCESS_KEY_ID: ${{ secrets.NAP_R2_ACCESS_KEY_ID }}
           NAP_R2_SECRET_ACCESS_KEY: ${{ secrets.NAP_R2_SECRET_ACCESS_KEY }}
-          # Apps only (napConfig.apps): the Apple Distribution key and certificate (one PEM), and the
+          # iOS apps only (napConfig.apps.ios): the Apple Distribution key and certificate (one PEM), and the
           # App Store Connect team key.
           NAP_APPLE_SIGNING_PEM: ${{ secrets.NAP_APPLE_SIGNING_PEM }}
           NAP_ASC_PRIVATE_KEY: ${{ secrets.NAP_ASC_PRIVATE_KEY }}

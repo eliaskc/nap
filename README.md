@@ -425,24 +425,28 @@ became ordinary sites in migration 0016 and move in the same way.
 
 ## Apps
 
-Native iOS apps in SwiftUI, inside one launcher that people install from
-TestFlight. `napConfig.apps` turns them on and names the Apple team and the
-TestFlight app. Nap never builds apps; it signs them:
+Native apps. A Nap has one app (`napConfig.apps.app`): an Artifacts repo
+(`app-<slug>`, in `SOURCES`) with a folder per platform. Each platform is a
+target of the app, with its own builds, build numbers, and live build, and a
+launcher that holds every app made for it. Today the only platform is iOS:
+SwiftUI apps in one launcher that people install from TestFlight
+(`napConfig.apps.ios`). Nap never builds apps:
 
 ```text
-agent → app repo (Artifacts) → Tuist project → xcodebuild without signing on a Mac
-agent → upload the zipped launcher with sourceCommit → Nap checks the commit
-Nap → signer container (rcodesign) → App Store .ipa in R2 → App Store Connect → TestFlight
+agent → app repo (Artifacts) → ios/: Tuist project → xcodebuild without signing on a Mac
+agent → upload the platform's zip with sourceCommit → Nap checks the commit
+Nap (iOS) → signer container (rcodesign) → App Store .ipa in R2 → App Store Connect → TestFlight
 ```
 
-- **Repo.** A Nap has one app: an Artifacts repo (`app-<slug>`, in `SOURCES`)
-  with the launcher in `Launcher/` and one module per app in `Apps/<slug>/`.
-  The launcher is the only target Nap publishes. Everyone who can sign in can
-  push to it and publish it.
-- **Publishing.** A build names its commit, which must be the head of `main`
-  and contain the live build's commit, as with sites. Nap keeps the unsigned
-  zip and the signed `.ipa` under `apps/<app>/builds/<id>/` and moves
-  `app_targets.live_build`.
+- **Repo.** `ios/` holds the iOS launcher (`ios/Launcher/`) and one module per
+  app (`ios/Apps/<slug>/`). Everyone who can sign in can push to the repo and
+  publish every platform.
+- **Publishing.** A build names its platform and its commit, which must be
+  the head of `main` and contain the commit of that platform's live build, as
+  with sites. Nap keeps the upload and what it made of it under
+  `apps/<app>/builds/<id>/` and moves `app_targets.live_build`. What happens
+  between upload and going live is the platform's own step (`PLATFORMS` in
+  `src/lib/apps.ts`).
 - **Signing.** The `SIGNER` binding is a Cloudflare Container built from
   `containers/signer`. It gets the Apple Distribution key and certificate as an
   environment variable, has no internet access, and signs without a timestamp.
@@ -450,7 +454,7 @@ Nap → signer container (rcodesign) → App Store .ipa in R2 → App Store Conn
   Store profile covers the app record's bundle id. The profile comes from the
   App Store Connect API (team key) and is cached in R2 at `apps/_signing/`.
   Deploys need Docker to build the image.
-- **TestFlight.** Each build is uploaded to App Store Connect with the build
+- **TestFlight.** Each iOS build is uploaded to App Store Connect with the build
   upload API before it goes live. Its build number goes above every build App
   Store Connect has. Apple then processes it for internal testers; Nap asks
   Apple how far it got when someone looks at `/apps`, at most every few

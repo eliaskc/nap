@@ -14,8 +14,8 @@ const config = (overrides = {}) => ({
   defaultAccess: "private",
   admin: "the admin",
   apps: {
-    teamId: "T",
-    testFlight: { appStoreId: "1", bundleId: "com.example.nap", profileName: "S", app: "nap" },
+    app: "nap",
+    ios: { teamId: "T", appStoreId: "1", bundleId: "com.example.nap", profileName: "S" },
   },
   ...overrides,
 });
@@ -60,9 +60,10 @@ test("every page fills in the deployment and leaves no markers", () => {
   }
 });
 
-test("the apps topic names the one app, which goes to TestFlight", () => {
+test("the apps topic names the one app, and iOS goes to TestFlight", () => {
   const text = renderInstructions(read("apps"), config());
-  assert.match(text, /one iOS app on Nap, `nap`/);
+  assert.match(text, /one app on Nap, `nap`/);
+  assert.match(text, /ios\/scripts\/publish/);
   assert.match(text, /app clone nap/);
   assert.doesNotMatch(text, /\{\{/);
   assert.doesNotMatch(text, /ad hoc|standalone|prototype/i);
