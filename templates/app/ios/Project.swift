@@ -169,7 +169,7 @@ let launcher: Target = .target(
     "UISupportedInterfaceOrientations": orientations,
   ]) { _, fixed in fixed }),
   sources: ["Launcher/Sources/**", "Generated/Launcher/**"],
-  // The app icon: TestFlight refuses builds without one. Replace icon.png (1024 x 1024, no alpha).
+  // The app icon, Resources/AppIcon.icon (Icon Composer): TestFlight refuses builds without one.
   resources: ["Launcher/Resources/**"],
   dependencies: apps.map { .target(name: moduleName($0.slug)) }
 )

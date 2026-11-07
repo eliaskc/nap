@@ -27,6 +27,46 @@ const files = import.meta.glob("/templates/app/**/*", {
   eager: true,
 }) as Record<string, string>;
 
+/**
+ * The launcher's icon, an Icon Composer icon: the instance's (instance/icon/AppIcon.icon), or
+ * Nap's (brand/AppIcon.icon). It goes to ios/Launcher/Resources/AppIcon.icon. Its layers are SVG
+ * or PNG; PNGs come in as data URLs and go out as base64.
+ */
+const ICON_TEXT = { query: "?raw", import: "default", eager: true } as const;
+const ICON_IMAGE = { query: "?inline", import: "default", eager: true } as const;
+const ICONS = {
+  instance: {
+    prefix: "/instance/icon/AppIcon.icon/",
+    text: import.meta.glob("/instance/icon/AppIcon.icon/**/*.{json,svg}", ICON_TEXT),
+    images: import.meta.glob("/instance/icon/AppIcon.icon/**/*.{png,jpg,jpeg}", ICON_IMAGE),
+  },
+  brand: {
+    prefix: "/brand/AppIcon.icon/",
+    text: import.meta.glob("/brand/AppIcon.icon/**/*.{json,svg}", ICON_TEXT),
+    images: import.meta.glob("/brand/AppIcon.icon/**/*.{png,jpg,jpeg}", ICON_IMAGE),
+  },
+} as const;
+const ICON_FOLDER = "ios/Launcher/Resources/AppIcon.icon/";
+function iconFiles() {
+  const { prefix, text, images } = Object.keys(ICONS.instance.text).length
+    ? ICONS.instance
+    : ICONS.brand;
+  return [
+    ...Object.entries(text as Record<string, string>).map(([path, content]) => ({
+      path: ICON_FOLDER + path.slice(prefix.length),
+      content,
+      encoding: "utf8" as const,
+      executable: false,
+    })),
+    ...Object.entries(images as Record<string, string>).map(([path, url]) => ({
+      path: ICON_FOLDER + path.slice(prefix.length),
+      content: url.slice(url.indexOf(",") + 1),
+      encoding: "base64" as const,
+      executable: false,
+    })),
+  ];
+}
+
 /** Files that cannot be in the template under their own name, in any folder. */
 const RENAMES: Record<string, string> = { gitignore: ".gitignore" };
 const rename = (path: string) =>
@@ -62,5 +102,6 @@ export function appTemplateFiles() {
         executable: /(^|\/)scripts\//.test(relative),
       };
     })
+    .concat(platformOn("ios") ? iconFiles() : [])
     .sort((a, b) => a.path.localeCompare(b.path));
 }

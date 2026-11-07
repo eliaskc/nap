@@ -109,6 +109,12 @@ the secrets and a deploy workflow that deploys this code with them.
 9. **Extensions (optional).** Add APIs of your own to the kit pages get, in
    `instance/extensions/<name>/` (see "Extensions" below). Their secrets go in
    one secret, `NAP_EXTENSION_SECRETS`, as a JSON object.
+10. **Icon (optional).** Nap's icon (`brand/AppIcon.icon`, made in Icon
+    Composer) is the icon of the dashboard and of new app launchers. For your
+    own, put an Icon Composer icon at `instance/icon/AppIcon.icon` and run
+    `node scripts/icons.mjs instance/icon` on a Mac. Commit both the icon and
+    the `instance/icon/web/` it writes. An app repo made before keeps its icon
+    in `ios/Launcher/Resources/`.
 
 To stay on a release instead of `main`, set the config repository variable
 `NAP_REF` to a tag of this repository. To add someone, put their email in

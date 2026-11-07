@@ -1,4 +1,4 @@
-import { readdirSync } from "node:fs";
+import { copyFileSync, existsSync, readFileSync, readdirSync } from "node:fs";
 import { build, defineConfig, type Plugin, type Rolldown } from "vite";
 import cloudflare from "@alchemy.run/cloudflare-runtime/vite";
 import { tanstackStart } from "@tanstack/react-start/plugin/vite";
@@ -128,6 +128,40 @@ function napExtensionsModule(): Plugin {
   };
 }
 
+/**
+ * The instance's own icon: instance/icon/web (rendered by scripts/icons.mjs from
+ * instance/icon/AppIcon.icon) replaces Nap's icons in public/ with the same names.
+ */
+const INSTANCE_ICONS = "instance/icon/web";
+const instanceIcons = () => (existsSync(INSTANCE_ICONS) ? readdirSync(INSTANCE_ICONS) : []);
+
+function napIcons(): Plugin {
+  return {
+    name: "nap-icons",
+    applyToEnvironment: (environment) => environment.name === "client",
+    writeBundle(options) {
+      for (const name of instanceIcons()) {
+        copyFileSync(`${INSTANCE_ICONS}/${name}`, `${options.dir}/${name}`);
+      }
+    },
+    configureServer(server) {
+      server.middlewares.use((req, res, next) => {
+        const name = req.url?.split("?")[0]?.slice(1) ?? "";
+        if (!name || name.includes("/") || !instanceIcons().includes(name)) return next();
+        res.setHeader(
+          "content-type",
+          name.endsWith(".svg")
+            ? "image/svg+xml"
+            : name.endsWith(".ico")
+              ? "image/x-icon"
+              : "image/png",
+        );
+        res.end(readFileSync(`${INSTANCE_ICONS}/${name}`));
+      });
+    },
+  };
+}
+
 export default defineConfig({
   server: {
     port: 3000,
@@ -155,5 +189,6 @@ export default defineConfig({
     commentsFrameModule(),
     napClientModule(),
     napExtensionsModule(),
+    napIcons(),
   ],
 });

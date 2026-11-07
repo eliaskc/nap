@@ -1,0 +1,150 @@
+{
+  "features": [
+    "refractivity",
+    "specular-location"
+  ],
+  "fill-specializations": [
+    {
+      "value": {
+        "solid": "extended-srgb:0.95686,0.95686,0.96078,1.00000"
+      }
+    },
+    {
+      "appearance": "dark",
+      "value": {
+        "solid": "extended-srgb:0.00000,0.00000,0.00000,1.00000"
+      }
+    }
+  ],
+  "groups": [
+    {
+      "name": "App",
+      "layers": [
+        {
+          "name": "App",
+          "image-name": "app.svg",
+          "glass": true,
+          "fill-specializations": [
+            {
+              "value": {
+                "solid": "extended-srgb:0.02745,0.58824,0.41176,1.00000"
+              }
+            },
+            {
+              "appearance": "dark",
+              "value": {
+                "solid": "extended-srgb:0.00000,0.83137,0.57255,1.00000"
+              }
+            },
+            {
+              "appearance": "tinted",
+              "value": "automatic"
+            }
+          ]
+        }
+      ],
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.45
+      },
+      "specular": true,
+      "translucency": {
+        "enabled": true,
+        "value": 0.1
+      },
+      "refractivity": {
+        "enabled": true,
+        "depth": 0.3,
+        "strength": 0.2
+      }
+    },
+    {
+      "name": "Artifact",
+      "layers": [
+        {
+          "name": "Artifact",
+          "image-name": "artifact.svg",
+          "glass": true,
+          "fill-specializations": [
+            {
+              "value": {
+                "solid": "extended-srgb:0.85098,0.46667,0.03137,1.00000"
+              }
+            },
+            {
+              "appearance": "dark",
+              "value": {
+                "solid": "extended-srgb:1.00000,0.72549,0.00000,1.00000"
+              }
+            },
+            {
+              "appearance": "tinted",
+              "value": "automatic"
+            }
+          ]
+        }
+      ],
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.45
+      },
+      "specular": true,
+      "translucency": {
+        "enabled": true,
+        "value": 0.1
+      },
+      "refractivity": {
+        "enabled": true,
+        "depth": 0.3,
+        "strength": 0.2
+      }
+    },
+    {
+      "name": "Site",
+      "layers": [
+        {
+          "name": "Site",
+          "image-name": "site.svg",
+          "glass": true,
+          "fill-specializations": [
+            {
+              "value": {
+                "solid": "extended-srgb:0.14510,0.38824,0.92157,1.00000"
+              }
+            },
+            {
+              "appearance": "dark",
+              "value": {
+                "solid": "extended-srgb:0.31373,0.63529,1.00000,1.00000"
+              }
+            },
+            {
+              "appearance": "tinted",
+              "value": "automatic"
+            }
+          ]
+        }
+      ],
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.45
+      },
+      "specular": true,
+      "translucency": {
+        "enabled": true,
+        "value": 0.1
+      },
+      "refractivity": {
+        "enabled": true,
+        "depth": 0.3,
+        "strength": 0.2
+      }
+    }
+  ],
+  "supported-platforms": {
+    "squares": [
+      "iOS",
+      "macOS"
+    ]
+  }
+}

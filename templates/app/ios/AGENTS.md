@@ -8,8 +8,9 @@ TestFlight; people install it from the TestFlight app. Paths here are inside `io
 - `Apps/<slug>/` is one app: `app.json` (title, summary, and what it needs: see below),
   `Sources/` with a `public struct AppView: View`, and optional `Resources/`. Slugs are lowercase
   letters, numbers, and hyphens. To start one, copy `Apps/hello`.
-- `Launcher/` is the launcher. Its app icon is `Resources/Assets.xcassets/AppIcon.appiconset/icon.png`
-  (1024 x 1024, no transparency); replace it, but keep one: TestFlight refuses builds without it.
+- `Launcher/` is the launcher. Its app icon is `Resources/AppIcon.icon`, an Icon Composer icon
+  (the instance's icon when the repo was made). Edit it in Icon Composer, or swap it for an
+  `AppIcon.appiconset` with a 1024 x 1024 PNG, but keep one: TestFlight refuses builds without it.
   Its name on the home screen is `displayName` in `Project.swift`.
 - `Project.swift` finds apps by folder. Never edit or commit an `.xcodeproj`: it is generated.
 - `../nap.json` names the app on Nap.

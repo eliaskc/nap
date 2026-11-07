@@ -215,13 +215,14 @@ function qrTarget(status: InstallStatus | null) {
 
 // ---- Pieces --------------------------------------------------------------------------------
 
+/** The app's icon: Nap's, or the instance's (instance/icon), light or dark with the theme. */
 export function AppIcon({ className }: { className?: string }) {
+  const base = "size-11 shrink-0 rounded-[22.5%] shadow-sm";
   return (
-    <img
-      src="/app-icon.png"
-      alt=""
-      className={cn("size-11 shrink-0 rounded-[22.5%] shadow-sm ring-1 ring-black/5", className)}
-    />
+    <>
+      <img src="/app-icon.png" alt="" className={cn(base, "dark:hidden", className)} />
+      <img src="/app-icon-dark.png" alt="" className={cn(base, "hidden dark:block", className)} />
+    </>
   );
 }
 
