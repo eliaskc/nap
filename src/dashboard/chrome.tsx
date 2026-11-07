@@ -46,15 +46,23 @@ import {
   type Mode,
   type Variant,
 } from "~/dashboard/variant-switch";
+import { iconUrl } from "~/lib/icons";
 import { cn } from "~/lib/utils";
+import { napConfig } from "~/nap.config";
 
+/**
+ * Nap's mark in the top bar: the instance's icon (Nap's own unless instance/icon replaces it) and
+ * its name. On a phone just the icon, which leaves the bar room for the rest.
+ */
 export function NapMark({ className }: { className?: string }) {
+  const icon = "size-6 shrink-0 rounded-[22.5%]";
   return (
-    <span
-      className={cn("inline-flex items-baseline text-xl font-bold tracking-[-0.04em]", className)}
-    >
-      <span className="mr-px -translate-y-[0.55em] -rotate-12 text-[0.6em] opacity-45">z</span>
-      nap
+    <span className={cn("inline-flex items-center gap-2", className)}>
+      <img src={iconUrl("app-icon.png")} alt="" className={cn(icon, "dark:hidden")} />
+      <img src={iconUrl("app-icon-dark.png")} alt="" className={cn(icon, "hidden dark:block")} />
+      <span className="text-[0.95rem] font-semibold tracking-[-0.02em] whitespace-nowrap max-sm:sr-only">
+        {napConfig.orgName}
+      </span>
     </span>
   );
 }

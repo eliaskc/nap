@@ -1,4 +1,5 @@
-import { copyFileSync, existsSync, readFileSync, readdirSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { copyFileSync, existsSync, readFileSync, readdirSync, realpathSync } from "node:fs";
 import { build, defineConfig, type Plugin, type Rolldown } from "vite";
 import cloudflare from "@alchemy.run/cloudflare-runtime/vite";
 import { tanstackStart } from "@tanstack/react-start/plugin/vite";
@@ -135,6 +136,34 @@ function napExtensionsModule(): Plugin {
 const INSTANCE_ICONS = "instance/icon/web";
 const instanceIcons = () => (existsSync(INSTANCE_ICONS) ? readdirSync(INSTANCE_ICONS) : []);
 
+/** Nap's icons in public/, the names an instance's icon/web replaces. */
+const ICON_NAMES = [
+  "favicon.svg",
+  "favicon-dev.svg",
+  "favicon.ico",
+  "favicon-16x16.png",
+  "favicon-32x32.png",
+  "favicon.png",
+  "apple-touch-icon.png",
+  "android-chrome-192x192.png",
+  "android-chrome-512x512.png",
+  "app-icon.png",
+  "app-icon-dark.png",
+];
+
+/**
+ * A short hash of the icons this build serves, added to their URLs (`?v=`): browsers keep a
+ * favicon under its URL and do not look again, so a new icon needs a new URL.
+ */
+function iconVersion() {
+  const hash = createHash("sha256");
+  for (const name of ICON_NAMES) {
+    const file = instanceIcons().includes(name) ? `${INSTANCE_ICONS}/${name}` : `public/${name}`;
+    if (existsSync(file)) hash.update(name).update(readFileSync(file));
+  }
+  return hash.digest("hex").slice(0, 10);
+}
+
 function napIcons(): Plugin {
   return {
     name: "nap-icons",
@@ -167,9 +196,14 @@ export default defineConfig({
     port: 3000,
     // Nap routes by host: the dashboard at the root domain, each site at <slug>.<root>.
     allowedHosts: [`.${napConfig.rootDomain}`],
+    // instance/ is often a link to a config repo beside this one (its icon is read in dev).
+    fs: { allow: [".", ...(existsSync("instance") ? [realpathSync("instance")] : [])] },
   },
   resolve: {
     tsconfigPaths: true,
+  },
+  define: {
+    __NAP_ICON_VERSION__: JSON.stringify(iconVersion()),
   },
   plugins: [
     tailwindcss(),

@@ -17,6 +17,7 @@ import { Skeleton } from "~/components/ui/skeleton";
 import { Spinner } from "~/components/ui/spinner";
 import { GroupButton } from "~/dashboard/controls";
 import { PANEL_CLASS } from "~/dashboard/variant-switch";
+import { iconUrl } from "~/lib/icons";
 import type { InstallStatus } from "~/lib/testflight-testers";
 import { cn } from "~/lib/utils";
 import { napConfig } from "~/nap.config";
@@ -220,8 +221,12 @@ export function AppIcon({ className }: { className?: string }) {
   const base = "size-11 shrink-0 rounded-[22.5%] shadow-sm";
   return (
     <>
-      <img src="/app-icon.png" alt="" className={cn(base, "dark:hidden", className)} />
-      <img src="/app-icon-dark.png" alt="" className={cn(base, "hidden dark:block", className)} />
+      <img src={iconUrl("app-icon.png")} alt="" className={cn(base, "dark:hidden", className)} />
+      <img
+        src={iconUrl("app-icon-dark.png")}
+        alt=""
+        className={cn(base, "hidden dark:block", className)}
+      />
     </>
   );
 }

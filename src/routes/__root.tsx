@@ -6,6 +6,7 @@ import { ThemeProvider } from "~/components/theme-provider";
 import { DefaultCatchBoundary } from "~/components/DefaultCatchBoundary";
 import { NotFound } from "~/components/NotFound";
 import appCss from "~/styles/app.css?url";
+import { iconUrl } from "~/lib/icons";
 import { seo } from "~/utils/seo";
 import { napConfig } from "~/nap.config";
 
@@ -24,10 +25,10 @@ export const Route = createRootRoute({
       {
         rel: "icon",
         type: "image/svg+xml",
-        href: import.meta.env.DEV ? "/favicon-dev.svg" : "/favicon.svg",
+        href: iconUrl(import.meta.env.DEV ? "favicon-dev.svg" : "favicon.svg"),
       },
-      { rel: "icon", type: "image/png", sizes: "32x32", href: "/favicon-32x32.png" },
-      { rel: "apple-touch-icon", href: "/apple-touch-icon.png" },
+      { rel: "icon", type: "image/png", sizes: "32x32", href: iconUrl("favicon-32x32.png") },
+      { rel: "apple-touch-icon", href: iconUrl("apple-touch-icon.png") },
       { rel: "manifest", href: "/site.webmanifest" },
     ],
   }),

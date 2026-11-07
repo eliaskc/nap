@@ -32,18 +32,33 @@ const files = import.meta.glob("/templates/app/**/*", {
  * Nap's (brand/AppIcon.icon). It goes to ios/Launcher/Resources/AppIcon.icon. Its layers are SVG
  * or PNG; PNGs come in as data URLs and go out as base64.
  */
-const ICON_TEXT = { query: "?raw", import: "default", eager: true } as const;
-const ICON_IMAGE = { query: "?inline", import: "default", eager: true } as const;
+// Vite reads import.meta.glob options only when they are written in place.
 const ICONS = {
   instance: {
     prefix: "/instance/icon/AppIcon.icon/",
-    text: import.meta.glob("/instance/icon/AppIcon.icon/**/*.{json,svg}", ICON_TEXT),
-    images: import.meta.glob("/instance/icon/AppIcon.icon/**/*.{png,jpg,jpeg}", ICON_IMAGE),
+    text: import.meta.glob("/instance/icon/AppIcon.icon/**/*.{json,svg}", {
+      query: "?raw",
+      import: "default",
+      eager: true,
+    }),
+    images: import.meta.glob("/instance/icon/AppIcon.icon/**/*.{png,jpg,jpeg}", {
+      query: "?inline",
+      import: "default",
+      eager: true,
+    }),
   },
   brand: {
     prefix: "/brand/AppIcon.icon/",
-    text: import.meta.glob("/brand/AppIcon.icon/**/*.{json,svg}", ICON_TEXT),
-    images: import.meta.glob("/brand/AppIcon.icon/**/*.{png,jpg,jpeg}", ICON_IMAGE),
+    text: import.meta.glob("/brand/AppIcon.icon/**/*.{json,svg}", {
+      query: "?raw",
+      import: "default",
+      eager: true,
+    }),
+    images: import.meta.glob("/brand/AppIcon.icon/**/*.{png,jpg,jpeg}", {
+      query: "?inline",
+      import: "default",
+      eager: true,
+    }),
   },
 } as const;
 const ICON_FOLDER = "ios/Launcher/Resources/AppIcon.icon/";

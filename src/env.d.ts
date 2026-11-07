@@ -5,3 +5,8 @@ declare global {
     interface Env extends NapWorkerEnv {}
   }
 }
+
+declare global {
+  /** A hash of the icons this build serves (vite.config.ts), for their URLs. */
+  const __NAP_ICON_VERSION__: string;
+}
