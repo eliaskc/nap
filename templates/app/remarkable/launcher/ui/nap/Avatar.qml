@@ -1,5 +1,4 @@
 import QtQuick
-import QtQuick.Shapes
 
 // A person's look on Nap (src/lib/looks.ts): their shape, filled in their colour's grey, with
 // initials. Each person on a Nap has their own shape and colour pair; on e-ink the colours are
@@ -33,15 +32,31 @@ Item {
         return ((parts[0] || "?")[0] + (parts.length > 1 ? parts[parts.length - 1][0] : "")).toUpperCase()
     }
 
-    Shape {
+    // A Canvas, not a Shape: the tablet's interface renders in software, which has no Shapes.
+    Canvas {
+        id: canvas
         anchors.fill: parent
-        preferredRendererType: Shape.CurveRenderer
-        ShapePath {
-            fillColor: root.outline ? "white" : root.fill
-            strokeColor: "black"
-            strokeWidth: root.outline ? root.size * 0.05 : (root.dark ? 0 : root.size * 0.025)
-            scale: Qt.size(root.size / 100, root.size / 100)
-            PathSvg { path: root.look[0] }
+        renderStrategy: Canvas.Immediate
+        onPaint: {
+            var ctx = getContext("2d")
+            ctx.reset()
+            ctx.scale(width / 100, height / 100)
+            ctx.path = root.look[0]
+            ctx.fillStyle = root.outline ? "white" : root.fill
+            ctx.fill()
+            var line = root.outline ? 5 : (root.dark ? 0 : 2.5)
+            if (line > 0) {
+                ctx.lineWidth = line
+                ctx.strokeStyle = "black"
+                ctx.stroke()
+            }
+        }
+        Connections {
+            target: root
+            function onShapeChanged() { canvas.requestPaint() }
+            function onColorChanged() { canvas.requestPaint() }
+            function onOutlineChanged() { canvas.requestPaint() }
+            function onSizeChanged() { canvas.requestPaint() }
         }
     }
     Text {
