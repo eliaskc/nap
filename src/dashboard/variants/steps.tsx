@@ -4,7 +4,7 @@ import { GroupButton } from "~/dashboard/controls";
 import { FilterBar, NapMark, UploadError } from "~/dashboard/chrome";
 import { ExampleDots, ExampleText, PromptButtons, useExample } from "~/dashboard/connect";
 import { useStored } from "~/dashboard/data";
-import { PhoneInstallBanner, SidebarInstallCard } from "~/dashboard/install";
+import { AppNudge, SidebarInstallCard } from "~/dashboard/install";
 import { ItemCollection } from "~/dashboard/items";
 import type { VariantProps } from "~/dashboard/variants/types";
 import { cn } from "~/lib/utils";
@@ -81,12 +81,12 @@ export function StepsLayout({ view, loading, bar }: VariantProps) {
             collapsed && "mx-auto max-w-4xl",
           )}
         >
-          <PhoneInstallBanner />
           {collapsed || (
             <div className="md:hidden">
               <PromptButtons />
             </div>
           )}
+          <AppNudge />
           <FilterBar view={view} showLook />
           <UploadError />
           <ItemCollection view={view} loading={loading} columns={3} />

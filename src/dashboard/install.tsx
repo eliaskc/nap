@@ -1,55 +1,92 @@
 import {
-  CheckIcon,
-  CopyIcon,
   DownloadIcon,
   ExternalLinkIcon,
-  LinkIcon,
+  MailIcon,
   SmartphoneIcon,
+  TabletIcon,
+  UsbIcon,
   XIcon,
 } from "lucide-react";
 import * as React from "react";
 import { renderSVG } from "uqr";
 import { Button } from "~/components/ui/button";
-import { Dialog, DialogContent, DialogTitle } from "~/components/ui/dialog";
 import { Input } from "~/components/ui/input";
-import { Popover, PopoverContent, PopoverTrigger } from "~/components/ui/popover";
+import {
+  Sheet,
+  SheetClose,
+  SheetContent,
+  SheetDescription,
+  SheetTitle,
+} from "~/components/ui/sheet";
 import { Skeleton } from "~/components/ui/skeleton";
 import { Spinner } from "~/components/ui/spinner";
-import { GroupButton } from "~/dashboard/controls";
-import { PANEL_CLASS } from "~/dashboard/variant-switch";
+import { GroupButton, GroupTab, GroupTabs } from "~/dashboard/controls";
 import { iconUrl } from "~/lib/icons";
 import type { InstallStatus } from "~/lib/testflight-testers";
 import { cn } from "~/lib/utils";
 import { napConfig } from "~/nap.config";
 
 /**
- * Get the app: the instance's one Nap app, from TestFlight. The bar has a Get the app button with
- * a popover (a sheet on phones); Steps, Canvas, and Vending each have a spot of their own with a
- * QR code, and phones get a banner. All of them share one state, so opening any of them opens
- * the same panel. Only on a Nap with iOS on and its app record set (napConfig.apps.ios).
+ * Get the app: the instance's one Nap app, on each platform it has (iPhone through TestFlight,
+ * reMarkable over USB once). It all happens in one sheet that comes up from the bottom: the bar's
+ * button opens it, and so do the nudge above the list, the playful layouts' QR spots, and any
+ * link to /app (which lands on the dashboard as #app). The bar button says your next step.
  */
 
-export const TESTFLIGHT_ENABLED = Boolean(napConfig.apps?.ios?.appStoreId);
+const IOS = Boolean(napConfig.apps?.ios?.appStoreId);
+type Target = "ios" | "remarkable";
+/** The platforms this Nap has, in the switch's order. iOS only once its app record exists. */
+const TARGETS: Array<Target> = [
+  ...(IOS ? (["ios"] as const) : []),
+  ...(napConfig.apps?.remarkable ? (["remarkable"] as const) : []),
+];
+export const APP_ENABLED = TARGETS.length > 0;
+
+const PLATFORM: Record<Target, { label: string; device: string; icon: typeof SmartphoneIcon }> = {
+  ios: { label: "iPhone", device: "phone", icon: SmartphoneIcon },
+  remarkable: { label: "reMarkable", device: "reMarkable", icon: TabletIcon },
+};
+
 /** The TestFlight app on the App Store. */
 const TESTFLIGHT_STORE_URL = "https://apps.apple.com/app/testflight/id899247664";
-/** The page with the same flow, to send people a link to, and where QR codes go. */
+/** The link to send people. It opens the dashboard with the sheet open. */
 export const INSTALL_PAGE = "/app";
-/** While Apple is busy (an invite, a build), the open panel asks again this often. */
+/** While Apple is busy (an invite, a build), the open sheet asks again this often. */
 const POLL_MS = 8_000;
 
 type Status = InstallStatus | { enabled: false };
 
+type BuildApp = { slug: string; title: string; summary: string };
+type LiveBuild = {
+  buildNumber: number;
+  status: "signing" | "ready" | "failed";
+  notes: string;
+  by: string;
+  createdAt: string;
+  apps: Array<BuildApp> | null;
+  testFlight: { state: "processing" | "ready" | "failed"; error: string | null } | null;
+};
+type AppSheet = {
+  title: string;
+  platforms: Array<{ target: Target; live: LiveBuild | null }>;
+  nudgeDismissed: boolean;
+};
+
 type InstallState = {
+  /** The iPhone side: where the person is with Apple. Null while it loads or without iOS. */
   status: InstallStatus | null;
+  app: AppSheet | null;
   error: string;
   busy: boolean;
   open: boolean;
   setOpen: (open: boolean) => void;
+  target: Target;
+  setTarget: (target: Target) => void;
   invite: (email: string) => Promise<void>;
   forget: () => Promise<void>;
   refresh: () => Promise<void>;
+  dismissNudge: () => void;
   isIOS: boolean;
-  isPhone: boolean;
 };
 
 const InstallContext = React.createContext<InstallState | null>(null);
@@ -68,18 +105,6 @@ function useIsIOS() {
   );
 }
 
-function useIsPhone() {
-  const [phone, setPhone] = React.useState(false);
-  React.useEffect(() => {
-    const query = window.matchMedia("(max-width: 639px)");
-    const update = () => setPhone(query.matches);
-    update();
-    query.addEventListener("change", update);
-    return () => query.removeEventListener("change", update);
-  }, []);
-  return phone;
-}
-
 async function call(method: "GET" | "POST" | "DELETE", body?: unknown) {
   const response = await fetch(
     "/api/testflight",
@@ -92,6 +117,13 @@ async function call(method: "GET" | "POST" | "DELETE", body?: unknown) {
   return data;
 }
 
+async function loadApp() {
+  const response = await fetch("/api/app");
+  if (!response.ok) return null;
+  const data = (await response.json()) as ({ enabled: true } & AppSheet) | { enabled: false };
+  return data.enabled ? data : null;
+}
+
 /** Apple still has something to do: the person's team invite, or the build. */
 function waiting(status: InstallStatus | null) {
   if (!status) return false;
@@ -102,23 +134,23 @@ function waiting(status: InstallStatus | null) {
   );
 }
 
-/**
- * The state every spot shares. `page`: the /app page, where the panel is always open and there is
- * no sheet.
- */
-export function InstallProvider({
-  children,
-  page = false,
-}: {
-  children: React.ReactNode;
-  page?: boolean;
-}) {
+/** #app opens the sheet, and #app/remarkable on that platform. */
+function fromHash(): Target | true | null {
+  const match = /^#app(?:\/(\w+))?$/.exec(window.location.hash);
+  if (!match) return null;
+  const asked = match[1] as Target | undefined;
+  return asked && TARGETS.includes(asked) ? asked : true;
+}
+
+/** The state every spot shares, and the sheet. */
+export function InstallProvider({ children }: { children: React.ReactNode }) {
   const [status, setStatus] = React.useState<InstallStatus | null>(null);
+  const [app, setApp] = React.useState<AppSheet | null>(null);
   const [error, setError] = React.useState("");
   const [busy, setBusy] = React.useState(false);
-  const [open, setOpen] = React.useState(page);
+  const [open, setOpen] = React.useState(false);
+  const [target, setTarget] = React.useState<Target>(TARGETS[0] ?? "ios");
   const isIOS = useIsIOS();
-  const isPhone = useIsPhone();
 
   const run = React.useCallback(async (request: () => Promise<Status>) => {
     try {
@@ -130,17 +162,38 @@ export function InstallProvider({
     }
   }, []);
 
-  const refresh = React.useCallback(() => run(() => call("GET")), [run]);
+  const refreshApp = React.useCallback(async () => {
+    const next = await loadApp().catch(() => null);
+    if (next) setApp(next);
+  }, []);
+  const refresh = React.useCallback(
+    () => Promise.all([IOS ? run(() => call("GET")) : null, refreshApp()]).then(() => {}),
+    [run, refreshApp],
+  );
 
   React.useEffect(() => {
-    if (!TESTFLIGHT_ENABLED) return;
+    if (!APP_ENABLED) return;
     void refresh();
   }, [refresh]);
 
+  // Links to /app land here as #app. Open, then drop the hash so closing stays closed.
+  React.useEffect(() => {
+    if (!APP_ENABLED) return;
+    const check = () => {
+      const asked = fromHash();
+      if (!asked) return;
+      if (asked !== true) setTarget(asked);
+      setOpen(true);
+      history.replaceState(null, "", window.location.pathname + window.location.search);
+    };
+    check();
+    window.addEventListener("hashchange", check);
+    return () => window.removeEventListener("hashchange", check);
+  }, []);
+
   // Opening asks again; while it is open and Apple is busy, keep asking.
   React.useEffect(() => {
-    if (!open || !TESTFLIGHT_ENABLED) return;
-    void refresh();
+    if (open && APP_ENABLED) void refresh();
   }, [open, refresh]);
   const poll = open && waiting(status);
   React.useEffect(() => {
@@ -160,55 +213,69 @@ export function InstallProvider({
     [run],
   );
 
+  const dismissNudge = React.useCallback(() => {
+    setApp((current) => current && { ...current, nudgeDismissed: true });
+    void fetch("/api/app", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ dismissNudge: true }),
+    });
+  }, []);
+
   const value = React.useMemo<InstallState>(
     () => ({
       status,
+      app,
       error,
       busy,
       open,
       setOpen,
+      target,
+      setTarget,
       invite: (email) => withBusy(() => call("POST", { email })),
       forget: () => withBusy(() => call("DELETE")),
       refresh: () => withBusy(() => call("GET")),
+      dismissNudge,
       isIOS,
-      isPhone,
     }),
-    [status, error, busy, open, withBusy, isIOS, isPhone],
+    [status, app, error, busy, open, target, withBusy, dismissNudge, isIOS],
   );
 
-  if (!TESTFLIGHT_ENABLED) return children;
-  if (page) return <InstallContext value={value}>{children}</InstallContext>;
+  if (!APP_ENABLED) return children;
   return (
     <InstallContext value={value}>
       {children}
-      {/* On phones the panel is a sheet: the bar has no room for a popover. */}
-      <Dialog open={open && isPhone} onOpenChange={setOpen}>
-        <DialogContent className="gap-0 p-0 sm:max-w-sm">
-          <DialogTitle className="sr-only">Nap for iPhone</DialogTitle>
-          <InstallPanel />
-        </DialogContent>
-      </Dialog>
+      <AppSheetView />
     </InstallContext>
   );
 }
 
+/** The app's name: the app record's title, or the instance's name until there is one. */
+function appTitle(install: InstallState | null) {
+  return install?.app?.title || napConfig.orgName;
+}
+
+/** Apple says the iPhone app is installed. */
+function installed(status: InstallStatus | null) {
+  return status?.step.kind === "tester" && status.step.tester === "installed";
+}
+
 /**
  * The extra spots show until Apple says the app is installed; the bar button always stays. They
- * show while the status loads, so they don't pop in late.
+ * show while the status loads, so they don't pop in late. Only with iOS: they are QR codes.
  */
 export function useShowInstallSpots() {
   const install = useInstall();
-  if (!install) return false;
-  const step = install.status?.step;
-  return !(step?.kind === "tester" && step.tester === "installed");
+  if (!install || !IOS) return false;
+  return !installed(install.status);
 }
 
-/** The /app page's address on this Nap. */
+/** The link to send people, on this Nap. */
 export function installPageUrl() {
   return typeof window === "undefined" ? "" : `${window.location.origin}${INSTALL_PAGE}`;
 }
 
-/** Where a QR code points: straight to TestFlight for testers, else the /app page. */
+/** Where a QR code points: straight to TestFlight for testers, else the sheet. */
 function qrTarget(status: InstallStatus | null) {
   if (status?.step.kind === "tester") return status.webUrl;
   return installPageUrl();
@@ -260,82 +327,148 @@ export function QrCode({
   );
 }
 
-function BuildLine({ build }: { build: InstallStatus["build"] }) {
-  if (!build) return <span>Nothing is published yet.</span>;
-  if (build.state === "processing")
-    return (
-      <span className="inline-flex items-center gap-1.5">
-        <Spinner className="size-3" />
-        Apple is processing build {build.buildNumber}…
-      </span>
-    );
-  if (build.state === "failed")
-    return (
-      <span className="text-destructive">Build {build.buildNumber} didn't reach TestFlight.</span>
-    );
-  return <span>Build {build.buildNumber} · ready</span>;
+/** "Daily games, Weave and Hello": what's inside, for the nudge and the sheet's head. */
+function inside(app: AppSheet | null) {
+  const titles = [
+    ...new Set(app?.platforms.flatMap((p) => p.live?.apps?.map((a) => a.title) ?? []) ?? []),
+  ];
+  if (titles.length === 0) return "";
+  if (titles.length === 1) return titles[0]!;
+  return `${titles.slice(0, -1).join(", ")} and ${titles.at(-1)}`;
 }
 
-function Note({ children }: { children: React.ReactNode }) {
+function platformList() {
+  const names = TARGETS.map((t) => PLATFORM[t].label);
+  return names.length > 1 ? `${names.slice(0, -1).join(", ")} and ${names.at(-1)}` : names[0]!;
+}
+
+/** The sheet's line under the name. */
+function tagline(app: AppSheet | null) {
+  const what = inside(app);
+  return what
+    ? `${what}, on your ${platformList()}.`
+    : `The apps people make here, on your ${platformList()}.`;
+}
+
+const ROW = "flex items-center gap-3 border-b py-2.5 last:border-b-0";
+
+/** The card's status line: a dot and a few words. */
+function StatusLine({
+  tone,
+  children,
+}: {
+  tone: "ok" | "wait" | "error";
+  children: React.ReactNode;
+}) {
   return (
-    <div className="flex items-start gap-2 rounded-xl bg-muted p-3 text-[13px] leading-snug text-foreground/80">
+    <span
+      className={cn(
+        "inline-flex items-center gap-2 text-[12.5px] font-medium",
+        tone === "ok" && "text-emerald-700 dark:text-emerald-400",
+        tone === "wait" && "text-blue-700 dark:text-blue-400",
+        tone === "error" && "text-destructive",
+      )}
+    >
+      <i
+        className={cn(
+          "size-[7px] shrink-0 rounded-full",
+          tone === "ok" && "bg-emerald-500",
+          tone === "wait" && "bg-blue-600 ring-3 ring-blue-600/20",
+          tone === "error" && "bg-destructive",
+        )}
+      />
+      {children}
+    </span>
+  );
+}
+
+function BuildState({ build }: { build: InstallStatus["build"] }) {
+  if (build?.state === "processing")
+    return (
+      <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+        <Spinner className="size-3" />
+        Apple is processing build {build.buildNumber}. It's in TestFlight in a few minutes.
+      </span>
+    );
+  if (build?.state === "failed")
+    return (
+      <span className="text-xs text-destructive">
+        Build {build.buildNumber} didn't reach TestFlight.
+      </span>
+    );
+  return null;
+}
+
+/** The card's text column: status, a title, a sentence, and whatever else. */
+function CardText({
+  status,
+  title,
+  detail,
+  children,
+}: {
+  status?: React.ReactNode;
+  title: string;
+  detail: React.ReactNode;
+  children?: React.ReactNode;
+}) {
+  return (
+    <div className="flex min-w-0 flex-col items-center gap-2 text-center sm:items-start sm:text-left">
+      {status}
+      <b className="text-xl font-semibold tracking-[-0.02em] sm:text-[22px]">{title}</b>
+      <span className="max-w-[380px] text-sm leading-normal text-muted-foreground sm:text-[14.5px]">
+        {detail}
+      </span>
       {children}
     </div>
   );
 }
 
-/**
- * The panel: the same in the popover, the phone sheet, and the /app page. The page shows its own
- * header, a bigger QR code, and no link to itself.
- */
-export function InstallPanel({ className, page = false }: { className?: string; page?: boolean }) {
-  const install = useInstall();
-  if (!install) return null;
-  const { status, error, busy, isIOS } = install;
+/** The QR code (or what stands in for it) next to the text, stacked on phones. */
+function CardRow({ art, children }: { art: React.ReactNode; children: React.ReactNode }) {
   return (
-    <div className={cn("flex flex-col gap-4 p-4", className)}>
-      <div className={cn("flex items-center gap-3", page && "hidden")}>
-        <AppIcon />
-        <div className="flex min-w-0 flex-col">
-          <b className="text-[15px] font-semibold">Nap for iPhone</b>
-          <span className="text-[13px] text-muted-foreground">
-            Open the apps you make here, on your phone.
-          </span>
-        </div>
-      </div>
-      {!status ? (
-        error ? null : (
-          <Skeleton className="h-28 rounded-xl" />
-        )
-      ) : status.step.kind === "new" ? (
-        <InviteForm key="new" />
-      ) : status.step.kind === "team_invited" ? (
-        <>
-          <Note>
-            {status.step.pending ? (
-              <>
-                <CheckIcon className="mt-0.5 size-4 shrink-0 text-emerald-600" />
-                <span>
-                  <b className="font-semibold">Invite sent.</b> Accept Apple's email to{" "}
-                  {status.appleEmail} to join {napConfig.orgName} in App Store Connect, then come
-                  back here.
-                </span>
-              </>
+    <div className="flex flex-col items-center gap-5 sm:flex-row sm:gap-7">
+      {art}
+      {children}
+    </div>
+  );
+}
+
+// ---- The iPhone card -----------------------------------------------------------------------
+
+function IosCard() {
+  const install = useInstall()!;
+  const { status, error, busy, isIOS } = install;
+  const title = appTitle(install);
+  if (!status) return error ? null : <Skeleton className="h-49 rounded-xl" />;
+
+  if (status.step.kind === "new") return <InviteForm key="new" />;
+
+  if (status.step.kind === "team_invited") {
+    const pending = status.step.pending;
+    return (
+      <CardRow art={<MailArt />}>
+        <CardText
+          status={
+            pending ? (
+              <StatusLine tone="wait">Invite sent · {status.appleEmail}</StatusLine>
             ) : (
-              <span>
-                Apple has no open invite for {status.appleEmail}. If you accepted it with another
-                Apple Account, use that email.
-              </span>
-            )}
-          </Note>
-          <div className="flex flex-wrap gap-2">
-            <Button size="sm" className="rounded-full" disabled={busy} onClick={install.refresh}>
+              <StatusLine tone="error">No open invite · {status.appleEmail}</StatusLine>
+            )
+          }
+          title={pending ? "Check your email" : "Apple has no invite for you"}
+          detail={
+            pending
+              ? `Accept Apple's email to join ${napConfig.orgName} in App Store Connect, then come back here.`
+              : "If you accepted it with another Apple Account, use that email instead."
+          }
+        >
+          <div className="mt-1 flex flex-wrap justify-center gap-2">
+            <Button className="rounded-full" disabled={busy} onClick={install.refresh}>
               {busy && <Spinner data-icon="inline-start" />}
               I've accepted it
             </Button>
             <Button
-              size="sm"
-              variant="ghost"
+              variant="outline"
               className="rounded-full"
               disabled={busy}
               onClick={install.forget}
@@ -343,119 +476,99 @@ export function InstallPanel({ className, page = false }: { className?: string; 
               Use another email
             </Button>
           </div>
-        </>
-      ) : (
-        <>
-          {status.step.tester === "invited" && (
-            <Note>
-              <span>
-                Accept the TestFlight invite Apple emailed to {status.appleEmail}, then open Nap in
-                TestFlight.
-              </span>
-            </Note>
-          )}
-          {isIOS ? (
-            <div className="flex flex-col gap-3">
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  size="sm"
-                  className="rounded-full"
-                  nativeButton={false}
-                  render={<a href={status.url} />}
-                >
-                  <ExternalLinkIcon data-icon="inline-start" />
-                  Open in TestFlight
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="rounded-full"
-                  nativeButton={false}
-                  render={<a href={TESTFLIGHT_STORE_URL} target="_blank" rel="noreferrer" />}
-                >
-                  <DownloadIcon data-icon="inline-start" />
-                  Get TestFlight
-                </Button>
-              </div>
-              <span className="text-xs text-muted-foreground">
-                <BuildLine build={status.build} />
-              </span>
-            </div>
-          ) : (
-            <div className={cn("flex items-center gap-4", page && "max-sm:flex-col sm:gap-6")}>
-              <QrCode
-                value={status.webUrl}
-                className={cn("ring-1 ring-border", page && "size-44")}
-              />
-              <div className="flex flex-col gap-2 text-[13px] leading-snug text-muted-foreground">
-                <span className="text-foreground/80">
-                  Scan with your iPhone camera to open Nap in TestFlight.
-                </span>
-                <span className="text-xs">
-                  <BuildLine build={status.build} />
-                </span>
-                <a
-                  href={TESTFLIGHT_STORE_URL}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="text-xs underline-offset-2 hover:underline"
-                >
-                  No TestFlight yet? Get it on the App Store.
-                </a>
-              </div>
-            </div>
-          )}
-          <span className="text-xs text-muted-foreground">
-            Apple's emails go to {status.appleEmail}.{" "}
-            <button
-              type="button"
-              className="underline-offset-2 hover:text-foreground hover:underline"
-              disabled={busy}
-              onClick={install.forget}
+        </CardText>
+      </CardRow>
+    );
+  }
+
+  const invited = status.step.tester === "invited";
+  const line = invited ? (
+    <StatusLine tone="wait">TestFlight invite sent · {status.appleEmail}</StatusLine>
+  ) : (
+    <StatusLine tone="ok">
+      {status.step.tester === "installed" ? "Installed" : "You're a tester"} · {status.appleEmail}
+    </StatusLine>
+  );
+  const extras = (
+    <>
+      <BuildState build={status.build} />
+      <span className="flex flex-wrap justify-center gap-x-3 gap-y-1 text-xs text-muted-foreground sm:justify-start">
+        <a
+          href={TESTFLIGHT_STORE_URL}
+          target="_blank"
+          rel="noreferrer"
+          className="underline-offset-2 hover:text-foreground hover:underline"
+        >
+          No TestFlight yet? Get it on the App Store
+        </a>
+        <button
+          type="button"
+          className="underline-offset-2 hover:text-foreground hover:underline"
+          disabled={busy}
+          onClick={install.forget}
+        >
+          Use another email
+        </button>
+      </span>
+    </>
+  );
+  const detail = invited
+    ? `Accept the TestFlight invite Apple emailed you, then install ${title} there. TestFlight keeps it up to date.`
+    : `It opens ${title} in TestFlight. Install it there; TestFlight keeps it up to date.`;
+
+  if (isIOS)
+    return (
+      // The sheet's head already shows the icon, and there's nothing to scan on the phone itself.
+      <CardRow art={null}>
+        <CardText status={line} title="Open it in TestFlight" detail={detail}>
+          <div className="mt-1 flex flex-wrap justify-center gap-2 sm:justify-start">
+            <Button
+              size="lg"
+              className="rounded-full px-4"
+              nativeButton={false}
+              render={<a href={status.url} />}
             >
-              Use another email
-            </button>
-          </span>
-        </>
-      )}
-      {error && (
-        <p role="alert" className="text-[13px] text-destructive">
-          {error}
-        </p>
-      )}
-      {!page && <ShareLink />}
-    </div>
+              <ExternalLinkIcon data-icon="inline-start" />
+              Open in TestFlight
+            </Button>
+            <Button
+              size="lg"
+              variant="outline"
+              className="rounded-full px-4"
+              nativeButton={false}
+              render={<a href={TESTFLIGHT_STORE_URL} target="_blank" rel="noreferrer" />}
+            >
+              <DownloadIcon data-icon="inline-start" />
+              Get TestFlight
+            </Button>
+          </div>
+          <BuildState build={status.build} />
+        </CardText>
+      </CardRow>
+    );
+
+  return (
+    <CardRow
+      art={
+        <QrCode
+          value={status.webUrl}
+          className="size-44 rounded-xl ring-1 ring-border sm:size-49"
+        />
+      }
+    >
+      <CardText status={line} title="Scan with your iPhone camera" detail={detail}>
+        {extras}
+      </CardText>
+    </CardRow>
   );
 }
 
-/** The /app page's link, for sending to someone who wants the app. */
-function ShareLink() {
-  const [copied, setCopied] = React.useState(false);
-  const url = installPageUrl();
+/** Stands in for the QR code while there is nothing to scan yet. */
+function MailArt() {
   return (
-    <div className="-mx-4 -mb-4 flex items-center gap-2 border-t px-4 py-2.5 text-xs text-muted-foreground">
-      <LinkIcon className="size-3.5 shrink-0" />
-      <a
-        href={INSTALL_PAGE}
-        className="min-w-0 flex-1 truncate underline-offset-2 hover:text-foreground hover:underline"
-      >
-        {url.replace(/^https?:\/\//, "")}
-      </a>
-      <Button
-        size="xs"
-        variant="ghost"
-        className="rounded-full"
-        onClick={() => {
-          void navigator.clipboard.writeText(url).then(() => {
-            setCopied(true);
-            window.setTimeout(() => setCopied(false), 1_500);
-          });
-        }}
-      >
-        {copied ? <CheckIcon data-icon="inline-start" /> : <CopyIcon data-icon="inline-start" />}
-        {copied ? "Copied" : "Copy link"}
-      </Button>
-    </div>
+    <span className="grid size-36 shrink-0 place-items-center rounded-2xl border-2 border-dashed bg-muted/50 text-muted-foreground sm:size-49">
+      <MailIcon className="size-10" />
+    </span>
   );
 }
 
@@ -465,70 +578,362 @@ function InviteForm() {
   const [email, setEmail] = React.useState(install.status?.appleEmail ?? "");
   return (
     <form
-      className="flex flex-col gap-3"
+      className="flex flex-col gap-5 sm:flex-row sm:items-start sm:gap-7"
       onSubmit={(event) => {
         event.preventDefault();
         void install.invite(email);
       }}
     >
-      <ol className="flex list-decimal flex-col gap-1 pl-5 text-[13px] text-foreground/80">
-        <li>Nap asks Apple to invite you.</li>
-        <li>Accept Apple's emails: one for App Store Connect, then one for TestFlight.</li>
-        <li>Install Nap from the TestFlight app.</li>
-      </ol>
-      <label className="flex flex-col gap-1.5 text-xs text-muted-foreground">
+      <div className="flex flex-col gap-2 sm:w-[46%]">
+        <b className="text-xl font-semibold tracking-[-0.02em] sm:text-[22px]">
+          Get it with TestFlight
+        </b>
+        <ol className="flex list-decimal flex-col gap-1 pl-5 text-sm leading-normal text-muted-foreground">
+          <li>Nap asks Apple to invite you.</li>
+          <li>Accept Apple's emails: one for App Store Connect, then one for TestFlight.</li>
+          <li>Install it from the TestFlight app.</li>
+        </ol>
+      </div>
+      <label className="flex flex-1 flex-col gap-1.5 text-xs text-muted-foreground">
         Your Apple Account email
         <Input
           type="email"
           required
-          autoFocus
           value={email}
           onChange={(event) => setEmail(event.target.value)}
           placeholder="you@icloud.com"
           autoComplete="email"
+          className="h-10 rounded-xl text-base sm:text-sm"
         />
         <span>
           The one you sign in to the App Store with. For most people that's a personal address, not
           their work email.
         </span>
+        <Button type="submit" size="lg" className="mt-2 rounded-full" disabled={install.busy}>
+          {install.busy && <Spinner data-icon="inline-start" />}
+          Send me an invite
+        </Button>
       </label>
-      <Button type="submit" className="rounded-full" disabled={install.busy}>
-        {install.busy && <Spinner data-icon="inline-start" />}
-        Send me an invite
-      </Button>
     </form>
+  );
+}
+
+// ---- The reMarkable card -------------------------------------------------------------------
+
+function RemarkableCard() {
+  return (
+    <CardRow
+      art={
+        <span className="grid size-36 shrink-0 place-items-center rounded-2xl border-2 border-dashed bg-muted/50 text-muted-foreground sm:size-49">
+          <UsbIcon className="size-10" />
+        </span>
+      }
+    >
+      <CardText
+        title="Install over USB, once"
+        detail="Plug in the tablet, then run this from the repo. After that it updates itself from Nap."
+      >
+        <code className="mt-1 rounded-[10px] border bg-muted px-3 py-2 font-mono text-[13px]">
+          remarkable/scripts/install
+        </code>
+      </CardText>
+    </CardRow>
+  );
+}
+
+// ---- Inside and What's new -----------------------------------------------------------------
+
+const TINTS = [
+  "bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-200",
+  "bg-cyan-100 text-cyan-900 dark:bg-cyan-950 dark:text-cyan-200",
+  "bg-violet-100 text-violet-900 dark:bg-violet-950 dark:text-violet-200",
+  "bg-rose-100 text-rose-900 dark:bg-rose-950 dark:text-rose-200",
+  "bg-emerald-100 text-emerald-900 dark:bg-emerald-950 dark:text-emerald-200",
+  "bg-sky-100 text-sky-900 dark:bg-sky-950 dark:text-sky-200",
+];
+const tint = (slug: string) =>
+  TINTS[[...slug].reduce((sum, c) => sum + c.charCodeAt(0), 0) % TINTS.length]!;
+
+function Inside({ build, target }: { build: LiveBuild | null; target: Target }) {
+  const apps = build?.apps ?? [];
+  if (apps.length === 0)
+    return (
+      <p className="text-sm text-muted-foreground">
+        {build ? "This build doesn't say yet. The next one will." : "Nothing is published yet."}
+      </p>
+    );
+  return (
+    <div className="flex flex-col">
+      {apps.map((app) => (
+        <div key={app.slug} className={ROW}>
+          <span
+            className={cn(
+              "grid size-[38px] shrink-0 place-items-center rounded-[10px] text-base font-semibold",
+              target === "remarkable" ? "bg-muted text-foreground" : tint(app.slug),
+            )}
+          >
+            {app.title.slice(0, 1).toUpperCase()}
+          </span>
+          <div className="flex min-w-0 flex-col gap-px">
+            <b className="text-[14.5px] font-semibold">{app.title}</b>
+            {app.summary && (
+              <span className="truncate text-[13px] text-muted-foreground">{app.summary}</span>
+            )}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function when(iso: string) {
+  const date = new Date(iso);
+  const days = Math.round(
+    (new Date().setHours(0, 0, 0, 0) - new Date(iso).setHours(0, 0, 0, 0)) / 86_400_000,
+  );
+  if (days === 0) return "Today";
+  if (days === 1) return "Yesterday";
+  return date.toLocaleDateString(undefined, { day: "numeric", month: "short" });
+}
+
+function WhatsNew({ build }: { build: LiveBuild | null }) {
+  if (!build) return <p className="text-sm text-muted-foreground">No builds yet.</p>;
+  return (
+    <div className="flex flex-col gap-1.5">
+      <div className="flex items-baseline justify-between gap-3">
+        <b className="text-[14.5px] font-semibold">Build {build.buildNumber}</b>
+        <span className="text-[12.5px] text-muted-foreground">
+          {when(build.createdAt)} · {build.by.split("@")[0]}
+        </span>
+      </div>
+      <p className="text-[14.5px] leading-normal text-foreground/80">
+        {build.notes || "No notes for this build."}
+      </p>
+    </div>
+  );
+}
+
+// ---- The sheet -----------------------------------------------------------------------------
+
+function AppSheetView() {
+  const install = useInstall()!;
+  const { app, target } = install;
+  const title = appTitle(install);
+  const live = app?.platforms.find((p) => p.target === target)?.live ?? null;
+  const count = live?.apps?.length ?? 0;
+  // Opening with a click focuses the page, not the close button (which would show its ring).
+  const scroller = React.useRef<HTMLDivElement>(null);
+  return (
+    <Sheet open={install.open} onOpenChange={install.setOpen}>
+      <SheetContent
+        side="bottom"
+        showCloseButton={false}
+        initialFocus={(type) => (type === "keyboard" ? true : scroller.current)}
+        className={cn(
+          "gap-0 overflow-hidden border-0 bg-background p-0 shadow-[0_-10px_60px_rgb(0_0_0/0.25)]",
+          "rounded-t-[22px] data-[side=bottom]:h-[calc(100dvh-3.5rem)] sm:rounded-t-[28px] sm:data-[side=bottom]:h-[calc(100dvh-2.25rem)]",
+          "sm:data-[side=bottom]:inset-x-auto sm:data-[side=bottom]:left-1/2 sm:w-[min(900px,calc(100vw-2rem))] sm:-translate-x-1/2",
+          "duration-500 ease-[cubic-bezier(0.32,0.72,0,1)] data-[side=bottom]:data-ending-style:translate-y-full data-[side=bottom]:data-starting-style:translate-y-full",
+        )}
+      >
+        <SheetClose
+          render={
+            <Button
+              variant="secondary"
+              size="icon"
+              className="absolute top-4 right-4 z-10 size-9 rounded-full sm:top-4 sm:right-[18px]"
+            />
+          }
+        >
+          <XIcon />
+          <span className="sr-only">Close</span>
+        </SheetClose>
+        <div
+          ref={scroller}
+          tabIndex={-1}
+          className="min-h-0 flex-1 overflow-y-auto bg-muted/40 outline-none"
+        >
+          <button
+            type="button"
+            aria-label="Close"
+            onClick={() => install.setOpen(false)}
+            className="mx-auto mt-2 block h-[5px] w-10 rounded-full bg-foreground/15 sm:hidden"
+          />
+          <div className="mx-auto flex w-full max-w-[760px] flex-col gap-6 px-4 pt-6 pb-12 sm:gap-[26px] sm:px-6 sm:pt-10">
+            <div className="flex flex-col items-center gap-2.5 text-center">
+              <AppIcon className="size-[72px] shadow-md sm:size-[88px]" />
+              <SheetTitle className="mt-1.5 text-3xl font-semibold tracking-[-0.03em] sm:text-[38px]">
+                {title}
+              </SheetTitle>
+              <SheetDescription className="mb-2 text-balance text-muted-foreground sm:text-[15px]">
+                {tagline(app)}
+              </SheetDescription>
+              {TARGETS.length > 1 && (
+                <GroupTabs value={target} onValueChange={install.setTarget} label="Platform">
+                  {TARGETS.map((name) => {
+                    const Icon = PLATFORM[name].icon;
+                    return (
+                      <GroupTab key={name} value={name}>
+                        <Icon data-icon="inline-start" />
+                        {PLATFORM[name].label}
+                      </GroupTab>
+                    );
+                  })}
+                </GroupTabs>
+              )}
+            </div>
+            <section className="rounded-[22px] border bg-card p-5 text-card-foreground shadow-[0_12px_34px_-20px_rgb(0_0_0/0.25)] sm:px-7 sm:py-[26px]">
+              {target === "ios" ? <IosCard /> : <RemarkableCard />}
+              {target === "ios" && install.error && (
+                <p role="alert" className="mt-4 text-center text-[13px] text-destructive">
+                  {install.error}
+                </p>
+              )}
+            </section>
+            <div className="grid gap-8 sm:grid-cols-[1.3fr_1fr] sm:gap-9">
+              <section className="min-w-0">
+                <h2 className="mb-3 flex items-baseline gap-2 text-lg font-semibold tracking-[-0.02em]">
+                  Inside
+                  {count > 0 && (
+                    <span className="text-[13px] font-medium text-muted-foreground">
+                      {count} {count === 1 ? "app" : "apps"}
+                    </span>
+                  )}
+                </h2>
+                {app ? (
+                  <Inside build={live} target={target} />
+                ) : (
+                  <Skeleton className="h-32 rounded-xl" />
+                )}
+              </section>
+              <section className="min-w-0">
+                <h2 className="mb-3 text-lg font-semibold tracking-[-0.02em]">What's new</h2>
+                {app ? <WhatsNew build={live} /> : <Skeleton className="h-20 rounded-xl" />}
+              </section>
+            </div>
+          </div>
+        </div>
+      </SheetContent>
+    </Sheet>
   );
 }
 
 // ---- Where it shows ------------------------------------------------------------------------
 
-/** In the bar, in every layout. A popover on wider screens; on phones it opens the sheet. */
+type Tone = "plain" | "wait" | "warn" | "busy" | "error";
+
+/** The bar button's words: your next step, or how the newest build is doing. */
+function nextStep(status: InstallStatus | null): { label: string; tone: Tone } | null {
+  if (!status) return { label: "Get the app", tone: "plain" };
+  const step = status.step;
+  if (step.kind === "new") return { label: "Get the app", tone: "plain" };
+  if (step.kind === "team_invited")
+    return step.pending
+      ? { label: "Check your email", tone: "wait" }
+      : { label: "Invite not found", tone: "warn" };
+  if (step.tester === "invited") return { label: "Accept in TestFlight", tone: "wait" };
+  const build = status.build;
+  if (build?.state === "processing")
+    return { label: `Build ${build.buildNumber} on its way`, tone: "busy" };
+  if (build?.state === "failed")
+    return { label: `Build ${build.buildNumber} failed`, tone: "error" };
+  if (step.tester === "installed") return null;
+  return { label: "Install from TestFlight", tone: "plain" };
+}
+
+const TONE: Record<Tone, string> = {
+  plain: "",
+  wait: "text-blue-700 bg-blue-50 hover:bg-blue-100 hover:text-blue-800 dark:text-blue-300 dark:bg-blue-950/60 dark:hover:bg-blue-950",
+  warn: "text-amber-700 bg-amber-50 hover:bg-amber-100 hover:text-amber-800 dark:text-amber-300 dark:bg-amber-950/60 dark:hover:bg-amber-950",
+  busy: "",
+  error:
+    "text-red-700 bg-red-50 hover:bg-red-100 hover:text-red-800 dark:text-red-300 dark:bg-red-950/60 dark:hover:bg-red-950",
+};
+const DOT: Partial<Record<Tone, string>> = {
+  wait: "bg-blue-600 ring-3 ring-blue-600/20",
+  warn: "bg-amber-600 ring-3 ring-amber-600/20",
+  error: "bg-red-600 ring-3 ring-red-600/20",
+};
+
+/** In the bar, in every layout. Its label is your next step; once installed, the app's icon. */
 export function GetAppButton() {
   const install = useInstall();
   if (!install) return null;
-  const label = (
-    <>
-      <SmartphoneIcon data-icon="inline-start" />
-      <span className="max-sm:sr-only">Get the app</span>
-    </>
-  );
-  if (install.isPhone)
+  const title = appTitle(install);
+  const next = IOS ? nextStep(install.status) : { label: "Get the app", tone: "plain" as Tone };
+  if (!next)
     return (
-      <GroupButton aria-label="Get the app" onClick={() => install.setOpen(true)}>
-        {label}
+      <GroupButton
+        icon
+        aria-label={`${title} · installed`}
+        title={`${title} · installed`}
+        onClick={() => install.setOpen(true)}
+      >
+        <AppIcon className="size-5 rounded-[5px] opacity-75 shadow-none" />
       </GroupButton>
     );
   return (
-    <Popover open={install.open} onOpenChange={install.setOpen}>
-      <PopoverTrigger render={<GroupButton aria-label="Get the app" />}>{label}</PopoverTrigger>
-      <PopoverContent
-        align="end"
-        sideOffset={8}
-        className={cn(PANEL_CLASS, "w-[380px] max-w-[calc(100vw-2rem)] gap-0 p-0 ring-0")}
+    <GroupButton
+      aria-label={next.label}
+      title={next.label}
+      className={TONE[next.tone]}
+      onClick={() => install.setOpen(true)}
+    >
+      {next.tone === "busy" ? (
+        <Spinner data-icon="inline-start" />
+      ) : DOT[next.tone] ? (
+        <span data-icon="inline-start" className={cn("size-[7px] rounded-full", DOT[next.tone])} />
+      ) : (
+        <SmartphoneIcon data-icon="inline-start" />
+      )}
+      <span className="max-sm:sr-only">{next.label}</span>
+    </GroupButton>
+  );
+}
+
+/**
+ * Between the prompt and the list: the app, until the person dismisses it (for good, on every
+ * device) or Apple says it's installed.
+ */
+export function AppNudge({ className }: { className?: string }) {
+  const install = useInstall();
+  if (!install?.app || install.app.nudgeDismissed || installed(install.status)) return null;
+  const title = appTitle(install);
+  const what = inside(install.app);
+  const device = TARGETS.includes("ios") ? "phone" : PLATFORM[TARGETS[0]!].device;
+  return (
+    <div
+      className={cn(
+        "flex items-center gap-3 rounded-2xl border border-kind-app/20 bg-linear-to-r from-kind-app-soft/70 to-card to-70% p-2.5 pl-3 text-card-foreground sm:gap-4 sm:rounded-[18px] sm:px-[18px] sm:py-4",
+        className,
+      )}
+    >
+      <AppIcon className="size-10 shadow-none sm:size-12" />
+      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <b className="truncate text-sm font-semibold sm:text-[15px]">
+          {title} <span className="max-sm:hidden">is</span> on your {device}
+          <span className="max-sm:hidden"> too</span>
+        </b>
+        <span className="truncate text-xs text-muted-foreground sm:text-[13.5px]">
+          {what ? `${what}, on your ${platformList()}.` : `On your ${platformList()}.`}
+        </span>
+      </div>
+      <Button className="rounded-full sm:px-3" onClick={() => install.setOpen(true)}>
+        <SmartphoneIcon data-icon="inline-start" className="max-sm:hidden" />
+        <span className="sm:hidden">Get</span>
+        <span className="max-sm:hidden">Get the app</span>
+      </Button>
+      <Button
+        size="icon-sm"
+        variant="ghost"
+        className="-ml-1 shrink-0 rounded-full text-muted-foreground"
+        aria-label="Dismiss"
+        title="Dismiss. It stays in the bar."
+        onClick={install.dismissNudge}
       >
-        <InstallPanel />
-      </PopoverContent>
-    </Popover>
+        <XIcon />
+      </Button>
+    </div>
   );
 }
 
@@ -545,7 +950,7 @@ export function SidebarInstallCard() {
     >
       <QrCode value={qrTarget(install.status)} className="size-[92px]" />
       <span className="flex min-w-0 flex-col gap-1.5">
-        <b className="text-[15px] font-semibold">Nap for iPhone</b>
+        <b className="text-[15px] font-semibold">{appTitle(install)} for iPhone</b>
         <span className="text-[13px] leading-snug text-muted-foreground">
           The apps you make open here. Scan to install it with TestFlight.
         </span>
@@ -582,7 +987,7 @@ export function PinnedInstallCard({ className }: { className?: string }) {
           </span>
         </span>
       </span>
-      <b className="text-sm font-semibold">Nap for iPhone</b>
+      <b className="text-sm font-semibold">{appTitle(install)} for iPhone</b>
       <span className="inline-flex h-8 w-full items-center justify-center gap-1.5 rounded-full bg-kind-app-soft text-[13.5px] font-semibold text-kind-app">
         <SmartphoneIcon className="size-3.5" />
         Get the app
@@ -611,64 +1016,12 @@ export function VendingInstallSticker() {
         />
       </span>
       <span className="font-mono text-[10.5px] leading-[1.45] tracking-[0.08em] text-[#fde68a]">
-        NAP FOR
+        GET THE
         <br />
-        iPHONE
+        APP
         <br />
         <span className="opacity-60">SCAN ME</span>
       </span>
     </button>
-  );
-}
-
-const BANNER_KEY = "nap:app-banner-dismissed";
-
-/** Phones: a banner under the bar, until it's installed or dismissed. iPhones only. */
-export function PhoneInstallBanner({ className }: { className?: string }) {
-  const install = useInstall();
-  const show = useShowInstallSpots();
-  const [dismissed, setDismissed] = React.useState(true);
-  React.useEffect(() => setDismissed(localStorage.getItem(BANNER_KEY) === "1"), []);
-  if (!install || !show || dismissed || !install.isIOS || !install.isPhone) return null;
-  const tester = install.status?.step.kind === "tester";
-  return (
-    <div
-      className={cn(
-        "flex items-center gap-3 rounded-2xl border bg-card p-3 text-card-foreground shadow-sm",
-        className,
-      )}
-    >
-      <AppIcon className="size-[42px]" />
-      <div className="flex min-w-0 flex-1 flex-col">
-        <b className="text-[14.5px] font-semibold">Nap for iPhone</b>
-        <span className="truncate text-xs text-muted-foreground">Open the apps you make here</span>
-      </div>
-      {tester ? (
-        <Button
-          size="sm"
-          className="rounded-full"
-          nativeButton={false}
-          render={<a href={install.status!.url} />}
-        >
-          Get
-        </Button>
-      ) : (
-        <Button size="sm" className="rounded-full" onClick={() => install.setOpen(true)}>
-          Get
-        </Button>
-      )}
-      <Button
-        size="icon-sm"
-        variant="ghost"
-        className="-mr-1 rounded-full text-muted-foreground"
-        aria-label="Dismiss"
-        onClick={() => {
-          localStorage.setItem(BANNER_KEY, "1");
-          setDismissed(true);
-        }}
-      >
-        <XIcon />
-      </Button>
-    </div>
   );
 }

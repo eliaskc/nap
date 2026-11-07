@@ -32,7 +32,7 @@ iOS:
 - Publish: commit, then ios/scripts/publish 'What changed, for testers'. It builds the launcher for iPhone without signing, pushes HEAD to main, and uploads the build with that commit. Nap signs it, gives it the next build number, and uploads it to App Store Connect; Apple processes it for a few minutes, and testers install or update it in the TestFlight app. People get it from Get the app on the dashboard; send anyone who cannot to {{admin}}.
 - Keep the launcher's app icon (ios/Launcher/Resources) and ITSAppUsesNonExemptEncryption in ios/Project.swift: TestFlight refuses builds without them.
 - Permissions, capabilities, and other Info.plist keys go in the app's app.json, never in Project.swift: "permissions" are Info.plist usage strings ({"NSCameraUsageDescription": "Why, in a sentence"}), "infoPlist" holds any other keys ({"UIBackgroundModes": ["audio"], "NSBonjourServices": ["_my-app._tcp"]}), and "capabilities" are names such as ["push-notifications", "healthkit"]. ios/AGENTS.md lists them. Nap turns capabilities on when it signs; what it cannot turn on, the publish answer lists under capabilityWarnings and the launcher shows on the app. Tell the user about those. Networking, WebSockets, and audio need nothing, except audio that keeps running when the phone locks (UIBackgroundModes in "infoPlist").
-- Tell the user the build number, that it reaches TestFlight in a few minutes, and that https://{{rootDomain}}/apps shows when it is ready.
+- Tell the user the build number, that it reaches TestFlight in a few minutes, and that Get the app at https://{{rootDomain}}/app shows when it is ready. The title and summary in each app's app.json are what the dashboard lists as inside the build, so keep them short and true.
 
 <!-- /if -->
 

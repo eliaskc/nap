@@ -96,6 +96,7 @@ type BuildRow = {
   testflightKey: string | null;
   testflightCheckedAt: string | null;
   sha256: string | null;
+  contents: string | null;
   createdByEmail: string;
   client: string;
   createdAt: string;
@@ -110,7 +111,7 @@ const BUILD_COLUMNS = `id, app_slug AS appSlug, target, build_number AS buildNum
   short_version AS shortVersion, xcode, signed_bytes AS signedBytes,
   testflight_state AS testflightState, testflight_error AS testflightError,
   testflight_upload AS testflightUpload, testflight_key AS testflightKey,
-  testflight_checked_at AS testflightCheckedAt, sha256,
+  testflight_checked_at AS testflightCheckedAt, sha256, contents,
   created_by_email AS createdByEmail, client, created_at AS createdAt`;
 
 /** Workers take request bodies up to 100 MB. Launchers are far smaller. */
@@ -297,8 +298,44 @@ const createApp = Effect.fnUntraced(function* (
   );
 });
 
+/** An app inside a launcher, from its app.json. */
+export type BuildApp = { slug: string; title: string; summary: string };
+
 /**
- * POST /_nap/api/apps/<app>/builds?target=<platform>&sourceCommit=<sha>&notes=<text>
+ * ?apps=: the apps in the launcher, as JSON [{ slug, title, summary }]. The publish script reads
+ * them from app.json. Anything else is left out: the list is only shown, never trusted.
+ */
+function parseContents(raw: string | null): Array<BuildApp> | null {
+  if (!raw) return null;
+  try {
+    const value: unknown = JSON.parse(raw);
+    if (!Array.isArray(value)) return null;
+    const text = (v: unknown, max: number) => (typeof v === "string" ? v.trim().slice(0, max) : "");
+    return value
+      .slice(0, 50)
+      .map((item) => ({
+        slug: text(item?.slug, 80),
+        title: text(item?.title, 80),
+        summary: text(item?.summary, 240),
+      }))
+      .filter((item) => item.slug)
+      .map((item) => ({ ...item, title: item.title || item.slug }));
+  } catch {
+    return null;
+  }
+}
+
+function readContents(raw: string | null): Array<BuildApp> | null {
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as Array<BuildApp>;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * POST /_nap/api/apps/<app>/builds?target=<platform>&sourceCommit=<sha>&notes=<text>&apps=<json>
  * Body: a zip of the platform's launcher (content-type application/zip). target may be left out
  * when the Nap has one platform.
  */
@@ -313,6 +350,7 @@ const publishBuild = Effect.fnUntraced(function* (
   const target = asked ? (TARGET_ALIASES[asked] ?? asked) : on.length === 1 ? on[0] : "";
   const commit = (url.searchParams.get("sourceCommit") ?? "").trim().toLowerCase();
   const notes = (url.searchParams.get("notes") ?? "").trim().slice(0, 2000);
+  const contents = parseContents(url.searchParams.get("apps"));
   if (app.slug !== napApp()) {
     return yield* failNoStore(400, `This Nap only publishes the app ${napApp()}.`, {
       code: "not_distributed",
@@ -371,14 +409,15 @@ const publishBuild = Effect.fnUntraced(function* (
   const id = crypto.randomUUID();
   yield* db.run(
     `INSERT INTO app_builds (id, app_slug, target, build_number, source_commit, status, notes,
-                             unsigned_bytes, created_by_email, client)
-     VALUES (?, ?, ?, ?, ?, 'signing', ?, ?, ?, ?)`,
+                             contents, unsigned_bytes, created_by_email, client)
+     VALUES (?, ?, ?, ?, ?, 'signing', ?, ?, ?, ?, ?)`,
     id,
     app.slug,
     target,
     buildNumber,
     commit,
     notes,
+    contents && JSON.stringify(contents),
     size,
     agent.email,
     agent.client.slice(0, 80),
@@ -437,7 +476,7 @@ const publishBuild = Effect.fnUntraced(function* (
   yield* db.run("UPDATE apps SET updated_at = ? WHERE slug = ?", now(), app.slug);
   yield* logAppEvent(agent, app.slug, "publish", { target, buildNumber, commit });
 
-  const page = `${url.origin}/apps`;
+  const page = `${url.origin}/app`;
   return json(
     {
       ok: true,
@@ -862,6 +901,7 @@ function describeBuild(build: BuildRow) {
     xcode: build.xcode,
     bytes: build.signedBytes,
     sha256: build.sha256,
+    apps: readContents(build.contents),
     download:
       build.target === "remarkable" && build.status === "ready"
         ? `/_nap/api/apps/${build.appSlug}/targets/remarkable/builds/${build.id}/download`
@@ -938,3 +978,40 @@ const logAppEvent = (
       ...extra,
     }),
   );
+
+/**
+ * The dashboard's Get the app sheet: the Nap app with each platform this Nap has on and its live
+ * build (with what is inside it), and whether the person dismissed the nudge. Null when apps
+ * are off or the app has no record yet.
+ */
+export const appSheet = Effect.fn("appSheet")(function* (email: string, origin: string) {
+  const slug = napApp();
+  const db = yield* Database;
+  const row = slug
+    ? yield* db.first<AppRow>(`SELECT ${APP_COLUMNS} FROM apps WHERE slug = ?`, slug)
+    : null;
+  const app = row ? yield* describeApp(row, origin) : null;
+  const profile = yield* db.first<{ dismissed: string | null }>(
+    "SELECT app_nudge_dismissed_at AS dismissed FROM profiles WHERE email = ?",
+    email,
+  );
+  return {
+    slug,
+    title: app?.title ?? slug ?? "",
+    platforms: platformsOn().map((target) => ({
+      target,
+      live: app?.targets.find((t) => t.target === target)?.live ?? null,
+    })),
+    nudgeDismissed: Boolean(profile?.dismissed),
+  };
+});
+
+/** Hides the nudge for good, for this person. */
+export const dismissAppNudge = Effect.fn("dismissAppNudge")(function* (email: string) {
+  const db = yield* Database;
+  yield* db.run(
+    "UPDATE profiles SET app_nudge_dismissed_at = ? WHERE email = ? AND app_nudge_dismissed_at IS NULL",
+    now(),
+    email,
+  );
+});

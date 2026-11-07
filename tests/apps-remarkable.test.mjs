@@ -315,3 +315,36 @@ test("reMarkable: publish, live, download, and build numbers per target", async 
     );
   });
 });
+
+test("a build keeps the apps inside it, and the sheet shows them with the nudge flag", async () => {
+  await withApps({ app: "notes", remarkable: {} }, async () => {
+    const { api, SOURCES, env, sqlite } = setup();
+    assert.equal((await api("POST", "", { json: { slug: "notes", title: "Notes" } })).status, 201);
+    SOURCES.commit("app-notes", sha(1));
+    const apps = JSON.stringify([
+      { slug: "hello", title: "Hello", summary: "Who you are." },
+      { slug: "draw", title: "", summary: 7 },
+      { title: "No slug" },
+    ]);
+    const response = await api(
+      "POST",
+      `/notes/builds?target=remarkable&sourceCommit=${sha(1)}&apps=${encodeURIComponent(apps)}`,
+      upload(zipBytes("with apps")),
+    );
+    assert.equal(response.status, 201);
+
+    sqlite.prepare("INSERT INTO profiles (email, display_name) VALUES (?, ?)").run("p@x.com", "P");
+    const { appSheet, dismissAppNudge } = await import("../src/lib/apps.ts");
+    const { runNap } = await import("../src/server/runtime.ts");
+    let sheet = await runNap(env, appSheet("p@x.com", ORIGIN));
+    assert.equal(sheet.title, "Notes");
+    assert.deepEqual(sheet.platforms[0].live.apps, [
+      { slug: "hello", title: "Hello", summary: "Who you are." },
+      { slug: "draw", title: "draw", summary: "" },
+    ]);
+    assert.equal(sheet.nudgeDismissed, false);
+    await runNap(env, dismissAppNudge("p@x.com"));
+    sheet = await runNap(env, appSheet("p@x.com", ORIGIN));
+    assert.equal(sheet.nudgeDismissed, true);
+  });
+});

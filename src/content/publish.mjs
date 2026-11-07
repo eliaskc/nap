@@ -575,10 +575,12 @@ async function appCommand(options) {
     pushSource(local, source, `app run ${decodeURIComponent(app)}`);
     const size = (await stat(zip)).size;
     console.log(`Uploading ${target || "the build"} (${mb(size)})...`);
+    const apps = await launcherApps(local.dir, target || "ios");
     const query = new URLSearchParams({
       target,
       sourceCommit: local.head,
       notes: options.notes || "",
+      ...(apps.length ? { apps: JSON.stringify(apps) } : {}),
     });
     const response = await fetch(`${NAP_URL}/_nap/api/apps/${app}/builds?${query}`, {
       method: "POST",
@@ -596,6 +598,30 @@ async function appCommand(options) {
   throw new ExitError(
     "Usage: node publish.mjs app list | init | clone | run | publish. See --help.",
   );
+}
+
+/**
+ * The apps in a platform's launcher, for the dashboard: each folder with an app.json in
+ * <platform>/Apps (iOS) or <platform>/apps (reMarkable, Android). Missing ones are fine.
+ */
+async function launcherApps(root, target) {
+  for (const folder of [join(root, target, "Apps"), join(root, target, "apps")]) {
+    const slugs = await readdir(folder).catch(() => null);
+    if (!slugs) continue;
+    const apps = [];
+    for (const slug of slugs.filter((name) => !name.startsWith(".")).sort()) {
+      const manifest = await readFile(join(folder, slug, "app.json"), "utf8").catch(() => null);
+      if (!manifest) continue;
+      try {
+        const { title, summary } = JSON.parse(manifest);
+        apps.push({ slug, title: title || slug, summary: summary || "" });
+      } catch {
+        apps.push({ slug, title: slug, summary: "" });
+      }
+    }
+    return apps;
+  }
+  return [];
 }
 
 try {

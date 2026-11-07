@@ -468,7 +468,7 @@ Nap (reMarkable) → the zip as it came, with its SHA-256 → tablet (Nap token)
 - **TestFlight.** Each iOS build is uploaded to App Store Connect with the build
   upload API before it goes live. Its build number goes above every build App
   Store Connect has. Apple then processes it for internal testers; Nap asks
-  Apple how far it got when someone looks at `/apps`, at most every few
+  Apple how far it got when someone opens Get the app, at most every few
   seconds per build, and keeps the state on the build. TestFlight builds need
   an app icon and `ITSAppUsesNonExemptEncryption`; the template has both.
 - **reMarkable.** Nap keeps the zipped AppLoad folder as it was uploaded
@@ -491,6 +491,10 @@ Nap (reMarkable) → the zip as it came, with its SHA-256 → tablet (Nap token)
   have (those needing setup in the developer account, or Apple refused) the
   signer writes into Info.plist as `NapCapabilityWarnings`, and the launcher
   shows them on the app that asked. Nap never turns capabilities off.
+- **Get the app.** One sheet on the dashboard, opened from the bar (whose label
+  is the person's next step), the nudge above the list, or a link to `/app`.
+  It shows each platform's live build with the apps inside it, which the
+  publish script reads from each app's `app.json` (`app_builds.contents`).
 - **Testers.** Internal testers must be App Store Connect users. From the
   dashboard's Get the app, anyone signed in to Nap gives their Apple Account
   email; Nap invites it to the team with the Marketing role and access to the

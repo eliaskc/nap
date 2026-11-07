@@ -289,7 +289,7 @@ export function DashboardActions({
 
   const actions: Actions = {
     open: (item) => {
-      if (item.kind === "app") window.location.assign(item.url);
+      if (item.kind === "app") window.location.hash = "app";
       else window.open(item.url, "_blank", "noopener,noreferrer");
     },
     copyLink: (item) => {

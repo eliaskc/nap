@@ -26,6 +26,7 @@ import { Route as ApiProfileRouteImport } from './routes/api/profile'
 import { Route as ApiPeopleRouteImport } from './routes/api/people'
 import { Route as ApiMeRouteImport } from './routes/api/me'
 import { Route as ApiAppsRouteImport } from './routes/api/apps'
+import { Route as ApiAppRouteImport } from './routes/api/app'
 import { Route as SSlugSplatRouteImport } from './routes/s.$slug.$'
 import { Route as ApiTokensIdRouteImport } from './routes/api/tokens.$id'
 import { Route as ApiSitesSlugRouteImport } from './routes/api/sites.$slug'
@@ -123,6 +124,11 @@ const ApiAppsRoute = ApiAppsRouteImport.update({
   path: '/api/apps',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiAppRoute = ApiAppRouteImport.update({
+  id: '/api/app',
+  path: '/api/app',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const SSlugSplatRoute = SSlugSplatRouteImport.update({
   id: '/s/$slug/$',
   path: '/s/$slug/$',
@@ -186,6 +192,7 @@ export interface FileRoutesByFullPath {
   '/connect': typeof ConnectRoute
   '/install': typeof InstallRoute
   '/welcome': typeof WelcomeRoute
+  '/api/app': typeof ApiAppRoute
   '/api/apps': typeof ApiAppsRoute
   '/api/me': typeof ApiMeRoute
   '/api/people': typeof ApiPeopleRoute
@@ -216,6 +223,7 @@ export interface FileRoutesByTo {
   '/connect': typeof ConnectRoute
   '/install': typeof InstallRoute
   '/welcome': typeof WelcomeRoute
+  '/api/app': typeof ApiAppRoute
   '/api/apps': typeof ApiAppsRoute
   '/api/me': typeof ApiMeRoute
   '/api/people': typeof ApiPeopleRoute
@@ -247,6 +255,7 @@ export interface FileRoutesById {
   '/connect': typeof ConnectRoute
   '/install': typeof InstallRoute
   '/welcome': typeof WelcomeRoute
+  '/api/app': typeof ApiAppRoute
   '/api/apps': typeof ApiAppsRoute
   '/api/me': typeof ApiMeRoute
   '/api/people': typeof ApiPeopleRoute
@@ -279,6 +288,7 @@ export interface FileRouteTypes {
     | '/connect'
     | '/install'
     | '/welcome'
+    | '/api/app'
     | '/api/apps'
     | '/api/me'
     | '/api/people'
@@ -309,6 +319,7 @@ export interface FileRouteTypes {
     | '/connect'
     | '/install'
     | '/welcome'
+    | '/api/app'
     | '/api/apps'
     | '/api/me'
     | '/api/people'
@@ -339,6 +350,7 @@ export interface FileRouteTypes {
     | '/connect'
     | '/install'
     | '/welcome'
+    | '/api/app'
     | '/api/apps'
     | '/api/me'
     | '/api/people'
@@ -370,6 +382,7 @@ export interface RootRouteChildren {
   ConnectRoute: typeof ConnectRoute
   InstallRoute: typeof InstallRoute
   WelcomeRoute: typeof WelcomeRoute
+  ApiAppRoute: typeof ApiAppRoute
   ApiAppsRoute: typeof ApiAppsRoute
   ApiMeRoute: typeof ApiMeRoute
   ApiPeopleRoute: typeof ApiPeopleRoute
@@ -505,6 +518,13 @@ declare module '@tanstack/react-router' {
       path: '/api/apps'
       fullPath: '/api/apps'
       preLoaderRoute: typeof ApiAppsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/app': {
+      id: '/api/app'
+      path: '/api/app'
+      fullPath: '/api/app'
+      preLoaderRoute: typeof ApiAppRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/s/$slug/$': {
@@ -660,6 +680,7 @@ const rootRouteChildren: RootRouteChildren = {
   ConnectRoute: ConnectRoute,
   InstallRoute: InstallRoute,
   WelcomeRoute: WelcomeRoute,
+  ApiAppRoute: ApiAppRoute,
   ApiAppsRoute: ApiAppsRoute,
   ApiMeRoute: ApiMeRoute,
   ApiPeopleRoute: ApiPeopleRoute,
