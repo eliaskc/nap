@@ -16,7 +16,7 @@ test("readRequests keeps well-formed slugs and names, once each", () => {
   assert.deepEqual(readRequests(["healthkit"]), {});
 });
 
-test("planCapabilities grants what it can and warns per prototype about the rest", () => {
+test("planCapabilities grants what it can and warns per app about the rest", () => {
   const plan = planCapabilities(
     { snore: ["healthkit", "icloud"], ping: ["push-notifications", "teleport"] },
     (name) => (name === "push-notifications" ? "is not on this Nap's list" : null),
@@ -35,7 +35,7 @@ test("planCapabilities grants what it can and warns per prototype about the rest
   });
 });
 
-test("a capability two prototypes ask for is granted once", () => {
+test("a capability two apps ask for is granted once", () => {
   const plan = planCapabilities({ a: ["siri"], b: ["siri"] }, () => null);
   assert.deepEqual(plan.granted, ["siri"]);
   assert.deepEqual(plan.warnings, {});

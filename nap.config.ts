@@ -23,38 +23,29 @@ export type NapConfig = {
   /** Who agents send feature requests to. */
   admin: string;
   /**
-   * Native iOS apps, signed by Nap. null turns apps off. The signing certificate and the
-   * App Store Connect key are secrets (see alchemy.run.ts). Set profileName, testFlight, or both.
+   * Native iOS apps, signed by Nap and distributed through TestFlight. null turns apps off. The
+   * signing certificate and the App Store Connect key are secrets (see alchemy.run.ts). Nap has
+   * one app: its launcher goes to an app record in App Store Connect, and its internal testers
+   * install it from the TestFlight app. The App ID, the App Store profile, and the app record are
+   * made by hand in the developer account; Nap never creates them.
    */
   apps: {
     /** The Apple developer team that owns the certificate and profiles. */
     teamId: string;
-    /** A wildcard App ID covers <bundleIdPrefix>.*. Each target is <bundleIdPrefix>.<target>. */
-    bundleIdPrefix: string;
-    /**
-     * Ad hoc: the provisioning profile for the wildcard App ID, by its name in the developer
-     * account. People install every target from /apps on iPhones registered with Nap. Leave it
-     * out for TestFlight only: no UDIDs, no install links.
-     */
-    profileName?: string;
-    /**
-     * TestFlight: one app's launcher also goes to an app record in App Store Connect, and its
-     * internal testers install it from the TestFlight app. Leave it out to turn TestFlight off.
-     */
-    testFlight?: {
+    testFlight: {
       /** The app record's Apple ID (App Store Connect → the app → App Information). */
       appStoreId: string;
       /** The app record's bundle id, an explicit App ID such as com.example.nap. */
       bundleId: string;
       /** The App Store provisioning profile for that bundle id, by its name. */
       profileName: string;
-      /** The Nap app whose launcher goes to TestFlight. Without ad hoc, it is the only app. */
+      /** The app on Nap (its slug) whose launcher goes to TestFlight: the only app. */
       app: string;
       /**
-       * Capabilities that prototypes may turn on for the App ID by declaring them in
-       * prototype.json, such as ["push-notifications", "healthkit"]. Leave it out to allow every
-       * one Nap can turn on (src/lib/capabilities.ts); [] allows none. The rest become warnings
-       * inside the app.
+       * Capabilities that apps in the launcher may turn on for the App ID by declaring them in
+       * app.json, such as ["push-notifications", "healthkit"]. Leave it out to allow every one
+       * Nap can turn on (src/lib/capabilities.ts); [] allows none. The rest become warnings
+       * inside the launcher.
        */
       capabilities?: Array<AutomaticCapability>;
     };

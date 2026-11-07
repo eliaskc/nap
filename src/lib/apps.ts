@@ -4,8 +4,6 @@ import { appTemplateFiles } from "~/lib/app-template";
 import {
   AppleError,
   buildUploadStatus,
-  bundleIdFor,
-  type Distribution,
   ensureCapabilities,
   latestTestFlightBuildNumber,
   signingProfile,
@@ -31,27 +29,23 @@ import {
 import { napConfig } from "~/nap.config";
 import { SignerBinding } from "~/server/bindings";
 import { Database } from "~/server/database";
-import { failNoStore, failText, json, noStore, readParams } from "~/server/http";
+import { failNoStore, json, noStore, readParams } from "~/server/http";
 import { Storage } from "~/server/storage";
-import { randomString, sha256Hex } from "~/server/tokens";
 
 /**
  * Native apps. See migrations/0018_apps.sql for the model.
  *
- * 1. An agent creates an app: Nap makes its source repo (Artifacts) and returns a Git token.
- * 2. The agent pushes the Xcode project to main, builds a target on a Mac without signing, and
+ * A Nap has one app, napConfig.apps.testFlight.app: a launcher with one folder per app inside it.
+ *
+ * 1. An agent creates the app once: Nap makes its source repo (Artifacts) and returns a Git token.
+ * 2. The agent pushes the Xcode project to main, builds the launcher on a Mac without signing, and
  *    uploads the zipped .app with the commit it built: POST /_nap/api/apps/<app>/builds.
- * 3. Nap checks the commit like a site's (head of main, contains the target's live build), stores
- *    the unsigned build, signs it in the signer container, stores the .ipa, and makes it live.
- * 4. Ad hoc: people install from the dashboard. An install link is a short-lived token that the
- *    iOS installer uses for the manifest and the .ipa, since it sends no Access cookie.
- * 5. TestFlight: the launcher of napConfig.apps.testFlight.app is also signed with the App Store
- *    profile and uploaded to App Store Connect before it goes live. Apple processes it for a few
- *    minutes; Nap asks Apple how far it got when someone looks at the apps.
+ * 3. Nap checks the commit like a site's (head of main, contains the live build's commit), stores
+ *    the unsigned build, signs it with the App Store profile in the signer container, and uploads
+ *    it to App Store Connect before it goes live. Apple processes it for a few minutes; Nap asks
+ *    Apple how far it got when someone looks at the apps.
  *
- * Without ad hoc (no profileName), the TestFlight launcher is the only thing Nap publishes.
- *
- * Every person who can sign in can see, push to, publish, and install every app.
+ * Every person who can sign in can push to and publish the app, and install it from TestFlight.
  */
 
 type AppRow = {
@@ -85,8 +79,6 @@ type BuildRow = {
   shortVersion: string;
   xcode: string;
   signedBytes: number;
-  signedKey: string | null;
-  signedProfile: string | null;
   testflightState: "processing" | "ready" | "failed" | null;
   testflightError: string | null;
   testflightUpload: string | null;
@@ -104,26 +96,20 @@ const TARGET_COLUMNS = `app_slug AS appSlug, target, bundle_id AS bundleId, titl
 const BUILD_COLUMNS = `id, app_slug AS appSlug, target, build_number AS buildNumber,
   source_commit AS sourceCommit, status, error, notes, app_name AS appName,
   short_version AS shortVersion, xcode, signed_bytes AS signedBytes,
-  signed_key AS signedKey, signed_profile AS signedProfile,
   testflight_state AS testflightState, testflight_error AS testflightError,
   testflight_upload AS testflightUpload, testflight_key AS testflightKey,
   testflight_checked_at AS testflightCheckedAt,
   created_by_email AS createdByEmail, client, created_at AS createdAt`;
 
-const TARGET_PATTERN = /^[a-z][a-z0-9-]{0,31}$/;
-/** Workers take request bodies up to 100 MB. Prototypes are far smaller. */
+/** The one target Nap publishes: the launcher. Builds name it, as older scripts do. */
+const LAUNCHER = "launcher";
+/** Workers take request bodies up to 100 MB. Launchers are far smaller. */
 export const MAX_APP_BYTES = 95 * 1024 * 1024;
-const INSTALL_LINK_SECONDS = 60 * 60;
-export const INSTALL_PREFIX = "/_nap/install/";
 const now = () => new Date().toISOString();
 
 export const appsEnabled = () => napConfig.apps !== null;
-/** Ad hoc: every target installs from /apps on iPhones registered with Nap. */
-export const adHocEnabled = () => Boolean(napConfig.apps?.profileName);
-/** TestFlight: the app record, and which launcher goes there. Null when TestFlight is off. */
+/** The app record, and which app's launcher goes there. Null when apps are off. */
 export const testFlightConfig = () => napConfig.apps?.testFlight ?? null;
-const isTestFlightTarget = (app: string, target: string) =>
-  testFlightConfig()?.app === app && target === "launcher";
 /** Opens the app in the TestFlight app on an iPhone. */
 export const testFlightUrl = (appStoreId: string) =>
   `itms-beta://beta.itunes.apple.com/v1/app/${appStoreId}`;
@@ -131,12 +117,9 @@ export const testFlightUrl = (appStoreId: string) =>
 const TESTFLIGHT_CHECK_MS = 10 * 1000;
 
 const unsignedKey = (app: string, build: string) => `apps/${app}/builds/${build}/unsigned.zip`;
-/**
- * Builds signed before re-signing existed are at signed.ipa; later ones name their profile.
- * App Store builds (TestFlight) are at signed-appstore-<profile>.ipa.
- */
-const signedKey = (app: string, build: string, profile?: string, kind: Distribution = "adhoc") =>
-  `apps/${app}/builds/${build}/${profile ? `signed-${kind === "appstore" ? "appstore-" : ""}${profile}` : "signed"}.ipa`;
+/** The .ipa signed for the App Store (TestFlight), named after its profile. */
+const signedKey = (app: string, build: string, profile: string) =>
+  `apps/${app}/builds/${build}/signed-appstore-${profile}.ipa`;
 
 /** The agent API under /_nap/api/apps. `path` starts after /apps. */
 export const handleAppsApi = Effect.fn("handleAppsApi")(function* (
@@ -191,19 +174,14 @@ export const handleAppsApi = Effect.fn("handleAppsApi")(function* (
     );
     return json({ builds: results.map(describeBuild) }, { headers: noStore });
   }
-  // The live build of a target, with a fresh install link. Apps call this to check for updates.
+  // The live build of the launcher.
   const targetMatch = rest.match(/^\/targets\/([a-z][a-z0-9-]{0,31})$/);
   if (targetMatch && method === "GET") {
     const live = yield* liveBuild(app.slug, targetMatch[1]);
     if (!live) {
       return yield* failNoStore(404, "This target has no live build", { code: "no_live_build" });
     }
-    if (!adHocEnabled() || live.signedKey === null) {
-      return json({ build: describeBuild(live), install: null }, { headers: noStore });
-    }
-    yield* ensureCurrentSignature(live);
-    const install = yield* createInstallLink(live.id, agent.email, url.origin);
-    return json({ build: describeBuild(live), install }, { headers: noStore });
+    return json({ build: describeBuild(live) }, { headers: noStore });
   }
   return yield* failNoStore(404, "Not found");
 });
@@ -219,10 +197,10 @@ const createApp = Effect.fnUntraced(function* (
   }
   const title = rawTitle.trim().slice(0, 120) || slug;
   const testFlight = testFlightConfig();
-  if (!adHocEnabled() && testFlight && slug !== testFlight.app) {
+  if (testFlight && slug !== testFlight.app) {
     return yield* failNoStore(
       409,
-      `This Nap has one app, ${testFlight.app}, which goes to TestFlight. Add your prototype to it: node nap-publish.mjs app clone ${testFlight.app}`,
+      `This Nap has one app, ${testFlight.app}, which goes to TestFlight. Add yours to its launcher: node nap-publish.mjs app clone ${testFlight.app}`,
       { code: "one_app" },
     );
   }
@@ -253,14 +231,14 @@ const createApp = Effect.fnUntraced(function* (
     {
       app: { slug, title },
       source: access,
-      next: "Start from the template (GET /_nap/api/apps/template), push it to main, then build a target and POST it to /_nap/api/apps/<slug>/builds.",
+      next: "Start from the template (GET /_nap/api/apps/template), push it to main, then build the launcher and POST it to /_nap/api/apps/<slug>/builds.",
     },
     { status: 201, headers: noStore },
   );
 });
 
 /**
- * POST /_nap/api/apps/<app>/builds?target=<target>&sourceCommit=<sha>&notes=<text>
+ * POST /_nap/api/apps/<app>/builds?target=launcher&sourceCommit=<sha>&notes=<text>
  * Body: a zip of the unsigned .app (content-type application/zip).
  */
 const publishBuild = Effect.fnUntraced(function* (
@@ -269,13 +247,15 @@ const publishBuild = Effect.fnUntraced(function* (
   agent: AgentIdentity,
   app: AppRow,
 ) {
-  const target = (url.searchParams.get("target") ?? "").trim();
+  const target = (url.searchParams.get("target") ?? "").trim() || LAUNCHER;
   const commit = (url.searchParams.get("sourceCommit") ?? "").trim().toLowerCase();
   const notes = (url.searchParams.get("notes") ?? "").trim().slice(0, 2000);
-  if (!TARGET_PATTERN.test(target)) {
+  const testFlight = testFlightConfig()!;
+  if (app.slug !== testFlight.app || target !== LAUNCHER) {
     return yield* failNoStore(
       400,
-      "target must start with a letter and use lowercase letters, numbers, and hyphens",
+      `This Nap only publishes the launcher of ${testFlight.app}, to TestFlight. Add your app to that launcher and publish the launcher.`,
+      { code: "not_distributed" },
     );
   }
   const size = Number(request.headers.get("content-length"));
@@ -284,41 +264,13 @@ const publishBuild = Effect.fnUntraced(function* (
     return yield* failNoStore(411, "Send the zipped .app as the body, with a content-length");
   }
   if (size > MAX_APP_BYTES) return yield* failNoStore(413, "The app is larger than 95 MB");
-  const toTestFlight = isTestFlightTarget(app.slug, target);
-  if (!toTestFlight && !adHocEnabled()) {
-    const testFlight = testFlightConfig();
-    return yield* failNoStore(
-      400,
-      testFlight
-        ? `This Nap only publishes the launcher of ${testFlight.app}, to TestFlight. Add your prototype to that launcher (no "standalone") and publish the launcher.`
-        : "Apps have no way to be installed on this Nap. Ask the admin.",
-      { code: "not_distributed" },
-    );
-  }
   if (!(yield* SignerBinding)) {
     return yield* failNoStore(503, "The app signer is not set up", { code: "signer_unavailable" });
   }
   const db = yield* Database;
   const storage = yield* Storage;
 
-  // The target: new targets get their bundle id now, so a name cannot be taken twice.
   let targetRow = yield* getTarget(app.slug, target);
-  if (!targetRow) {
-    const bundleId = bundleIdFor(target);
-    const taken = yield* db.first<{ appSlug: string }>(
-      `SELECT app_slug AS appSlug FROM app_targets WHERE bundle_id = ?`,
-      bundleId,
-    );
-    if (taken) {
-      return yield* failNoStore(
-        409,
-        `The target name ${target} is used by the app ${taken.appSlug}. Pick another.`,
-        {
-          code: "target_taken",
-        },
-      );
-    }
-  }
   const live = targetRow?.liveBuild ? yield* getBuild(targetRow.liveBuild) : null;
   yield* checkRepoCommit(app.sourceRepo, commit, live?.sourceCommit ?? null);
 
@@ -327,29 +279,25 @@ const publishBuild = Effect.fnUntraced(function* (
       `INSERT INTO app_targets (app_slug, target, bundle_id) VALUES (?, ?, ?) ON CONFLICT DO NOTHING`,
       app.slug,
       target,
-      bundleIdFor(target),
+      testFlight.bundleId,
     );
     targetRow = yield* getTarget(app.slug, target);
-    if (!targetRow) {
-      return yield* failNoStore(409, `The target name ${target} is taken. Pick another.`);
-    }
+    if (!targetRow) return yield* failNoStore(500, "Could not add the launcher");
   }
 
-  // TestFlight build numbers must go above every build App Store Connect has, from any source.
-  if (toTestFlight) {
-    const latest = yield* latestTestFlightBuildNumber().pipe(
-      Effect.catchTag("AppleError", (error) =>
-        failNoStore(503, error.message, { code: "testflight_unavailable" }),
-      ),
-    );
-    yield* db.run(
-      `UPDATE app_targets SET next_build_number = MAX(next_build_number, ?)
-       WHERE app_slug = ? AND target = ?`,
-      latest + 1,
-      app.slug,
-      target,
-    );
-  }
+  // Build numbers must go above every build App Store Connect has, from any source.
+  const latest = yield* latestTestFlightBuildNumber().pipe(
+    Effect.catchTag("AppleError", (error) =>
+      failNoStore(503, error.message, { code: "testflight_unavailable" }),
+    ),
+  );
+  yield* db.run(
+    `UPDATE app_targets SET next_build_number = MAX(next_build_number, ?)
+     WHERE app_slug = ? AND target = ?`,
+    latest + 1,
+    app.slug,
+    target,
+  );
   const numbered = yield* db.first<{ buildNumber: number }>(
     `UPDATE app_targets SET next_build_number = next_build_number + 1
      WHERE app_slug = ? AND target = ? RETURNING next_build_number - 1 AS buildNumber`,
@@ -378,7 +326,6 @@ const publishBuild = Effect.fnUntraced(function* (
       .run("UPDATE app_builds SET status = 'failed', error = ? WHERE id = ?", error, id)
       .pipe(Effect.andThen(failNoStore(status, error, { code: "build_failed", buildId: id })));
 
-  // Keep the unsigned build: a new device means signing it again, not building it again.
   yield* storage.put(unsignedKey(app.slug, id), fixedLength(body, size), {
     httpMetadata: { contentType: "application/zip" },
   });
@@ -388,45 +335,27 @@ const publishBuild = Effect.fnUntraced(function* (
     AppleError: (error: AppleError) => failBuild(503, error.message),
   });
 
-  // TestFlight first: sign for the App Store and upload, so a build Apple refuses never goes live.
-  let testFlight: { key: string; upload: string } | null = null;
-  let storeSigned: Signed | null = null;
-  if (toTestFlight) {
-    const config = testFlightConfig()!;
-    storeSigned = yield* signBuild(app.slug, id, config.bundleId, buildNumber, "appstore").pipe(
-      catchSigning,
-    );
-    const upload = yield* uploadToTestFlight(
-      storeSigned.key,
-      storeSigned.shortVersion,
-      buildNumber,
-    ).pipe(
-      Effect.catchTag("AppleError", (error) =>
-        failBuild(502, `Uploading to TestFlight failed: ${error.message}`),
-      ),
-    );
-    testFlight = { key: storeSigned.key, upload };
-  }
-  const adHocSigned = adHocEnabled()
-    ? yield* signBuild(app.slug, id, targetRow.bundleId, buildNumber).pipe(catchSigning)
-    : null;
-  const signed = (adHocSigned ?? storeSigned)!;
+  // Sign for the App Store and upload before going live, so a build Apple refuses never does.
+  const signed = yield* signBuild(app.slug, id, testFlight.bundleId, buildNumber).pipe(
+    catchSigning,
+  );
+  const upload = yield* uploadToTestFlight(signed.key, signed.shortVersion, buildNumber).pipe(
+    Effect.catchTag("AppleError", (error) =>
+      failBuild(502, `Uploading to TestFlight failed: ${error.message}`),
+    ),
+  );
   yield* db.run(
     `UPDATE app_builds SET status = 'ready', app_name = ?, short_version = ?, xcode = ?,
-                           signed_bytes = ?, signed_key = ?, signed_profile = ?,
-                           testflight_state = ?, testflight_upload = ?, testflight_key = ?,
-                           testflight_checked_at = ?
+                           signed_bytes = ?, testflight_state = 'processing',
+                           testflight_upload = ?, testflight_key = ?, testflight_checked_at = ?
      WHERE id = ?`,
     signed.appName,
     signed.shortVersion,
     signed.xcode,
     signed.bytes,
-    adHocSigned?.key ?? null,
-    adHocSigned?.profileId ?? null,
-    testFlight ? "processing" : null,
-    testFlight?.upload ?? null,
-    testFlight?.key ?? null,
-    testFlight ? now() : null,
+    upload,
+    signed.key,
+    now(),
     id,
   );
 
@@ -463,11 +392,8 @@ const publishBuild = Effect.fnUntraced(function* (
 
   const page = `${url.origin}/apps`;
   const message = [
-    testFlight
-      ? `Build ${buildNumber} of ${target} is uploaded to TestFlight. Apple processes it for a few minutes; then testers install or update it in the TestFlight app. ${page} shows when it is ready.`
-      : `Build ${buildNumber} of ${target} is live.`,
-    adHocSigned ? `People with a registered iPhone install it from ${page} now.` : "",
-    capabilityNote(storeSigned ?? signed),
+    `Build ${buildNumber} of ${target} is uploaded to TestFlight. Apple processes it for a few minutes; then testers install or update it in the TestFlight app. ${page} shows when it is ready.`,
+    capabilityNote(signed),
   ]
     .filter(Boolean)
     .join(" ");
@@ -476,14 +402,14 @@ const publishBuild = Effect.fnUntraced(function* (
       ok: true,
       app: app.slug,
       target,
-      bundleId: toTestFlight ? testFlightConfig()!.bundleId : targetRow.bundleId,
+      bundleId: testFlight.bundleId,
       buildNumber,
       buildId: id,
       sourceCommit: commit,
       installPage: page,
-      testFlight: testFlight ? { state: "processing" } : null,
-      capabilities: storeSigned?.capabilities ?? [],
-      capabilityWarnings: (storeSigned ?? signed).capabilityWarnings,
+      testFlight: { state: "processing" },
+      capabilities: signed.capabilities,
+      capabilityWarnings: signed.capabilityWarnings,
       message,
     },
     { status: 201, headers: noStore },
@@ -496,7 +422,7 @@ function capabilityNote(signed: Signed) {
     warnings.map((warning) => `${slug}: ${warning}`),
   );
   return lines.length
-    ? `Capabilities the build does not get (the launcher shows these on the prototype): ${lines.join(" ")}`
+    ? `Capabilities the build does not get (the launcher shows these on the app): ${lines.join(" ")}`
     : "";
 }
 
@@ -508,13 +434,12 @@ class SignError extends Schema.TaggedError<SignError>()("SignError", {
 
 type Signed = Effect.Success<ReturnType<typeof signBuild>>;
 
-/** Signs a stored unsigned build, ad hoc or for the App Store, and stores the .ipa. */
+/** Signs a stored unsigned build for the App Store and stores the .ipa. */
 const signBuild = Effect.fnUntraced(function* (
   app: string,
   build: string,
   bundleId: string,
   buildNumber: number,
-  kind: Distribution = "adhoc",
 ) {
   const storage = yield* Storage;
   const unsigned = yield* storage.get(unsignedKey(app, build));
@@ -527,11 +452,11 @@ const signBuild = Effect.fnUntraced(function* (
   }
   // Capabilities first: turning one on makes a new App Store profile, which signing then uses.
   const requests = yield* inspectBuild(signer, unsigned.body, unsigned.size);
-  const capabilities = yield* grantCapabilities(requests, kind);
+  const capabilities = yield* grantCapabilities(requests);
   // App Store profiles change with capabilities, from any Nap that shares the App ID, and
   // publishes are rare: ask Apple each time.
-  const profile = yield* signingProfile(kind, { fresh: kind === "appstore" });
-  const key = signedKey(app, build, profile.id, kind);
+  const profile = yield* signingProfile({ fresh: true });
+  const key = signedKey(app, build, profile.id);
   const fresh = yield* storage.get(unsignedKey(app, build));
   if (!fresh) {
     return yield* new SignError({ message: "The unsigned build is missing", status: 500 });
@@ -546,7 +471,7 @@ const signBuild = Effect.fnUntraced(function* (
           "x-bundle-id": bundleId,
           "x-build-number": String(buildNumber),
           "x-profile": toBase64(profile.bytes),
-          "x-distribution": kind === "appstore" ? "app-store" : "ad-hoc",
+          "x-distribution": "app-store",
           "x-entitlement-keys": capabilities.entitlementKeys.join(","),
           ...(Object.keys(capabilities.warnings).length
             ? {
@@ -629,24 +554,17 @@ const inspectBuild = Effect.fnUntraced(function* (
   return readRequests(result.capabilities);
 });
 
-/**
- * Turns on what a build asks for and can have, and says what it cannot. Only the TestFlight App
- * ID gets capabilities: an ad hoc build is signed with a wildcard profile, which has none.
- */
-const grantCapabilities = Effect.fnUntraced(function* (
-  requests: CapabilityRequests,
-  kind: Distribution,
-) {
+/** Turns on what a build asks for and can have, for the App ID, and says what it cannot. */
+const grantCapabilities = Effect.fnUntraced(function* (requests: CapabilityRequests) {
   const allowed = napConfig.apps?.testFlight?.capabilities;
   const refuse = (name: AutomaticCapability) => {
-    if (kind === "adhoc") return "is not available in ad hoc builds, only in TestFlight";
     if (allowed && !allowed.includes(name)) {
       return "is not on this Nap's list of capabilities. Ask whoever runs Nap to add it";
     }
     return null;
   };
   const plan = planCapabilities(requests, refuse);
-  if (kind !== "appstore" || plan.granted.length === 0) return plan;
+  if (plan.granted.length === 0) return plan;
   const refused = yield* ensureCapabilities(
     plan.granted.map((name) => AUTOMATIC_CAPABILITIES[name].apple),
   );
@@ -658,42 +576,6 @@ const grantCapabilities = Effect.fnUntraced(function* (
     const apple = refused.get(AUTOMATIC_CAPABILITIES[name].apple);
     return apple ? `could not be turned on: ${apple}` : null;
   });
-});
-
-/**
- * Signs a build again when the profile changed since it was signed (a device was added), so
- * every registered iPhone can install it. Runs when someone asks to install the build.
- */
-export const ensureCurrentSignature = Effect.fn("ensureCurrentSignature")(function* (
-  build: BuildRow,
-) {
-  if (!adHocEnabled() || build.signedProfile === null) return;
-  const profile = yield* signingProfile();
-  if (build.signedProfile === profile.id) return;
-  const target = yield* getTarget(build.appSlug, build.target);
-  if (!target) return;
-  const signed = yield* signBuild(build.appSlug, build.id, target.bundleId, build.buildNumber);
-  const db = yield* Database;
-  yield* db.run(
-    "UPDATE app_builds SET signed_key = ?, signed_profile = ?, signed_bytes = ? WHERE id = ?",
-    signed.key,
-    signed.profileId,
-    signed.bytes,
-    build.id,
-  );
-});
-
-/** The live build of every target of every app. */
-export const liveBuilds = Effect.gen(function* () {
-  const db = yield* Database;
-  const results = yield* db.all<{ id: string }>(
-    `SELECT t.live_build AS id FROM app_targets t JOIN app_builds b ON b.id = t.live_build
-     WHERE b.signed_key IS NOT NULL`,
-  );
-  const builds = yield* Effect.forEach(results, (row) => getBuild(row.id), {
-    concurrency: "unbounded",
-  });
-  return builds.filter((build): build is BuildRow => build !== null);
 });
 
 /** A stream with a known length, which R2 and the container need. */
@@ -743,128 +625,6 @@ const refreshTestFlight = Effect.fnUntraced(function* (build: BuildRow) {
   return { ...build, testflightState: status.state, testflightError: error };
 });
 
-// ---- Installing ----
-
-/**
- * An install link for one build: an itms-services URL whose manifest and .ipa are under
- * /_nap/install/<token>/. Access bypasses that path; the token is the credential.
- */
-export const createInstallLink = Effect.fn("createInstallLink")(function* (
-  buildId: string,
-  email: string,
-  origin: string,
-) {
-  const db = yield* Database;
-  const token = randomString(32);
-  const expiresAt = new Date(Date.now() + INSTALL_LINK_SECONDS * 1000).toISOString();
-  yield* db.run(
-    "INSERT INTO app_install_links (token_hash, build_id, email, expires_at) VALUES (?, ?, ?, ?)",
-    yield* sha256Hex(token),
-    buildId,
-    email,
-    expiresAt,
-  );
-  yield* db.run("DELETE FROM app_install_links WHERE expires_at < ?", now());
-  const manifest = `${origin}${INSTALL_PREFIX}${token}/manifest.plist`;
-  return {
-    url: `itms-services://?action=download-manifest&url=${encodeURIComponent(manifest)}`,
-    expiresAt,
-  };
-});
-
-export const isInstallPath = (pathname: string) => pathname.startsWith(INSTALL_PREFIX);
-
-/**
- * GET /_nap/install/<token>/manifest.plist and /_nap/install/<token>/app.ipa, for the iOS
- * installer. Never uses getIdentity(): Access bypasses this path.
- */
-export const handleInstallRequest = Effect.fn("handleInstallRequest")(function* (request: Request) {
-  const url = new URL(request.url);
-  const match = url.pathname
-    .slice(INSTALL_PREFIX.length)
-    .match(/^([A-Za-z0-9_-]{43})\/(manifest\.plist|app\.ipa)$/);
-  if (!match || (request.method !== "GET" && request.method !== "HEAD")) {
-    return yield* failText(404, "Not found", noStore);
-  }
-  const [, token, file] = match;
-  const db = yield* Database;
-  const link = yield* db.first<{
-    id: string;
-    appSlug: string;
-    target: string;
-    buildNumber: number;
-    appName: string;
-    shortVersion: string;
-    signedBytes: number;
-    signedKey: string | null;
-    bundleId: string;
-    title: string;
-  }>(
-    `SELECT b.id, b.app_slug AS appSlug, b.target, b.build_number AS buildNumber,
-            b.app_name AS appName, b.short_version AS shortVersion, b.signed_bytes AS signedBytes,
-            b.signed_key AS signedKey,
-            t.bundle_id AS bundleId, t.title
-     FROM app_install_links l
-     JOIN app_builds b ON b.id = l.build_id
-     JOIN app_targets t ON t.app_slug = b.app_slug AND t.target = b.target
-     WHERE l.token_hash = ? AND l.expires_at > ? AND b.status = 'ready'
-       AND b.signed_key IS NOT NULL`,
-    yield* sha256Hex(token),
-    now(),
-  );
-  if (!link) return yield* failText(404, "This install link has expired. Open Nap again.", noStore);
-
-  if (file === "app.ipa") {
-    const storage = yield* Storage;
-    const object = yield* storage.get(link.signedKey ?? signedKey(link.appSlug, link.id));
-    if (!object) return yield* failText(404, "Not found", noStore);
-    return new Response(request.method === "HEAD" ? null : object.body, {
-      headers: {
-        "content-type": "application/octet-stream",
-        "content-length": String(object.size),
-        ...noStore,
-      },
-    });
-  }
-
-  const title = link.appName || link.title || link.target;
-  const manifest = `<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>items</key>
-  <array>
-    <dict>
-      <key>assets</key>
-      <array>
-        <dict>
-          <key>kind</key><string>software-package</string>
-          <key>url</key><string>${xml(`${url.origin}${INSTALL_PREFIX}${token}/app.ipa`)}</string>
-        </dict>
-      </array>
-      <key>metadata</key>
-      <dict>
-        <key>bundle-identifier</key><string>${xml(link.bundleId)}</string>
-        <key>bundle-version</key><string>${xml(link.shortVersion || "1.0")}</string>
-        <key>kind</key><string>software</string>
-        <key>title</key><string>${xml(title)}</string>
-      </dict>
-    </dict>
-  </array>
-</dict>
-</plist>
-`;
-  return new Response(manifest, {
-    headers: { "content-type": "application/xml; charset=utf-8", ...noStore },
-  });
-});
-
-const xml = (value: string) =>
-  value.replace(
-    /[<>&"']/g,
-    (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;", "'": "&apos;" })[c]!,
-  );
-
 // ---- Reading ----
 
 const getApp = Effect.fnUntraced(function* (slug: string) {
@@ -898,7 +658,7 @@ export const liveBuild = Effect.fn("liveBuild")(function* (app: string, target: 
 export const testFlightBuild = Effect.fn("testFlightBuild")(function* () {
   const testFlight = testFlightConfig();
   if (!testFlight) return null;
-  const build = yield* liveBuild(testFlight.app, "launcher");
+  const build = yield* liveBuild(testFlight.app, LAUNCHER);
   if (!build) return null;
   const fresh = yield* refreshTestFlight(build);
   return {
@@ -922,7 +682,6 @@ function describeBuild(build: BuildRow) {
     version: build.shortVersion,
     xcode: build.xcode,
     bytes: build.signedBytes,
-    adHoc: build.signedKey !== null,
     testFlight: build.testflightState
       ? { state: build.testflightState, error: build.testflightError }
       : null,
@@ -956,9 +715,7 @@ const describeApp = Effect.fnUntraced(function* (app: AppRow, _origin: string) {
     updatedAt: app.updatedAt,
     targets: targets.map((target, index) => ({
       target: target.target,
-      bundleId: isTestFlightTarget(app.slug, target.target)
-        ? testFlightConfig()!.bundleId
-        : target.bundleId,
+      bundleId: testFlightConfig()?.bundleId ?? target.bundleId,
       title: target.title || target.target,
       live: builds[index] ? describeBuild(builds[index]!) : null,
     })),
@@ -977,20 +734,6 @@ export const listApps = Effect.fn("listApps")(function* (origin: string) {
   return yield* Effect.forEach(results, (app) => describeApp(app, origin), {
     concurrency: "unbounded",
   });
-});
-
-/** For the dashboard: an install link for a target's live build. */
-export const installLiveBuild = Effect.fn("installLiveBuild")(function* (
-  email: string,
-  app: string,
-  target: string,
-  origin: string,
-) {
-  if (!adHocEnabled()) return null;
-  const live = yield* liveBuild(app, target);
-  if (!live || live.signedKey === null) return null;
-  yield* ensureCurrentSignature(live);
-  return yield* createInstallLink(live.id, email, origin);
 });
 
 /** An audit line for app events. Never logs tokens. */

@@ -145,37 +145,6 @@ export const ArtifactFrameAccess = Cloudflare.Access.Application(
   }),
 ).pipe(RemovalPolicy.retain());
 
-// App installs. The iOS installer downloads <root>/_nap/install/<token>/manifest.plist and
-// app.ipa itself, without the Access cookie. The dashboard makes the tokens for signed-in people;
-// they expire after an hour. The Worker checks the token on every request.
-export const AppInstallAccess = Cloudflare.Access.Application(
-  "AppInstallAccess",
-  Effect.gen(function* () {
-    return {
-      type: "self_hosted" as const,
-      name: "nap-app-installs",
-      domain: `${ROOT_DOMAIN}/_nap/install/*`,
-      policies: yield* bypassPolicies("nap-app-installs"),
-      appLauncherVisible: false,
-    };
-  }),
-).pipe(RemovalPolicy.retain());
-
-// iPhone enrollment. iOS posts a phone's UDID to <root>/_nap/enroll/<token> without the Access
-// cookie. The dashboard makes the single-use tokens for signed-in people; the Worker checks them.
-export const DeviceEnrollAccess = Cloudflare.Access.Application(
-  "DeviceEnrollAccess",
-  Effect.gen(function* () {
-    return {
-      type: "self_hosted" as const,
-      name: "nap-device-enrollment",
-      domain: `${ROOT_DOMAIN}/_nap/enroll/*`,
-      policies: yield* bypassPolicies("nap-device-enrollment"),
-      appLauncherVisible: false,
-    };
-  }),
-).pipe(RemovalPolicy.retain());
-
 export const DraftLimiter = Cloudflare.RateLimit("DRAFT_LIMITER", {
   namespaceId: 1001,
   simple: { limit: 20, period: 60 },
@@ -351,11 +320,6 @@ export default Alchemy.Stack(
       yield* DraftUploadAccess;
       yield* AgentApiAccess;
       yield* ArtifactFrameAccess;
-      // Ad hoc only: install links and iPhone enrollment. TestFlight needs no path without Access.
-      if (napConfig.apps?.profileName) {
-        yield* AppInstallAccess;
-        yield* DeviceEnrollAccess;
-      }
     }
     const worker = yield* NapWorker.pipe(RemovalPolicy.retain());
     const database = yield* Database;

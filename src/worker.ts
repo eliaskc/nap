@@ -8,8 +8,6 @@ import {
   isFramePath,
 } from "~/lib/artifact-viewer";
 import { handleCreateDraft } from "~/lib/drafts";
-import { handleInstallRequest, isInstallPath } from "~/lib/apps";
-import { handleEnrollRequest, isEnrollPath } from "~/lib/devices";
 import { ensureProfile, getIdentity } from "~/lib/nap-server";
 import { serveToolbarScript, serveViewerScript } from "~/lib/nap-toolbar";
 import { ARTIFACT_PATH, type NapPlace } from "~/lib/nap-urls";
@@ -89,7 +87,7 @@ const routeRequest = Effect.fn("routeRequest")(function* (
 
   // Access bypasses these paths on the dashboard host. None may use getIdentity().
   // Draft uploads need no login. The agent API checks its own tokens. Artifact frames check
-  // their frame tokens. App installs and iPhone enrollments check their tokens.
+  // their frame tokens.
   if (target.type === "dashboard" && url.pathname === "/_nap/drafts") {
     return yield* handleCreateDraft(request);
   }
@@ -101,16 +99,6 @@ const routeRequest = Effect.fn("routeRequest")(function* (
   }
   if (target.type === "dashboard" && isFramePath(url.pathname)) {
     return yield* handleFrameRequest(request);
-  }
-  // App installs: the iOS installer fetches the manifest and the .ipa without the Access
-  // cookie. The install token in the path is the credential.
-  if (target.type === "dashboard" && isInstallPath(url.pathname)) {
-    return yield* handleInstallRequest(request);
-  }
-  // iPhone enrollment: iOS posts the device attributes without the Access cookie. The
-  // enrollment token in the path is the credential.
-  if (target.type === "dashboard" && isEnrollPath(url.pathname)) {
-    return yield* handleEnrollRequest(request);
   }
 
   // Artifacts: <root>/artifact/<slug>, a sandboxed frame below the Nap bar.

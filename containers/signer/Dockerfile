@@ -1,4 +1,4 @@
-# Nap's app signer: signs unsigned iOS builds with the ad hoc certificate and profile.
+# Nap's app signer: signs unsigned iOS builds with the distribution certificate and App Store profile.
 # rcodesign is a Rust implementation of Apple code signing that runs on Linux.
 FROM python:3.13-alpine
 ARG RCODESIGN_VERSION=0.29.0

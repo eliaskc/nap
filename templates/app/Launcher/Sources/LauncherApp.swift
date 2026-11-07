@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// The launcher: every prototype in Prototypes/, newest first in the order of the registry.
-/// Prototypes open full screen. Tap the close button in the top corner to come back.
+/// The launcher: every app in Apps/, in the order of the registry.
+/// Apps open full screen. Tap the close button in the top corner to come back.
 @main
 struct LauncherApp: App {
   var body: some Scene {
@@ -9,7 +9,7 @@ struct LauncherApp: App {
   }
 }
 
-struct PrototypeEntry: Identifiable {
+struct AppEntry: Identifiable {
   let slug: String
   let title: String
   let summary: String
@@ -17,8 +17,8 @@ struct PrototypeEntry: Identifiable {
   var id: String { slug }
 }
 
-/// Capabilities a prototype asked for in prototype.json and this build does not have, by
-/// prototype. Nap writes them into Info.plist when it signs.
+/// Capabilities an app asked for in app.json and this build does not have, by app. Nap writes
+/// them into Info.plist when it signs.
 enum CapabilityWarnings {
   static let all = Bundle.main.object(forInfoDictionaryKey: "NapCapabilityWarnings")
     as? [String: [String]] ?? [:]
@@ -40,20 +40,20 @@ struct CapabilityWarningList: View {
 }
 
 struct LauncherView: View {
-  @State private var open: PrototypeEntry?
+  @State private var open: AppEntry?
 
   var body: some View {
     NavigationStack {
-      List(Registry.prototypes) { prototype in
+      List(Registry.apps) { app in
         Button {
-          open = prototype
+          open = app
         } label: {
           VStack(alignment: .leading, spacing: 4) {
-            Text(prototype.title).font(.headline)
-            if !prototype.summary.isEmpty {
-              Text(prototype.summary).font(.subheadline).foregroundStyle(.secondary)
+            Text(app.title).font(.headline)
+            if !app.summary.isEmpty {
+              Text(app.summary).font(.subheadline).foregroundStyle(.secondary)
             }
-            let warnings = CapabilityWarnings.of(prototype.slug)
+            let warnings = CapabilityWarnings.of(app.slug)
             if !warnings.isEmpty {
               CapabilityWarningList(warnings: warnings)
             }
@@ -61,7 +61,7 @@ struct LauncherView: View {
         }
         .foregroundStyle(.primary)
       }
-      .navigationTitle("Nap")
+      .navigationTitle(Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String ?? "Nap")
       .safeAreaInset(edge: .bottom) {
         Text("Build \(Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?")")
           .font(.footnote)
@@ -69,10 +69,10 @@ struct LauncherView: View {
           .padding(.bottom, 8)
       }
     }
-    .fullScreenCover(item: $open) { prototype in
-      prototype.view()
+    .fullScreenCover(item: $open) { app in
+      app.view()
         .safeAreaInset(edge: .bottom) {
-          let warnings = CapabilityWarnings.of(prototype.slug)
+          let warnings = CapabilityWarnings.of(app.slug)
           if !warnings.isEmpty {
             CapabilityWarningList(warnings: warnings)
               .padding(10)
@@ -91,8 +91,14 @@ struct LauncherView: View {
               .foregroundStyle(.secondary)
               .padding()
           }
-          .accessibilityLabel("Close prototype")
+          .accessibilityLabel("Close app")
         }
+    }
+    // Testing: `-open <slug>` opens an app at launch.
+    .onAppear {
+      if open == nil, let slug = UserDefaults.standard.string(forKey: "open") {
+        open = Registry.apps.first { $0.slug == slug }
+      }
     }
   }
 }

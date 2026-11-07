@@ -1,7 +1,7 @@
 import { napConfig } from "~/nap.config";
 
 /**
- * The starting point of an app's source repo: a Tuist project with a launcher and one prototype.
+ * The starting point of an app's source repo: a Tuist project with a launcher and one app in it.
  * The files are in templates/app and bundled into the Worker. `node publish.mjs app init` writes
  * them, fills in the placeholders, and pushes the first commit.
  */

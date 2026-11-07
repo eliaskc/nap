@@ -13,7 +13,10 @@ const config = (overrides = {}) => ({
   orgName: "Example",
   defaultAccess: "private",
   admin: "the admin",
-  apps: { teamId: "T", bundleIdPrefix: "com.example", profileName: "P" },
+  apps: {
+    teamId: "T",
+    testFlight: { appStoreId: "1", bundleId: "com.example.nap", profileName: "S", app: "nap" },
+  },
   ...overrides,
 });
 const indexTopics = (text) => [...text.matchAll(/^- `([a-z]+)`:/gm)].map((match) => match[1]);
@@ -57,23 +60,10 @@ test("every page fills in the deployment and leaves no markers", () => {
   }
 });
 
-test("the apps topic follows how people install: ad hoc, TestFlight, or both", () => {
-  const testFlight = { appStoreId: "1", bundleId: "com.example.nap", profileName: "S", app: "nap" };
-  const adHocOnly = renderInstructions(read("apps"), config());
-  assert.match(adHocOnly, /iPhone registered with Nap/);
-  assert.match(adHocOnly, /app init/);
-  assert.doesNotMatch(adHocOnly, /TestFlight app/);
-
-  const testFlightOnly = renderInstructions(
-    read("apps"),
-    config({ apps: { teamId: "T", bundleIdPrefix: "com.example", testFlight } }),
-  );
-  assert.match(testFlightOnly, /launcher of the app `nap` from TestFlight/);
-  assert.doesNotMatch(testFlightOnly, /iPhone registered with Nap/);
-  assert.doesNotMatch(testFlightOnly, /app init/);
-  assert.doesNotMatch(testFlightOnly, /\{\{/);
-
-  const both = renderInstructions(read("apps"), config({ apps: { ...config().apps, testFlight } }));
-  assert.match(both, /from TestFlight/);
-  assert.match(both, /iPhone registered with Nap/);
+test("the apps topic names the one app, which goes to TestFlight", () => {
+  const text = renderInstructions(read("apps"), config());
+  assert.match(text, /one iOS app on Nap, `nap`/);
+  assert.match(text, /app clone nap/);
+  assert.doesNotMatch(text, /\{\{/);
+  assert.doesNotMatch(text, /ad hoc|standalone|prototype/i);
 });

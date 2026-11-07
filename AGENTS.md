@@ -13,7 +13,7 @@ Nap is a TanStack Start app on Cloudflare Workers. It provides a private dashboa
 - Runtime: Cloudflare Workers
 - UI: React, Tailwind CSS v4, shadcn/ui with Base UI
 - Infrastructure: `alchemy.run.ts`, with pinned Alchemy and Effect versions
-- Bindings: `DB` = D1, `SITES` = R2, `LIVE` = Durable Object for live collection updates, `CHANNELS` = Durable Object per multiplayer channel, `SOURCES` = Cloudflare Artifacts namespace with one Git repo per site that keeps its source in Nap (sites with a build step; never artifacts) and one per app, `SIGNER` = Cloudflare Container (`containers/signer`) that signs iOS builds, inferred from `NapWorker`
+- Bindings: `DB` = D1, `SITES` = R2, `LIVE` = Durable Object for live collection updates, `CHANNELS` = Durable Object per multiplayer channel, `SOURCES` = Cloudflare Artifacts namespace with one Git repo per site that keeps its source in Nap (sites with a build step; never artifacts) and one per app, `SIGNER` = Cloudflare Container (`containers/signer`) that signs iOS builds for TestFlight, inferred from `NapWorker`
 
 ## Rules
 
@@ -38,7 +38,7 @@ workersDev: { enabled: false, previewsEnabled: false }
 Temporary testing may enable them, but revert before deploying.
 
 - Nap has no Wrangler config. Production deployment and D1 migration history belong to Alchemy; local dev and the HTTP tests run `local*` Alchemy stages. Read the infrastructure section in `README.md` before changes to production resources. Preserve the live database and bucket; review the plan for replacements.
-- Code on Access-bypassed paths (`/_nap/drafts`, `/_nap/api/*`, `/_nap/frame/*`, `/_nap/install/*`, `/_nap/enroll/*`) must never call `getIdentity()` or `ensureProfile()`.
+- Code on Access-bypassed paths (`/_nap/drafts`, `/_nap/api/*`, `/_nap/frame/*`) must never call `getIdentity()` or `ensureProfile()`.
 
 ## Server code (Effect)
 
@@ -105,7 +105,6 @@ pnpm run build
 pnpm test
 pnpm test:http
 pnpm test:apps
-pnpm test:testflight
 pnpm infra:inventory
 pnpm plan
 pnpm run deploy

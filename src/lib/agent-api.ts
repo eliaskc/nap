@@ -156,7 +156,7 @@ export const handleAgentApi = Effect.fn("handleAgentApi")(function* (request: Re
     return json({ ok: true, ...publishedBody(nap, napUrl) }, { status: 201, headers: noStore });
   }
 
-  // Native apps: source repos, unsigned builds that Nap signs, install links. See apps.ts.
+  // Native apps: the source repo, and unsigned builds that Nap signs for TestFlight. See apps.ts.
   if (path === "/apps" || path.startsWith("/apps/")) {
     if (path.match(/^\/apps\/[^/]+\/builds$/) && method === "POST") yield* limitUploads(agent);
     return yield* handleAppsApi(request, url, agent, path.slice("/apps".length));

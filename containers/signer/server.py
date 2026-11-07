@@ -3,13 +3,13 @@ Nap's app signer. POST /sign signs a build; POST /inspect reads what a build ask
 
 Body: a zip of an unsigned iOS .app (built with CODE_SIGNING_ALLOWED=NO).
 Headers:
-  x-bundle-id      the bundle id Nap assigns, e.g. com.example.nap.launcher
+  x-bundle-id      the bundle id of the app record, e.g. com.example.nap
   x-build-number   CFBundleVersion, assigned by Nap
-  x-profile        the provisioning profile, base64
-  x-distribution   "ad-hoc" (default) or "app-store", for TestFlight
-  x-entitlement-keys  App Store only: entitlements beyond the basic ones to take from the profile,
+  x-profile        the App Store provisioning profile, base64
+  x-distribution   "app-store" (the only kind: builds go to TestFlight)
+  x-entitlement-keys  entitlements beyond the basic ones to take from the profile,
                    comma-separated (those of the capabilities Nap turned on)
-  x-warnings       optional, base64 JSON {prototype slug: [sentence]}: capabilities the build
+  x-warnings       optional, base64 JSON {app slug: [sentence]}: capabilities the build
                    asked for and does not get. Written into Info.plist as NapCapabilityWarnings.
 Environment:
   SIGNING_PEM      the distribution private key and certificate, PEM
@@ -155,7 +155,7 @@ def sign(
     bundle_id: str,
     build_number: str,
     profile_bytes: bytes,
-    distribution: str = "ad-hoc",
+    distribution: str = "app-store",
     extra_keys: list = (),
     warnings: dict = None,
 ):
@@ -166,7 +166,7 @@ def sign(
         raise BuildError("Bad bundle id")
     if not build_number.isdigit():
         raise BuildError("Bad build number")
-    if distribution not in ("ad-hoc", "app-store"):
+    if distribution != "app-store":
         raise BuildError("Bad distribution")
 
     profile = read_profile(profile_bytes)
@@ -179,10 +179,9 @@ def sign(
         raise BuildError("The provisioning profile has expired")
     entitlements["application-identifier"] = app_id
     entitlements["get-task-allow"] = False
-    if distribution == "app-store":
-        if "beta-reports-active" not in entitlements:
-            raise BuildError("The profile is not an App Store profile")
-        entitlements = app_store_entitlements(entitlements, list(extra_keys))
+    if "beta-reports-active" not in entitlements:
+        raise BuildError("The profile is not an App Store profile")
+    entitlements = app_store_entitlements(entitlements, list(extra_keys))
 
     work = tempfile.mkdtemp()
     try:
@@ -195,7 +194,7 @@ def sign(
         if not info.get("CFBundleExecutable") or not os.path.isfile(executable):
             raise BuildError("The app's executable is missing")
         check_executable(executable)
-        if distribution == "app-store" and not info.get("CFBundleIcons", {}).get(
+        if not info.get("CFBundleIcons", {}).get(
             "CFBundlePrimaryIcon", {}
         ).get("CFBundleIconName"):
             raise BuildError(
@@ -290,7 +289,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.headers.get("x-bundle-id", ""),
                 self.headers.get("x-build-number", ""),
                 profile,
-                self.headers.get("x-distribution", "") or "ad-hoc",
+                self.headers.get("x-distribution", "") or "app-store",
                 [key for key in keys.split(",") if key],
                 warnings,
             )

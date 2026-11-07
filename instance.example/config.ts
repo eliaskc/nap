@@ -5,6 +5,7 @@ export const napConfig: NapConfig = {
   orgName: "Example",
   defaultAccess: "private",
   admin: "the Nap admin",
-  // Native iOS apps: { teamId, bundleIdPrefix, profileName }, or null to turn them off.
+  // Native iOS apps through TestFlight: { teamId, testFlight: { appStoreId, bundleId, profileName,
+  // app } }, or null to turn them off.
   apps: null,
 };

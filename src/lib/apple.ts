@@ -7,14 +7,14 @@ import { Storage, tryStorage } from "~/server/storage";
 /**
  * Apple's side of apps: the App Store Connect API, the provisioning profiles, and TestFlight.
  *
- * Nap signs with one Apple Distribution certificate. Ad hoc builds use a profile for a wildcard
- * App ID (<bundleIdPrefix>.*) that lists the devices that may install. TestFlight builds use an
- * App Store profile for the app record's explicit bundle id, and Nap uploads them with the build
- * upload API. Nap reads profiles by name through the App Store Connect API and keeps a copy in
- * R2, so signing does not call Apple.
+ * Nap signs with one Apple Distribution certificate and an App Store profile for the app record's
+ * explicit bundle id, and uploads builds with the build upload API. Nap reads the profile by name
+ * through the App Store Connect API and keeps a copy in R2. The App ID, the profile, and the app
+ * record are made by hand; Nap only remakes the profile when it turns a capability on.
  */
 
-const PROFILE_KEY = "apps/_signing/adhoc.mobileprovision";
+const PROFILE_KEY = "apps/_signing/appstore.mobileprovision";
+const PROFILE_TYPE = "IOS_APP_STORE";
 const API = "https://api.appstoreconnect.apple.com/v1";
 
 export class AppleError extends Schema.TaggedError<AppleError>()("AppleError", {
@@ -85,77 +85,51 @@ type ProfileList = {
 
 export type SigningProfile = { id: string; bytes: Uint8Array };
 
+const profileName = Effect.suspend(() => {
+  const name = napConfig.apps?.testFlight.profileName;
+  return name
+    ? Effect.succeed(name)
+    : Effect.fail(new AppleError({ message: "Apps are off on this Nap" }));
+});
+
 /**
- * The two ways Nap signs: "adhoc" for every target, installed from /apps on registered iPhones,
- * and "appstore" for the TestFlight launcher, uploaded to App Store Connect.
+ * The App Store profile with the configured name: the active one, else one Apple made invalid (it
+ * does when a capability of the App ID changes), which only regenerating fixes.
  */
-export type Distribution = "adhoc" | "appstore";
-
-const PROFILES = {
-  adhoc: { type: "IOS_APP_ADHOC", key: PROFILE_KEY, label: "ad hoc" },
-  appstore: {
-    type: "IOS_APP_STORE",
-    key: "apps/_signing/appstore.mobileprovision",
-    label: "App Store",
-  },
-} as const;
-
-const profileName = (kind: Distribution) =>
-  Effect.suspend(() => {
-    const name =
-      kind === "adhoc" ? napConfig.apps?.profileName : napConfig.apps?.testFlight?.profileName;
-    return name
-      ? Effect.succeed(name)
-      : Effect.fail(
-          new AppleError({
-            message:
-              kind === "adhoc"
-                ? "Ad hoc installs are off on this Nap"
-                : "TestFlight is off on this Nap",
-          }),
-        );
-  });
-
-/** The active profile of a kind with Nap's profile name, from Apple. */
-/**
- * The profile with the configured name: the active one, else one Apple made invalid (it does
- * when a capability of the App ID changes), which only regenerating fixes.
- */
-const namedProfile = Effect.fnUntraced(function* (kind: Distribution) {
-  const name = yield* profileName(kind);
+const namedProfile = Effect.fnUntraced(function* () {
+  const name = yield* profileName;
   const list = yield* appStoreConnect<ProfileList>(
-    `profiles?filter[name]=${encodeURIComponent(name)}&filter[profileType]=${PROFILES[kind].type}&limit=10`,
+    `profiles?filter[name]=${encodeURIComponent(name)}&filter[profileType]=${PROFILE_TYPE}&limit=10`,
   );
   const named = list.data.filter((item) => item.attributes.name === name);
   return named.find((item) => item.attributes.profileState === "ACTIVE") ?? named[0] ?? null;
 });
 
-const storeProfile = Effect.fnUntraced(function* (kind: Distribution, id: string, content: string) {
+const storeProfile = Effect.fnUntraced(function* (id: string, content: string) {
   const storage = yield* Storage;
   const bytes = Uint8Array.from(atob(content), (c) => c.charCodeAt(0));
-  yield* storage.put(PROFILES[kind].key, bytes, {
+  yield* storage.put(PROFILE_KEY, bytes, {
     customMetadata: { profileId: id, fetchedAt: new Date().toISOString() },
   });
   const profile: SigningProfile = { id, bytes };
   return profile;
 });
 
-const missingProfile = (kind: Distribution) =>
-  Effect.gen(function* () {
-    return yield* new AppleError({
-      message: `No active ${PROFILES[kind].label} profile named "${yield* profileName(kind)}"`,
-    });
+const missingProfile = Effect.gen(function* () {
+  return yield* new AppleError({
+    message: `No App Store profile named "${yield* profileName}". Make it in the developer account.`,
   });
+});
 
-/** Fetches a profile from Apple by name and stores it in R2. */
-export const refreshProfile = Effect.fn("refreshProfile")(function* (kind: Distribution = "adhoc") {
-  const profile = yield* namedProfile(kind);
-  if (!profile) return yield* missingProfile(kind);
+/** Fetches the profile from Apple by name and stores it in R2. */
+export const refreshProfile = Effect.fn("refreshProfile")(function* () {
+  const profile = yield* namedProfile();
+  if (!profile) return yield* missingProfile;
   if (profile.attributes.profileState !== "ACTIVE") {
-    yield* Effect.logInfo("Profile invalid, regenerating").pipe(Effect.annotateLogs({ kind }));
-    return yield* regenerateProfile(kind);
+    yield* Effect.logInfo("Profile invalid, regenerating");
+    return yield* regenerateProfile();
   }
-  return yield* storeProfile(kind, profile.id, profile.attributes.profileContent);
+  return yield* storeProfile(profile.id, profile.attributes.profileContent);
 });
 
 /** How long the copy in R2 is trusted before Nap asks Apple again. */
@@ -165,12 +139,11 @@ const PROFILE_TTL_MS = 60 * 60 * 1000;
  * The profile to sign with: the copy in R2 when it is under an hour old, else Apple's. If Apple
  * cannot be reached, the copy is still used.
  */
-export const signingProfile = Effect.fn("signingProfile")(function* (
-  kind: Distribution = "adhoc",
-  { fresh = false }: { fresh?: boolean } = {},
-) {
+export const signingProfile = Effect.fn("signingProfile")(function* ({
+  fresh = false,
+}: { fresh?: boolean } = {}) {
   const storage = yield* Storage;
-  const stored = yield* storage.get(PROFILES[kind].key);
+  const stored = yield* storage.get(PROFILE_KEY);
   const id = stored?.customMetadata?.profileId;
   const fetchedAt = Date.parse(stored?.customMetadata?.fetchedAt ?? "");
   if (stored && id) {
@@ -180,61 +153,22 @@ export const signingProfile = Effect.fn("signingProfile")(function* (
     };
     if (!fresh && Date.now() - fetchedAt < PROFILE_TTL_MS) return copy;
     // Any failure, expected or not, falls back to the copy.
-    return yield* refreshProfile(kind).pipe(Effect.catchCause(() => Effect.succeed(copy)));
+    return yield* refreshProfile().pipe(Effect.catchCause(() => Effect.succeed(copy)));
   }
-  return yield* refreshProfile(kind);
-});
-
-type DeviceList = {
-  data: Array<{ id: string; attributes: { udid: string; status: string; name: string } }>;
-};
-
-/**
- * Registers an iPhone with the Apple team (or enables it again) and returns Apple's device id.
- * Apple counts each registration against the team's 100 iPhones a year.
- */
-export const registerDevice = Effect.fn("registerDevice")(function* (udid: string, name: string) {
-  const found = yield* appStoreConnect<DeviceList>(
-    `devices?filter[udid]=${encodeURIComponent(udid)}&limit=5`,
-  );
-  const existing = found.data.find((device) => device.attributes.udid === udid);
-  if (existing) {
-    if (existing.attributes.status !== "ENABLED") {
-      yield* appStoreConnect(`devices/${existing.id}`, {
-        method: "PATCH",
-        body: { data: { type: "devices", id: existing.id, attributes: { status: "ENABLED" } } },
-      });
-    }
-    return existing.id;
-  }
-  const created = yield* appStoreConnect<{ data: { id: string } }>("devices", {
-    method: "POST",
-    body: {
-      data: { type: "devices", attributes: { name: name.slice(0, 50), udid, platform: "IOS" } },
-    },
-  });
-  return created.data.id;
+  return yield* refreshProfile();
 });
 
 /**
- * Replaces a profile with a new one with the same name, App ID, and certificates: Apple profiles
- * cannot be edited. An ad hoc profile then lists every enabled iPhone of the team; an App Store
- * profile picks up the App ID's capabilities.
+ * Replaces the profile with a new one with the same name, App ID, and certificates, so it picks up
+ * the App ID's capabilities: Apple profiles cannot be edited.
  */
-export const regenerateProfile = Effect.fn("regenerateProfile")(function* (
-  kind: Distribution = "adhoc",
-) {
-  const old = yield* namedProfile(kind);
-  if (!old) return yield* missingProfile(kind);
-  const [bundle, certificates, devices] = yield* Effect.all(
+export const regenerateProfile = Effect.fn("regenerateProfile")(function* () {
+  const old = yield* namedProfile();
+  if (!old) return yield* missingProfile;
+  const [bundle, certificates] = yield* Effect.all(
     [
       appStoreConnect<{ data: { id: string } }>(`profiles/${old.id}/bundleId`),
       appStoreConnect<{ data: Array<{ id: string }> }>(`profiles/${old.id}/certificates`),
-      kind === "adhoc"
-        ? appStoreConnect<DeviceList>(
-            "devices?filter[status]=ENABLED&filter[platform]=IOS&limit=200",
-          )
-        : Effect.succeed(null),
     ],
     { concurrency: "unbounded" },
   );
@@ -244,20 +178,17 @@ export const regenerateProfile = Effect.fn("regenerateProfile")(function* (
     body: {
       data: {
         type: "profiles",
-        attributes: { name: yield* profileName(kind), profileType: PROFILES[kind].type },
+        attributes: { name: yield* profileName, profileType: PROFILE_TYPE },
         relationships: {
           bundleId: { data: { type: "bundleIds", id: bundle.data.id } },
           certificates: {
             data: certificates.data.map((item) => ({ type: "certificates", id: item.id })),
           },
-          ...(devices
-            ? { devices: { data: devices.data.map((item) => ({ type: "devices", id: item.id })) } }
-            : {}),
         },
       },
     },
   });
-  return yield* storeProfile(kind, created.data.id, created.data.attributes.profileContent);
+  return yield* storeProfile(created.data.id, created.data.attributes.profileContent);
 });
 
 // ---- TestFlight ----
@@ -266,7 +197,7 @@ const testFlightApp = Effect.suspend(() => {
   const testFlight = napConfig.apps?.testFlight;
   return testFlight
     ? Effect.succeed(testFlight)
-    : Effect.fail(new AppleError({ message: "TestFlight is off on this Nap" }));
+    : Effect.fail(new AppleError({ message: "Apps are off on this Nap" }));
 });
 
 type VersionList = { data: Array<{ attributes: { version?: string; cfBundleVersion?: string } }> };
@@ -448,7 +379,7 @@ export const ensureCapabilities = Effect.fn("ensureCapabilities")(function* (
       );
     }
   }
-  if (changed) yield* regenerateProfile("appstore");
+  if (changed) yield* regenerateProfile();
   return refused;
 });
 
@@ -516,11 +447,6 @@ export const buildUploadStatus = Effect.fn("buildUploadStatus")(function* (uploa
       return { state: "processing" } as TestFlightStatus;
   }
 });
-
-/** The bundle id of a target. Only called where apps are on (the apps API checks first). */
-export function bundleIdFor(target: string) {
-  return `${napConfig.apps?.bundleIdPrefix ?? "nap"}.${target}`;
-}
 
 export function toBase64(bytes: Uint8Array) {
   let binary = "";

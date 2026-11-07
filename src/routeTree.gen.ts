@@ -25,13 +25,11 @@ import { Route as ApiSitesRouteImport } from './routes/api/sites'
 import { Route as ApiProfileRouteImport } from './routes/api/profile'
 import { Route as ApiPeopleRouteImport } from './routes/api/people'
 import { Route as ApiMeRouteImport } from './routes/api/me'
-import { Route as ApiDevicesRouteImport } from './routes/api/devices'
 import { Route as ApiAppsRouteImport } from './routes/api/apps'
 import { Route as SSlugSplatRouteImport } from './routes/s.$slug.$'
 import { Route as ApiTokensIdRouteImport } from './routes/api/tokens.$id'
 import { Route as ApiSitesSlugRouteImport } from './routes/api/sites.$slug'
 import { Route as ApiDraftsIdRouteImport } from './routes/api/drafts.$id'
-import { Route as ApiDevicesProfileRouteImport } from './routes/api/devices.profile'
 import { Route as ApiConnectCodeRouteImport } from './routes/api/connect.$code'
 import { Route as ApiUploadsIdCommitRouteImport } from './routes/api/uploads.$id.commit'
 import { Route as ApiSitesSlugVersionsRouteImport } from './routes/api/sites.$slug.versions'
@@ -39,7 +37,6 @@ import { Route as ApiSitesSlugSettingsRouteImport } from './routes/api/sites.$sl
 import { Route as ApiSitesSlugOwnerRouteImport } from './routes/api/sites.$slug.owner'
 import { Route as ApiSitesSlugAccessRouteImport } from './routes/api/sites.$slug.access'
 import { Route as ApiDraftsIdPreviewSplatRouteImport } from './routes/api/drafts.$id.preview.$'
-import { Route as ApiAppsAppTargetInstallRouteImport } from './routes/api/apps.$app.$target.install'
 
 const WelcomeRoute = WelcomeRouteImport.update({
   id: '/welcome',
@@ -121,11 +118,6 @@ const ApiMeRoute = ApiMeRouteImport.update({
   path: '/api/me',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ApiDevicesRoute = ApiDevicesRouteImport.update({
-  id: '/api/devices',
-  path: '/api/devices',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const ApiAppsRoute = ApiAppsRouteImport.update({
   id: '/api/apps',
   path: '/api/apps',
@@ -150,11 +142,6 @@ const ApiDraftsIdRoute = ApiDraftsIdRouteImport.update({
   id: '/api/drafts/$id',
   path: '/api/drafts/$id',
   getParentRoute: () => rootRouteImport,
-} as any)
-const ApiDevicesProfileRoute = ApiDevicesProfileRouteImport.update({
-  id: '/profile',
-  path: '/profile',
-  getParentRoute: () => ApiDevicesRoute,
 } as any)
 const ApiConnectCodeRoute = ApiConnectCodeRouteImport.update({
   id: '/api/connect/$code',
@@ -191,11 +178,6 @@ const ApiDraftsIdPreviewSplatRoute = ApiDraftsIdPreviewSplatRouteImport.update({
   path: '/preview/$',
   getParentRoute: () => ApiDraftsIdRoute,
 } as any)
-const ApiAppsAppTargetInstallRoute = ApiAppsAppTargetInstallRouteImport.update({
-  id: '/$app/$target/install',
-  path: '/$app/$target/install',
-  getParentRoute: () => ApiAppsRoute,
-} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -204,8 +186,7 @@ export interface FileRoutesByFullPath {
   '/connect': typeof ConnectRoute
   '/install': typeof InstallRoute
   '/welcome': typeof WelcomeRoute
-  '/api/apps': typeof ApiAppsRouteWithChildren
-  '/api/devices': typeof ApiDevicesRouteWithChildren
+  '/api/apps': typeof ApiAppsRoute
   '/api/me': typeof ApiMeRoute
   '/api/people': typeof ApiPeopleRoute
   '/api/profile': typeof ApiProfileRoute
@@ -217,7 +198,6 @@ export interface FileRoutesByFullPath {
   '/claim/$id': typeof ClaimIdRoute
   '/dev/claim': typeof DevClaimRoute
   '/api/connect/$code': typeof ApiConnectCodeRoute
-  '/api/devices/profile': typeof ApiDevicesProfileRoute
   '/api/drafts/$id': typeof ApiDraftsIdRouteWithChildren
   '/api/sites/$slug': typeof ApiSitesSlugRouteWithChildren
   '/api/tokens/$id': typeof ApiTokensIdRoute
@@ -227,7 +207,6 @@ export interface FileRoutesByFullPath {
   '/api/sites/$slug/settings': typeof ApiSitesSlugSettingsRoute
   '/api/sites/$slug/versions': typeof ApiSitesSlugVersionsRoute
   '/api/uploads/$id/commit': typeof ApiUploadsIdCommitRoute
-  '/api/apps/$app/$target/install': typeof ApiAppsAppTargetInstallRoute
   '/api/drafts/$id/preview/$': typeof ApiDraftsIdPreviewSplatRoute
 }
 export interface FileRoutesByTo {
@@ -237,8 +216,7 @@ export interface FileRoutesByTo {
   '/connect': typeof ConnectRoute
   '/install': typeof InstallRoute
   '/welcome': typeof WelcomeRoute
-  '/api/apps': typeof ApiAppsRouteWithChildren
-  '/api/devices': typeof ApiDevicesRouteWithChildren
+  '/api/apps': typeof ApiAppsRoute
   '/api/me': typeof ApiMeRoute
   '/api/people': typeof ApiPeopleRoute
   '/api/profile': typeof ApiProfileRoute
@@ -250,7 +228,6 @@ export interface FileRoutesByTo {
   '/claim/$id': typeof ClaimIdRoute
   '/dev/claim': typeof DevClaimRoute
   '/api/connect/$code': typeof ApiConnectCodeRoute
-  '/api/devices/profile': typeof ApiDevicesProfileRoute
   '/api/drafts/$id': typeof ApiDraftsIdRouteWithChildren
   '/api/sites/$slug': typeof ApiSitesSlugRouteWithChildren
   '/api/tokens/$id': typeof ApiTokensIdRoute
@@ -260,7 +237,6 @@ export interface FileRoutesByTo {
   '/api/sites/$slug/settings': typeof ApiSitesSlugSettingsRoute
   '/api/sites/$slug/versions': typeof ApiSitesSlugVersionsRoute
   '/api/uploads/$id/commit': typeof ApiUploadsIdCommitRoute
-  '/api/apps/$app/$target/install': typeof ApiAppsAppTargetInstallRoute
   '/api/drafts/$id/preview/$': typeof ApiDraftsIdPreviewSplatRoute
 }
 export interface FileRoutesById {
@@ -271,8 +247,7 @@ export interface FileRoutesById {
   '/connect': typeof ConnectRoute
   '/install': typeof InstallRoute
   '/welcome': typeof WelcomeRoute
-  '/api/apps': typeof ApiAppsRouteWithChildren
-  '/api/devices': typeof ApiDevicesRouteWithChildren
+  '/api/apps': typeof ApiAppsRoute
   '/api/me': typeof ApiMeRoute
   '/api/people': typeof ApiPeopleRoute
   '/api/profile': typeof ApiProfileRoute
@@ -284,7 +259,6 @@ export interface FileRoutesById {
   '/claim/$id': typeof ClaimIdRoute
   '/dev/claim': typeof DevClaimRoute
   '/api/connect/$code': typeof ApiConnectCodeRoute
-  '/api/devices/profile': typeof ApiDevicesProfileRoute
   '/api/drafts/$id': typeof ApiDraftsIdRouteWithChildren
   '/api/sites/$slug': typeof ApiSitesSlugRouteWithChildren
   '/api/tokens/$id': typeof ApiTokensIdRoute
@@ -294,7 +268,6 @@ export interface FileRoutesById {
   '/api/sites/$slug/settings': typeof ApiSitesSlugSettingsRoute
   '/api/sites/$slug/versions': typeof ApiSitesSlugVersionsRoute
   '/api/uploads/$id/commit': typeof ApiUploadsIdCommitRoute
-  '/api/apps/$app/$target/install': typeof ApiAppsAppTargetInstallRoute
   '/api/drafts/$id/preview/$': typeof ApiDraftsIdPreviewSplatRoute
 }
 export interface FileRouteTypes {
@@ -307,7 +280,6 @@ export interface FileRouteTypes {
     | '/install'
     | '/welcome'
     | '/api/apps'
-    | '/api/devices'
     | '/api/me'
     | '/api/people'
     | '/api/profile'
@@ -319,7 +291,6 @@ export interface FileRouteTypes {
     | '/claim/$id'
     | '/dev/claim'
     | '/api/connect/$code'
-    | '/api/devices/profile'
     | '/api/drafts/$id'
     | '/api/sites/$slug'
     | '/api/tokens/$id'
@@ -329,7 +300,6 @@ export interface FileRouteTypes {
     | '/api/sites/$slug/settings'
     | '/api/sites/$slug/versions'
     | '/api/uploads/$id/commit'
-    | '/api/apps/$app/$target/install'
     | '/api/drafts/$id/preview/$'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -340,7 +310,6 @@ export interface FileRouteTypes {
     | '/install'
     | '/welcome'
     | '/api/apps'
-    | '/api/devices'
     | '/api/me'
     | '/api/people'
     | '/api/profile'
@@ -352,7 +321,6 @@ export interface FileRouteTypes {
     | '/claim/$id'
     | '/dev/claim'
     | '/api/connect/$code'
-    | '/api/devices/profile'
     | '/api/drafts/$id'
     | '/api/sites/$slug'
     | '/api/tokens/$id'
@@ -362,7 +330,6 @@ export interface FileRouteTypes {
     | '/api/sites/$slug/settings'
     | '/api/sites/$slug/versions'
     | '/api/uploads/$id/commit'
-    | '/api/apps/$app/$target/install'
     | '/api/drafts/$id/preview/$'
   id:
     | '__root__'
@@ -373,7 +340,6 @@ export interface FileRouteTypes {
     | '/install'
     | '/welcome'
     | '/api/apps'
-    | '/api/devices'
     | '/api/me'
     | '/api/people'
     | '/api/profile'
@@ -385,7 +351,6 @@ export interface FileRouteTypes {
     | '/claim/$id'
     | '/dev/claim'
     | '/api/connect/$code'
-    | '/api/devices/profile'
     | '/api/drafts/$id'
     | '/api/sites/$slug'
     | '/api/tokens/$id'
@@ -395,7 +360,6 @@ export interface FileRouteTypes {
     | '/api/sites/$slug/settings'
     | '/api/sites/$slug/versions'
     | '/api/uploads/$id/commit'
-    | '/api/apps/$app/$target/install'
     | '/api/drafts/$id/preview/$'
   fileRoutesById: FileRoutesById
 }
@@ -406,8 +370,7 @@ export interface RootRouteChildren {
   ConnectRoute: typeof ConnectRoute
   InstallRoute: typeof InstallRoute
   WelcomeRoute: typeof WelcomeRoute
-  ApiAppsRoute: typeof ApiAppsRouteWithChildren
-  ApiDevicesRoute: typeof ApiDevicesRouteWithChildren
+  ApiAppsRoute: typeof ApiAppsRoute
   ApiMeRoute: typeof ApiMeRoute
   ApiPeopleRoute: typeof ApiPeopleRoute
   ApiProfileRoute: typeof ApiProfileRoute
@@ -537,13 +500,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiMeRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/api/devices': {
-      id: '/api/devices'
-      path: '/api/devices'
-      fullPath: '/api/devices'
-      preLoaderRoute: typeof ApiDevicesRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/api/apps': {
       id: '/api/apps'
       path: '/api/apps'
@@ -578,13 +534,6 @@ declare module '@tanstack/react-router' {
       fullPath: '/api/drafts/$id'
       preLoaderRoute: typeof ApiDraftsIdRouteImport
       parentRoute: typeof rootRouteImport
-    }
-    '/api/devices/profile': {
-      id: '/api/devices/profile'
-      path: '/profile'
-      fullPath: '/api/devices/profile'
-      preLoaderRoute: typeof ApiDevicesProfileRouteImport
-      parentRoute: typeof ApiDevicesRoute
     }
     '/api/connect/$code': {
       id: '/api/connect/$code'
@@ -635,38 +584,8 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiDraftsIdPreviewSplatRouteImport
       parentRoute: typeof ApiDraftsIdRoute
     }
-    '/api/apps/$app/$target/install': {
-      id: '/api/apps/$app/$target/install'
-      path: '/$app/$target/install'
-      fullPath: '/api/apps/$app/$target/install'
-      preLoaderRoute: typeof ApiAppsAppTargetInstallRouteImport
-      parentRoute: typeof ApiAppsRoute
-    }
   }
 }
-
-interface ApiAppsRouteChildren {
-  ApiAppsAppTargetInstallRoute: typeof ApiAppsAppTargetInstallRoute
-}
-
-const ApiAppsRouteChildren: ApiAppsRouteChildren = {
-  ApiAppsAppTargetInstallRoute: ApiAppsAppTargetInstallRoute,
-}
-
-const ApiAppsRouteWithChildren =
-  ApiAppsRoute._addFileChildren(ApiAppsRouteChildren)
-
-interface ApiDevicesRouteChildren {
-  ApiDevicesProfileRoute: typeof ApiDevicesProfileRoute
-}
-
-const ApiDevicesRouteChildren: ApiDevicesRouteChildren = {
-  ApiDevicesProfileRoute: ApiDevicesProfileRoute,
-}
-
-const ApiDevicesRouteWithChildren = ApiDevicesRoute._addFileChildren(
-  ApiDevicesRouteChildren,
-)
 
 interface ApiSitesSlugRouteChildren {
   ApiSitesSlugAccessRoute: typeof ApiSitesSlugAccessRoute
@@ -741,8 +660,7 @@ const rootRouteChildren: RootRouteChildren = {
   ConnectRoute: ConnectRoute,
   InstallRoute: InstallRoute,
   WelcomeRoute: WelcomeRoute,
-  ApiAppsRoute: ApiAppsRouteWithChildren,
-  ApiDevicesRoute: ApiDevicesRouteWithChildren,
+  ApiAppsRoute: ApiAppsRoute,
   ApiMeRoute: ApiMeRoute,
   ApiPeopleRoute: ApiPeopleRoute,
   ApiProfileRoute: ApiProfileRoute,

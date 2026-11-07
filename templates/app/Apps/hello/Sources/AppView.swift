@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// Every prototype exposes a public PrototypeView. The launcher shows it full screen.
-public struct PrototypeView: View {
+/// Every app exposes a public AppView. The launcher shows it full screen.
+public struct AppView: View {
   @State private var taps = 0
 
   public init() {}

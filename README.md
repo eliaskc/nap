@@ -90,15 +90,12 @@ the secrets and a deploy workflow that deploys this code with them.
    Open the root domain, sign in, and give your agent
    `https://<root domain>/_nap/api/instructions`, or install the skill in
    `skills/nap`.
-7. **Apps (optional).** With an Apple Developer account: an Apple
-   Distribution certificate and an App Store Connect team key with the Admin
-   role. Then ad hoc, TestFlight, or both:
-   - **Ad hoc:** a wildcard App ID `<bundleIdPrefix>.*` and an ad hoc profile
-     for it, named as `profileName`.
-   - **TestFlight:** an explicit App ID, an App Store profile for it named as
-     `testFlight.profileName`, an app record in App Store Connect with that
-     bundle id (`testFlight.appStoreId` is its Apple ID), and an internal
-     tester group with access to all builds.
+7. **Apps (optional).** With an Apple Developer account, make these by hand
+   (Nap never creates them): an Apple Distribution certificate, an App Store
+   Connect team key with the Admin role, an explicit App ID, an App Store
+   profile for it named as `testFlight.profileName`, an app record in App
+   Store Connect with that bundle id (`testFlight.appStoreId` is its Apple
+   ID), and an internal tester group with access to all builds.
 
    Set `apps` in `instance/config.ts`. Add the secrets
    `NAP_APPLE_SIGNING_PEM` (the certificate's private key and certificate in
@@ -359,13 +356,11 @@ Agents get everything they need from `GET /_nap/api/instructions`.
 These are the only paths that bypass Access. Each one has its own Access
 application in `alchemy.run.ts`, and the Worker checks a credential itself:
 
-| Path              | Access app            | Credential                                  |
-| ----------------- | --------------------- | ------------------------------------------- |
-| `/_nap/drafts`    | `DraftUploadAccess`   | none; rate-limited, and drafts need a claim |
-| `/_nap/api/*`     | `AgentApiAccess`      | agent token                                 |
-| `/_nap/frame/*`   | `ArtifactFrameAccess` | frame token                                 |
-| `/_nap/install/*` | `AppInstallAccess`    | install token (one build, one hour)         |
-| `/_nap/enroll/*`  | `DeviceEnrollAccess`  | enrollment token (single use, one day)      |
+| Path            | Access app            | Credential                                  |
+| --------------- | --------------------- | ------------------------------------------- |
+| `/_nap/drafts`  | `DraftUploadAccess`   | none; rate-limited, and drafts need a claim |
+| `/_nap/api/*`   | `AgentApiAccess`      | agent token                                 |
+| `/_nap/frame/*` | `ArtifactFrameAccess` | frame token                                 |
 
 Code on these paths must never call `getIdentity()` or `ensureProfile()`.
 The Access headers are not set there, and a token must not keep its owner
@@ -430,63 +425,50 @@ became ordinary sites in migration 0016 and move in the same way.
 
 ## Apps
 
-Native iOS prototypes in SwiftUI, installed ad hoc on registered iPhones,
-from TestFlight, or both. `napConfig.apps` turns them on and names the Apple
-team, the bundle id prefix, the ad hoc profile, and the TestFlight app. Nap
-never builds apps; it signs them:
+Native iOS apps in SwiftUI, inside one launcher that people install from
+TestFlight. `napConfig.apps` turns them on and names the Apple team and the
+TestFlight app. Nap never builds apps; it signs them:
 
 ```text
 agent → app repo (Artifacts) → Tuist project → xcodebuild without signing on a Mac
-agent → upload the zipped .app with sourceCommit → Nap checks the commit
-Nap → signer container (rcodesign) → signed .ipa in R2 → install link → iPhone
-                                   → App Store .ipa → App Store Connect → TestFlight
+agent → upload the zipped launcher with sourceCommit → Nap checks the commit
+Nap → signer container (rcodesign) → App Store .ipa in R2 → App Store Connect → TestFlight
 ```
 
-- **Repos.** An app is one Artifacts repo (`app-<slug>`, in `SOURCES`) with a
-  launcher and one module per prototype. Its targets are the launcher and any
-  standalone prototypes; each gets the bundle id `<prefix>.<target>`. Everyone
-  who can sign in can push to, publish, and install every app.
+- **Repo.** A Nap has one app: an Artifacts repo (`app-<slug>`, in `SOURCES`)
+  with the launcher in `Launcher/` and one module per app in `Apps/<slug>/`.
+  The launcher is the only target Nap publishes. Everyone who can sign in can
+  push to it and publish it.
 - **Publishing.** A build names its commit, which must be the head of `main`
-  and contain the target's live build's commit, as with sites. Nap numbers
-  builds per target, keeps the unsigned zip and the signed `.ipa` under
-  `apps/<app>/builds/<id>/`, and moves `app_targets.live_build`.
+  and contain the live build's commit, as with sites. Nap keeps the unsigned
+  zip and the signed `.ipa` under `apps/<app>/builds/<id>/` and moves
+  `app_targets.live_build`.
 - **Signing.** The `SIGNER` binding is a Cloudflare Container built from
   `containers/signer`. It gets the Apple Distribution key and certificate as an
   environment variable, has no internet access, and signs without a timestamp.
-  It checks that the build is an arm64 iOS device build and that the profile
-  covers the bundle id. The profile comes from the App Store Connect API (team
-  key) and is cached in R2 at `apps/_signing/`. Deploys need Docker to build
-  the image.
-- **iPhones.** Ad hoc builds only install on iPhones in the profile. On
-  `/apps`, a signed-in person pastes an iPhone's UDID, or taps "Add this
-  iPhone" in Safari and installs a profile-service `.mobileconfig` whose UDID
-  iOS posts to `/_nap/enroll/<token>`. Nap registers the iPhone with Apple,
-  replaces the profile with one listing every enabled iPhone of the team, and
-  signs each live build again from its unsigned zip: at once for a pasted UDID,
-  at the next install for an enrollment. Apple allows 100 iPhones per team per
-  membership year.
-- **TestFlight.** With `apps.testFlight`, the launcher of `testFlight.app` is
-  also signed with the App Store profile for the app record's explicit bundle
-  id, without the profile's wildcard entitlements, and uploaded to App Store
-  Connect with the build upload API before it goes live. Its build number goes
-  above every build App Store Connect has. Apple then processes it for
-  internal testers; Nap asks Apple how far it got when someone looks at
-  `/apps`, at most every few seconds per build, and keeps the state on the
-  build. Without ad hoc, the TestFlight launcher is the only thing Nap
-  publishes and the only app: there are no install links, no iPhones, and no
-  paths without Access for them. TestFlight builds need an app icon and
-  `ITSAppUsesNonExemptEncryption`; the template has both.
-- **Capabilities.** A prototype declares Info.plist usage strings and
-  capabilities in its `prototype.json`; the template writes the capabilities
-  into the app's Info.plist as `NapCapabilities`, by prototype. When it signs,
-  Nap reads them (the signer's `/inspect`), turns the ones it can on for the
-  TestFlight App ID through App Store Connect, makes a new App Store profile if
-  any was off, and signs with the basic entitlements plus those of the granted
-  capabilities. `apps.testFlight.capabilities` limits which it turns on. What a
-  build cannot have (those needing setup in the developer account, any in ad
-  hoc builds, or Apple refused) the signer writes into Info.plist as
-  `NapCapabilityWarnings`, and the launcher shows them on the prototype that
-  asked. Nap never turns capabilities off.
+  It checks that the build is an arm64 iOS device build and that the App
+  Store profile covers the app record's bundle id. The profile comes from the
+  App Store Connect API (team key) and is cached in R2 at `apps/_signing/`.
+  Deploys need Docker to build the image.
+- **TestFlight.** Each build is uploaded to App Store Connect with the build
+  upload API before it goes live. Its build number goes above every build App
+  Store Connect has. Apple then processes it for internal testers; Nap asks
+  Apple how far it got when someone looks at `/apps`, at most every few
+  seconds per build, and keeps the state on the build. TestFlight builds need
+  an app icon and `ITSAppUsesNonExemptEncryption`; the template has both.
+- **Apple's side.** Nap uploads builds, reads the App Store profile, turns
+  capabilities on, and adds testers. The App ID, the profile, and the app
+  record are made by hand; Nap never creates them.
+- **Capabilities.** An app declares Info.plist usage strings and capabilities
+  in its `app.json`; the template writes the capabilities into the launcher's
+  Info.plist as `NapCapabilities`, by app. When it signs, Nap reads them (the
+  signer's `/inspect`), turns the ones it can on for the App ID through App
+  Store Connect, makes a new App Store profile if any was off, and signs with
+  the basic entitlements plus those of the granted capabilities.
+  `apps.testFlight.capabilities` limits which it turns on. What a build cannot
+  have (those needing setup in the developer account, or Apple refused) the
+  signer writes into Info.plist as `NapCapabilityWarnings`, and the launcher
+  shows them on the app that asked. Nap never turns capabilities off.
 - **Testers.** Internal testers must be App Store Connect users. From the
   dashboard's Get the app, anyone signed in to Nap gives their Apple Account
   email; Nap invites it to the team with the Marketing role and access to the
@@ -495,10 +477,6 @@ Nap → signer container (rcodesign) → signed .ipa in R2 → install link → 
   straight into the group. Nap learns that an invite was accepted only by
   asking Apple when the person looks. The team API key needs the Admin role
   for this.
-- **Installing.** Ad hoc: the dashboard's `/apps` page makes an `itms-services` link.
-  iOS fetches the manifest and the `.ipa` from `/_nap/install/<token>/`
-  without the Access cookie, so each link is a token for one build that lasts
-  an hour.
 - **Data.** Apps cannot pass Access, so they sign in with the agent device
   flow and use `/_nap/api/naps/<id>/data/*`, `/live`, `/channel/<name>`, and `/rtc`
   with the token. These are the site's own data and channel endpoints under
@@ -509,4 +487,5 @@ Nap → signer container (rcodesign) → signed .ipa in R2 → install link → 
   its variables. The Cloudflare API token needs Containers edit access.
 
 `pnpm test:apps` runs the whole path against an Artifacts test namespace with
-a real Xcode build and the real certificate (see the script for setup).
+a real Xcode build, the real certificate, and the instance's TestFlight app
+(see the script for setup).

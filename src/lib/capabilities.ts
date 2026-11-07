@@ -1,10 +1,10 @@
 /**
- * Capabilities that prototypes declare in prototype.json ("capabilities": ["push-notifications"]).
- * The template merges them into the launcher's Info.plist as NapCapabilities, prototype by
- * prototype. When a TestFlight build asks for one, Nap turns it on for the app's App ID, makes a
+ * Capabilities that the apps in a launcher declare in app.json ("capabilities":
+ * ["push-notifications"]). The template merges them into the launcher's Info.plist as
+ * NapCapabilities, app by app. When a build asks for one, Nap turns it on for the App ID, makes a
  * new App Store profile, and signs with its entitlements. What Nap cannot turn on becomes a
  * warning: the signer writes it into the app as NapCapabilityWarnings, and the launcher shows it
- * on the prototype that asked.
+ * on the app that asked.
  */
 
 /** Capabilities Nap turns on by itself: switches on the App ID, with no setup of their own. */
@@ -61,10 +61,10 @@ export type AutomaticCapability = keyof typeof AUTOMATIC_CAPABILITIES;
 export const isAutomatic = (name: string): name is AutomaticCapability =>
   Object.hasOwn(AUTOMATIC_CAPABILITIES, name);
 
-/** What a build asks for: prototype slug → capability names, from its Info.plist. */
+/** What a build asks for: app slug → capability names, from its Info.plist. */
 export type CapabilityRequests = Record<string, Array<string>>;
 
-/** What the launcher shows: prototype slug → one sentence per capability it cannot have. */
+/** What the launcher shows: app slug → one sentence per capability it cannot have. */
 export type CapabilityWarnings = Record<string, Array<string>>;
 
 export function labelOf(name: string) {
@@ -88,8 +88,8 @@ export function readRequests(value: unknown): CapabilityRequests {
 
 /**
  * Splits a build's requests into what to turn on and what to warn about. `refuse` gives the
- * reason for a capability that could be automatic but is not available here (ad hoc builds, or
- * one Apple would not turn on); null means it is fine.
+ * reason for a capability that could be automatic but is not available here (not on the Nap's
+ * list, or one Apple would not turn on); null means it is fine.
  */
 export function planCapabilities(
   requests: CapabilityRequests,
