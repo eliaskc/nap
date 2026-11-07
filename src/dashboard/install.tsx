@@ -75,6 +75,8 @@ type AppSheet = {
 type InstallState = {
   /** The iPhone side: where the person is with Apple. Null while it loads or without iOS. */
   status: InstallStatus | null;
+  /** Apple has answered (or failed to) at least once, here or in this browser before. */
+  statusKnown: boolean;
   app: AppSheet | null;
   error: string;
   busy: boolean;
@@ -142,9 +144,34 @@ function fromHash(): Target | true | null {
   return asked && TARGETS.includes(asked) ? asked : true;
 }
 
+/**
+ * The last answers, kept in this browser, so the bar and the nudge are right from the first paint
+ * instead of changing once Apple answers (which takes a moment).
+ */
+const CACHE_KEY = "nap:get-the-app";
+type Cached = { status: InstallStatus | null; app: AppSheet | null };
+function readCache(): Cached | null {
+  try {
+    const raw = localStorage.getItem(CACHE_KEY);
+    return raw ? (JSON.parse(raw) as Cached) : null;
+  } catch {
+    return null;
+  }
+}
+function writeCache(change: Partial<Cached>) {
+  try {
+    const next = { status: null, app: null, ...readCache(), ...change };
+    localStorage.setItem(CACHE_KEY, JSON.stringify(next));
+  } catch {
+    // Private mode or full: it only saves a flicker.
+  }
+}
+const useBeforePaint = typeof window === "undefined" ? React.useEffect : React.useLayoutEffect;
+
 /** The state every spot shares, and the sheet. */
 export function InstallProvider({ children }: { children: React.ReactNode }) {
   const [status, setStatus] = React.useState<InstallStatus | null>(null);
+  const [statusKnown, setStatusKnown] = React.useState(!IOS);
   const [app, setApp] = React.useState<AppSheet | null>(null);
   const [error, setError] = React.useState("");
   const [busy, setBusy] = React.useState(false);
@@ -155,16 +182,33 @@ export function InstallProvider({ children }: { children: React.ReactNode }) {
   const run = React.useCallback(async (request: () => Promise<Status>) => {
     try {
       const next = await request();
-      setStatus(next.enabled ? next : null);
+      const fresh = next.enabled ? next : null;
+      setStatus(fresh);
+      writeCache({ status: fresh });
       setError("");
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      setStatusKnown(true);
     }
   }, []);
 
   const refreshApp = React.useCallback(async () => {
     const next = await loadApp().catch(() => null);
-    if (next) setApp(next);
+    if (next) {
+      setApp(next);
+      writeCache({ app: next });
+    }
+  }, []);
+
+  useBeforePaint(() => {
+    if (!APP_ENABLED) return;
+    const cached = readCache();
+    if (cached?.app) setApp(cached.app);
+    if (IOS && cached?.status) {
+      setStatus(cached.status);
+      setStatusKnown(true);
+    }
   }, []);
   const refresh = React.useCallback(
     () => Promise.all([IOS ? run(() => call("GET")) : null, refreshApp()]).then(() => {}),
@@ -214,7 +258,11 @@ export function InstallProvider({ children }: { children: React.ReactNode }) {
   );
 
   const dismissNudge = React.useCallback(() => {
-    setApp((current) => current && { ...current, nudgeDismissed: true });
+    setApp((current) => {
+      const next = current && { ...current, nudgeDismissed: true };
+      writeCache({ app: next });
+      return next;
+    });
     void fetch("/api/app", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -225,6 +273,7 @@ export function InstallProvider({ children }: { children: React.ReactNode }) {
   const value = React.useMemo<InstallState>(
     () => ({
       status,
+      statusKnown,
       app,
       error,
       busy,
@@ -238,7 +287,7 @@ export function InstallProvider({ children }: { children: React.ReactNode }) {
       dismissNudge,
       isIOS,
     }),
-    [status, app, error, busy, open, target, withBusy, dismissNudge, isIOS],
+    [status, statusKnown, app, error, busy, open, target, withBusy, dismissNudge, isIOS],
   );
 
   if (!APP_ENABLED) return children;
@@ -897,7 +946,9 @@ export function GetAppButton() {
  */
 export function AppNudge({ className }: { className?: string }) {
   const install = useInstall();
-  if (!install?.app || install.app.nudgeDismissed || installed(install.status)) return null;
+  // Only once both are known: whether it was dismissed, and whether Apple says it's installed.
+  if (!install?.app || !install.statusKnown) return null;
+  if (install.app.nudgeDismissed || installed(install.status)) return null;
   const title = appTitle(install);
   const what = inside(install.app);
   const device = TARGETS.includes("ios") ? "phone" : PLATFORM[TARGETS[0]!].device;
