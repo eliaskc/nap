@@ -30,7 +30,7 @@ ssh "$host" "rm -rf $dir.new && mkdir -p $dir.new"
 echo "Installed on $host:$dir"
 if $restart; then
   ssh "$host" "systemctl restart xochitl"
-  echo "Restarted the interface. Open Nap from the AppLoad menu."
+  echo "Restarted the interface. Open it from the AppLoad menu."
 else
-  echo "Close and reopen Nap on the tablet (or run with --restart)."
+  echo "Close and reopen it on the tablet (or run with --restart)."
 fi

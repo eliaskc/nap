@@ -1,22 +1,31 @@
 #!/bin/sh
 # A screenshot of a reMarkable 2 plugged in by USB, for testing on the device.
 #   scripts/rmshot out.png [scale]
-# Reads the screen from xochitl's memory: the frame sits in the mapping after /dev/fb0 (firmware 3.x).
+# Reads the screen from xochitl's memory (firmware 3.x): an anonymous mapping the size of one
+# 1404 × 1872 frame, or else the frame inside the mapping right after /dev/fb0.
 set -eu
 out=${1:?usage: scripts/rmshot out.png [scale]}
 scale=${2:-0.5}
 host=${REMARKABLE:-root@10.11.99.1}
 raw=$(mktemp -t rmshot)
-ssh "$host" 'pid=$(pidof xochitl); line=$(grep -A1 "/dev/fb0" /proc/$pid/maps | tail -1); start=${line%%-*}; end=${line#*-}; end=${end%% *}; dd if=/proc/$pid/mem bs=4096 skip=$((0x$start/4096)) count=$(((0x$end-0x$start)/4096)) 2>/dev/null' > "$raw"
+ssh "$host" 'pid=$(pidof xochitl); frame=$((1404 * 1872 * 4)); pick=""; after=""; next=0
+while read range perm off dev inode path; do
+  s=${range%-*}; e=${range#*-}; size=$((0x$e - 0x$s))
+  if [ $next = 1 ]; then after="$s $size 2629640"; next=0; fi
+  case "$path" in /dev/fb0) next=1 ;; esac
+  if [ -z "$path" ] && [ "$perm" = rw-p ] && [ $size -ge $frame ] && [ $size -lt $((frame + 65536)) ]; then pick="$s $size 0"; fi
+done < /proc/$pid/maps
+set -- ${pick:-$after}
+printf "%016d" $3; dd if=/proc/$pid/mem bs=4096 skip=$((0x$1 / 4096)) count=$(($2 / 4096)) 2>/dev/null' > "$raw"
 uv run -q --no-project --with "PySide6-Essentials==6.10.3" python - "$raw" "$out" "$scale" <<'PY'
 import sys
 from PySide6.QtGui import QImage
-raw = open(sys.argv[1], "rb").read()
+data = open(sys.argv[1], "rb").read()
+offset, raw = int(data[:16]), data[16:]
 w, h = 1404, 1872
-off = 2629640  # firmware 3.29
-if len(raw) < off + w * h * 4:
-    sys.exit("unexpected framebuffer layout")
-img = QImage(raw[off:off + w * h * 4], w, h, w * 4, QImage.Format_RGB32).copy()
+if len(raw) < offset + w * h * 4:
+    sys.exit("could not read the screen")
+img = QImage(raw[offset : offset + w * h * 4], w, h, w * 4, QImage.Format_RGB32).copy()
 s = float(sys.argv[3])
 img.scaled(int(w * s), int(h * s)).save(sys.argv[2])
 PY
