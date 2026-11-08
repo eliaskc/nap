@@ -27,7 +27,11 @@ export const notificationsOn = () => napConfig.notifications === true;
 /** What a notification came from: a site or artifact, or the app itself (NapKit, no site). */
 export type NotificationSource =
   | { kind: "site"; slug: string; title: string; napKind: NapKind; place: NapPlace }
-  | { kind: "app"; place: NapPlace };
+  | { kind: "app"; app: string | null; place: NapPlace };
+
+/** Which app in the launcher a notification from the app itself belongs to, so a tap opens it. */
+export const readAppSlug = (value: unknown) =>
+  typeof value === "string" && /^[a-z0-9-]{1,64}$/.test(value) ? value : null;
 
 /** Per sender and per source. Generous for "wants to play", tight enough to stop a loop. */
 const LIMITS = {
@@ -79,7 +83,7 @@ export const webPushConfig = Effect.fn("webPushConfig")(function* () {
 });
 
 /** iOS: on when the instance has notifications, iOS, and an APNs key. */
-const apnsConfig = Effect.fn("apnsConfig")(function* () {
+export const apnsConfig = Effect.fn("apnsConfig")(function* () {
   const { apns } = yield* Settings;
   const ios = napConfig.apps?.ios;
   if (!notificationsOn() || !apns || !ios) return null;
@@ -267,7 +271,7 @@ function resolveOpen(source: NotificationSource, open: string) {
 }
 
 const sourceKey = (source: NotificationSource) =>
-  source.kind === "site" ? `site:${source.slug}` : "app";
+  source.kind === "site" ? `site:${source.slug}` : source.app ? `app:${source.app}` : "app";
 
 /**
  * Sends one notification. Fails with the reason the sender should see: off, too many, or a bad
@@ -440,7 +444,9 @@ export const handleNotifyRequest = Effect.fn("handleNotifyRequest")(function* (
   place: NapPlace,
   options: { frame?: boolean; token?: boolean } = {},
 ) {
-  if (request.method !== "POST") return yield* failNoStore(405, "Use POST");
+  // Whether this Nap sends notifications, so a page can leave out a button that would fail.
+  if (request.method === "GET") return json({ enabled: notificationsOn() }, { headers: noStore });
+  if (request.method !== "POST") return yield* failNoStore(405, "Use GET or POST");
   if (!options.frame && !options.token && isCrossSite(request)) {
     return yield* failNoStore(403, "Forbidden");
   }

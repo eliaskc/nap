@@ -11,7 +11,7 @@ import { collection, me } from "./db";
 import { NapError } from "./errors";
 import { extensionApis } from "./extensions";
 import { proxyFetch } from "./fetch";
-import { notify } from "./notify";
+import { canNotify, notify } from "./notify";
 import { avatar, defineAvatarElement, looks, people } from "./people";
 import { voice } from "./voice";
 
@@ -22,6 +22,7 @@ const nap: Nap = Object.freeze({
   voice,
   fetch: proxyFetch,
   notify,
+  canNotify,
   db: Object.freeze({ collection }),
   me,
   people,

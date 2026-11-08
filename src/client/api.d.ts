@@ -258,6 +258,8 @@ export interface Nap {
    * a few a minute at most. Resolves with how many people it went to.
    */
   notify(notification: NapNotification): Promise<{ sent: number }>;
+  /** Whether this Nap sends notifications. Show what calls nap.notify only when it does. */
+  canNotify(): Promise<boolean>;
   /** The person viewing the page, with their name and look. */
   me(): Promise<NapIdentity>;
   /** Everyone on this Nap, or only these emails, with their names and looks. */

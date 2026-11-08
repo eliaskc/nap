@@ -12,6 +12,8 @@ import ProjectDescription
 // - "infoPlist": any other Info.plist keys, such as {"UIBackgroundModes": ["audio"]}. Lists from
 //   several apps are combined; for other values the first app (by slug) wins. Keys this file
 //   sets itself, such as the bundle version, cannot be changed.
+// - "site": the page on Nap the app plays with (its id), so a tap on that page's notification
+//   opens the app.
 // - "packages": Swift packages, [{ "url": "…", "version": "1.2.3", "products": ["Name"] }].
 // - "frameworks": prebuilt .xcframeworks the app links, as paths inside its folder, such as
 //   ["Frameworks/SleepCycleSDK.xcframework"]. Commit them; the launcher embeds them.
@@ -132,6 +134,17 @@ let orientations: Plist.Value = [
   "UIInterfaceOrientationLandscapeRight",
 ]
 
+/// NapKit: window.nap for Swift (NapKit/Sources, from Nap: scripts/napkit updates it). Every app
+/// and the launcher link it.
+let napKit: Target = .target(
+  name: "NapKit",
+  destinations: .iOS,
+  product: .staticFramework,
+  bundleId: "nap.kit",
+  deploymentTargets: ios,
+  sources: ["NapKit/Sources/**"]
+)
+
 let modules: [Target] = apps.map { app in
   .target(
     name: moduleName(app.slug),
@@ -141,7 +154,8 @@ let modules: [Target] = apps.map { app in
     deploymentTargets: ios,
     sources: ["Apps/\(app.slug)/Sources/**"],
     resources: ["Apps/\(app.slug)/Resources/**"],
-    dependencies: app.packages.flatMap { $0.products.map { TargetDependency.package(product: $0) } }
+    dependencies: [.target(name: "NapKit")]
+      + app.packages.flatMap { $0.products.map { TargetDependency.package(product: $0) } }
       + app.frameworks.map { .xcframework(path: "Apps/\(app.slug)/\($0)") }
   )
 }
@@ -171,7 +185,7 @@ let launcher: Target = .target(
   sources: ["Launcher/Sources/**", "Generated/Launcher/**"],
   // The app icon, Resources/AppIcon.icon (Icon Composer): TestFlight refuses builds without one.
   resources: ["Launcher/Resources/**"],
-  dependencies: apps.map { .target(name: moduleName($0.slug)) }
+  dependencies: [.target(name: "NapKit")] + apps.map { .target(name: moduleName($0.slug)) }
 )
 
 let project = Project(
@@ -185,5 +199,5 @@ let project = Project(
     "ONLY_ACTIVE_ARCH": "YES",
     "SWIFT_VERSION": "6.0",
   ]),
-  targets: modules + [launcher]
+  targets: [napKit] + modules + [launcher]
 )

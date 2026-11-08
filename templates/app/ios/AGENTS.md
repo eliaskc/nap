@@ -12,6 +12,8 @@ TestFlight; people install it from the TestFlight app. Paths here are inside `io
   (the instance's icon when the repo was made). Edit it in Icon Composer, or swap it for an
   `AppIcon.appiconset` with a 1024 x 1024 PNG, but keep one: TestFlight refuses builds without it.
   Its name on the home screen is `displayName` in `Project.swift`.
+- `NapKit/` is Nap's client for Swift (see below). Every app links it. Never edit it:
+  `scripts/napkit` replaces it with the one Nap serves; commit what it changes.
 - `Project.swift` finds apps by folder. Never edit or commit an `.xcodeproj`: it is generated.
 - `../nap.json` names the app on Nap.
 
@@ -65,7 +67,56 @@ Declare them in the app's `app.json`; never edit `Project.swift` or Info.plist f
 - What the build does not get, Nap says when you publish, and the launcher shows it on the app in
   orange. Code that needs a missing capability should fail gracefully.
 - Capabilities are shared: every app in the launcher has what any one of them asked for.
-  Push notifications also need a server that sends them, which Nap does not have yet.
+- Nap's own notifications need nothing declared: on a Nap with notifications and an APNs key,
+  every launcher gets push notifications, and NapKit registers for them.
+
+## NapKit: Nap data, channels, and notifications
+
+`import NapKit` gives Swift what a web page gets as `window.nap`. Apps cannot pass Cloudflare
+Access, so the launcher signs in to Nap once (the device flow) and NapKit sends that token. A
+page's data and channels are the same for the app and the page's web version, so they play
+together.
+
+```swift
+import NapKit
+import SwiftUI
+
+public struct AppView: View {
+  let games = Nap.site("weave").db.collection("games")   // the page with id "weave"
+  var account = Nap.account
+
+  public init() {}
+
+  public var body: some View {
+    if !account.signedIn {
+      NapSignInButton()                                    // the launcher's one sign-in
+    } else {
+      List(games.documents) { doc in                       // live: updates as anyone writes
+        Text(doc.decode(Game.self)?.name ?? doc.id)
+      }
+      .onAppear { games.watch() }
+    }
+  }
+}
+```
+
+- `Nap.site(id)`: a page by its id. `db.collection(name)`: `documents` (newest first), `loaded`,
+  `watch()`, `document(id)`, `get`, `create`, `put(id, data, ifVersion:, ifNew:)`, `patch`,
+  `delete`, `ensure` (create once), and `mutate(id, as: T.self) { old in new }`, which retries
+  when someone else saved first. Data is any `Codable`; `doc.decode(T.self)` reads it.
+- `site.channel(name)`: presence (`setPresence`, `peers`) and messages (`send(_:to:)`,
+  `onMessage`), with everyone on the page's channel, web or app. `leave()` when done.
+- `site.fetch(url)`: APIs the page lists in its nap.json, like nap.fetch.
+- `site.notify(title:body:open:)`: a notification to everyone else who can see the page, on their
+  phones and in their browsers, never to the sender. Only on Naps with notifications; a few a
+  minute. Put `"site": "<id>"` in the app's app.json so a tap on that page's notifications opens
+  the app. An app with no page uses `Nap.notify(title:body:open:app: "<its folder>")`.
+- `Nap.me()`, `Nap.people()`: names and looks. `Nap.account`: `signedIn`, `email`, `name`.
+- Extensions of this Nap are properties on the site, such as `site.<name>`, when the Nap has a
+  Swift client for them (in `NapKit/Sources/Extensions/`).
+- Errors are `NapError` (`message`, `status`, `code`). A lost sign-in signs out by itself.
+- Test against a local Nap with the launch argument `-nap-url http://localhost:1337` and a token
+  with `-nap-token <token>`.
 
 ## Limits
 

@@ -28,6 +28,7 @@ import { createSource, describeSource, mintSourceToken, SOURCE_BRANCH } from "~/
 import { listVersions, restoreVersion } from "~/lib/versions";
 import { handleAppsApi } from "~/lib/apps";
 import { handleSiteDataRequest } from "~/lib/site-data";
+import { findPerson } from "~/lib/profiles";
 import { peopleResponse } from "~/lib/welcome";
 import { handleLiveRequest, publishChange } from "~/lib/site-live";
 import { handleChannelRequest } from "~/lib/site-channel";
@@ -40,6 +41,7 @@ import {
   notificationsOn,
   removeTarget,
   saveApnsTarget,
+  readAppSlug,
   sendNotification,
   sendTest,
 } from "~/lib/notifications";
@@ -146,10 +148,9 @@ export const handleAgentApi = Effect.fn("handleAgentApi")(function* (request: Re
   });
 
   if (path === "/me" && method === "GET") {
-    return json(
-      { email: agent.email, name: agent.name, client: agent.client },
-      { headers: noStore },
-    );
+    // With the look (shape and color), like /_nap/me on a nap's host: NapKit's Nap.me().
+    const person = yield* findPerson(agent.email, agent.name);
+    return json({ ...person, email: agent.email, client: agent.client }, { headers: noStore });
   }
 
   // Everyone on Nap with their name and look, like /_nap/people on a nap's host. For native
@@ -176,12 +177,17 @@ export const handleAgentApi = Effect.fn("handleAgentApi")(function* (request: Re
   }
 
   // Notifications from the app itself (NapKit's Nap.notify), to everyone else with the app or
-  // notifications on: { title, body?, open? }.
+  // notifications on: { title, body?, open?, app? }, where app is the app's folder in the
+  // launcher, so a tap opens it.
+  if (path === "/notify" && method === "GET") {
+    return json({ enabled: notificationsOn() }, { headers: noStore });
+  }
   if (path === "/notify" && method === "POST") {
+    const body = yield* readJsonObject(request);
     const result = yield* sendNotification(
-      { kind: "app", place },
+      { kind: "app", app: readAppSlug(body.app), place },
       agent,
-      yield* readJsonObject(request),
+      body,
     );
     return json(result, { headers: noStore });
   }

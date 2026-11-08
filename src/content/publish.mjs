@@ -14,6 +14,7 @@
 //   node publish.mjs app init <app> [dir] [--title "Name"]   Create an app from the template.
 //   node publish.mjs app clone <app> [dir]
 //   node publish.mjs app run <app> -- <command...>           git or jj with access to its repo.
+//   node publish.mjs app napkit <ios dir>                    Update NapKit (NapKit/Sources) to this Nap's.
 //   node publish.mjs app publish <app> <build.zip> --target <platform> --source <dir> [--notes "..."]
 //                          Pushes HEAD of <dir> to main, uploads the unsigned build with that
 //                          commit, and Nap signs it and makes it live. The app's
@@ -563,6 +564,24 @@ async function appCommand(options) {
     runCommand(options.command, gitEnv(source));
     return;
   }
+  if (command === "napkit") {
+    // NapKit is part of the template: replace NapKit/Sources with this Nap's.
+    const dir = options._[2];
+    if (!dir) throw new ExitError("Give the ios folder of the app, for example: app napkit .");
+    const template = await api("/apps/template", { token, method: "GET" });
+    if (!template.ok) throw failed("Could not read the template", template);
+    const prefix = "ios/NapKit/";
+    const files = template.data.files.filter((file) => file.path.startsWith(prefix));
+    if (!files.length) throw new ExitError("This Nap has no NapKit (no iOS apps).");
+    await rm(join(dir, "NapKit"), { recursive: true, force: true });
+    for (const file of files) {
+      const path = join(dir, file.path.slice("ios/".length));
+      await mkdir(join(path, ".."), { recursive: true });
+      await writeFile(path, file.content);
+    }
+    console.log(`Updated NapKit (${files.length} files) in ${join(dir, "NapKit")}.`);
+    return;
+  }
   if (command === "publish") {
     const app = appSlug(options);
     const zip = options._[3];
@@ -596,7 +615,7 @@ async function appCommand(options) {
     return;
   }
   throw new ExitError(
-    "Usage: node publish.mjs app list | init | clone | run | publish. See --help.",
+    "Usage: node publish.mjs app list | init | clone | run | napkit | publish. See --help.",
   );
 }
 

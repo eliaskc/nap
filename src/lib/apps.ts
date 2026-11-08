@@ -18,6 +18,7 @@ import {
   readRequests,
 } from "~/lib/capabilities";
 import { slugify } from "~/lib/nap-server";
+import { apnsConfig } from "~/lib/notifications";
 import {
   checkRepoCommit,
   containsCommit,
@@ -772,10 +773,20 @@ const inspectBuild = Effect.fnUntraced(function* (
   return readRequests(result.capabilities);
 });
 
+/** The launcher's own requests, apart from its apps' (not a valid app slug). */
+const NAP_REQUEST = "_nap";
+
 /** Turns on what a build asks for and can have, for the App ID, and says what it cannot. */
-const grantCapabilities = Effect.fnUntraced(function* (requests: CapabilityRequests) {
+const grantCapabilities = Effect.fnUntraced(function* (asked: CapabilityRequests) {
   const allowed = napConfig.apps?.ios?.capabilities;
+  // With an APNs key, every launcher gets push notifications: Nap's own notifications reach
+  // phones through it (NapKit registers), whatever the apps ask for.
+  const push = Boolean(yield* apnsConfig());
+  const requests: CapabilityRequests = push
+    ? { ...asked, [NAP_REQUEST]: ["push-notifications"] }
+    : asked;
   const refuse = (name: AutomaticCapability) => {
+    if (push && name === "push-notifications") return null;
     if (allowed && !allowed.includes(name)) {
       return "is not on this Nap's list of capabilities. Ask whoever runs Nap to add it";
     }

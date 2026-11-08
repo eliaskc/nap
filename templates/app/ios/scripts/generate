@@ -29,7 +29,8 @@ registry=Generated/Launcher/Registry.swift
     module="App_$(echo "$slug" | tr - _)"
     title=$(swift_string "$(field "$json" title)")
     summary=$(swift_string "$(field "$json" summary)")
-    echo "    AppEntry(slug: \"$slug\", title: \"${title:-$slug}\", summary: \"$summary\", view: { AnyView($module.AppView()) }),"
+    site=$(swift_string "$(field "$json" site)")
+    echo "    AppEntry(slug: \"$slug\", title: \"${title:-$slug}\", summary: \"$summary\", site: \"$site\", view: { AnyView($module.AppView()) }),"
   done
   echo "  ]"
   echo "}"

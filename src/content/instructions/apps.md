@@ -28,6 +28,7 @@ Working on the repo:
 iOS:
 
 - The project is ios/: the launcher in ios/Launcher/, and one folder per app in ios/Apps/<slug>/ (app.json, and Sources/ with a public struct AppView: View). Run ios/scripts/generate after every pull.
+- Nap data from Swift: NapKit (ios/NapKit, linked by every app; import NapKit). It is window.nap for Swift: Nap.site("<id>") gives a page's db.collection(name) (observable, live with watch()), channel(name), fetch, and notify; Nap.me() and Nap.people(); Nap.account is the launcher's one sign-in, so apps never sign in themselves (show NapSignInButton() where an app needs someone signed in). Never edit ios/NapKit: ios/scripts/napkit updates it from Nap. ios/AGENTS.md has examples. Put "site": "<id>" in app.json when the app plays with a page, so that page's notifications open the app.
 - Test in the Simulator while you work (xcodebuild -scheme Launcher -sdk iphonesimulator in ios/, or Xcode). Simulator builds cannot be published.
 - Publish: commit, then ios/scripts/publish 'What changed, for testers'. It builds the launcher for iPhone without signing, pushes HEAD to main, and uploads the build with that commit. Nap signs it, gives it the next build number, and uploads it to App Store Connect; Apple processes it for a few minutes, and testers install or update it in the TestFlight app. People get it from Get the app on the dashboard; send anyone who cannot to {{admin}}.
 - Keep the launcher's app icon (ios/Launcher/Resources) and ITSAppUsesNonExemptEncryption in ios/Project.swift: TestFlight refuses builds without them.
@@ -49,6 +50,12 @@ reMarkable:
 
 <!-- /if -->
 
-Nap data from an app, on every platform: the app cannot pass Cloudflare Access, so it uses a Nap token like an agent. Sign in with the device flow from the `api` topic: POST /\_nap/api/auth/device, open https://{{rootDomain}}/connect?code=<user_code> for the person to approve (on iOS in an ASWebAuthenticationSession or Safari), poll POST /\_nap/api/auth/token, and keep the token safe (the Keychain on iOS). Then send Authorization: Bearer <token> to https://{{rootDomain}}/\_nap/api/naps/<id>/data/<collection>[/<doc>], /live, /channel/<name> (WebSockets with the header), and /rtc (ICE servers for WebRTC). They work exactly like /\_nap/data, /\_nap/live, /\_nap/channel, and /\_nap/rtc on the nap's own host, so the app shares data and channels with the web version. GET /\_nap/api/people returns everyone's name and look (shape and colour), like nap.people() on the web. On 401 with code "invalid_token", sign in again; with "inactive", ask the person to open https://{{rootDomain}} in a browser.
+Nap data from an app, on every platform (NapKit and the launchers already do this): the app cannot pass Cloudflare Access, so it uses a Nap token like an agent. Sign in with the device flow from the `api` topic: POST /\_nap/api/auth/device, open https://{{rootDomain}}/connect?code=<user_code> for the person to approve (on iOS in an ASWebAuthenticationSession or Safari), poll POST /\_nap/api/auth/token, and keep the token safe (the Keychain on iOS). Then send Authorization: Bearer <token> to https://{{rootDomain}}/\_nap/api/naps/<id>/data/<collection>[/<doc>], /live, /channel/<name> (WebSockets with the header), and /rtc (ICE servers for WebRTC). They work exactly like /\_nap/data, /\_nap/live, /\_nap/channel, and /\_nap/rtc on the nap's own host, so the app shares data and channels with the web version. GET /\_nap/api/people returns everyone's name and look (shape and colour), like nap.people() on the web. On 401 with code "invalid_token", sign in again; with "inactive", ask the person to open https://{{rootDomain}} in a browser.
+
+<!-- if notifications -->
+
+Notifications from an app: POST /\_nap/api/naps/<id>/notify with { "title", "body", "open" } is nap.notify for that page (in Swift, Nap.site(id).notify(title:body:open:)). An app with no page of its own posts to /\_nap/api/notify with "app": its folder, which a tap opens (Nap.notify(title:body:open:app:)). The `notifications` topic says what to send. The iOS launcher registers for them itself once someone is signed in.
+
+<!-- /if -->
 
 In the commands, `nap-publish.mjs` is `/tmp/nap-publish.mjs` (see the main instructions).

@@ -82,6 +82,25 @@ function iconFiles() {
   ];
 }
 
+/**
+ * The Swift clients of the instance's extensions (instance/extensions/<name>/client.swift), for
+ * NapKit: what the web gets as nap.<name>, apps get from an extension on NapSite.
+ */
+const SWIFT_EXTENSIONS = import.meta.glob("/instance/extensions/*/client.swift", {
+  query: "?raw",
+  import: "default",
+  eager: true,
+}) as Record<string, string>;
+const NAPKIT_FOLDER = "ios/NapKit/Sources/";
+function swiftExtensionFiles() {
+  return Object.entries(SWIFT_EXTENSIONS).map(([path, content]) => ({
+    path: `${NAPKIT_FOLDER}Extensions/${path.split("/").at(-2)}.swift`,
+    content,
+    encoding: "utf8" as const,
+    executable: false,
+  }));
+}
+
 /** Files that cannot be in the template under their own name, in any folder. */
 const RENAMES: Record<string, string> = { gitignore: ".gitignore" };
 const rename = (path: string) =>
@@ -117,6 +136,6 @@ export function appTemplateFiles() {
         executable: /(^|\/)scripts\//.test(relative),
       };
     })
-    .concat(platformOn("ios") ? iconFiles() : [])
+    .concat(platformOn("ios") ? [...iconFiles(), ...swiftExtensionFiles()] : [])
     .sort((a, b) => a.path.localeCompare(b.path));
 }

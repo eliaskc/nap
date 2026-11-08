@@ -7,6 +7,9 @@
  *                    pages get as nap.<name> (optional)
  *   types.d.ts       its types, added to /_nap/client.d.ts (optional)
  *   instructions.md  the agent instructions topic <name>, listed in the index (optional)
+ *   client.swift     what iOS apps get, for NapKit: an `extension NapSite` with a property
+ *                    <name> built on `extensionKit("<name>")`, so apps call site.<name>
+ *                    (optional). New app repos get it; `scripts/napkit` updates existing ones.
  *
  * The name is the folder's: lowercase letters and digits, starting with a letter, and not one of
  * window.nap's own names. Nap bundles extensions at build time. They are plain TypeScript with no
