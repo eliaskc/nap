@@ -60,6 +60,9 @@ Read one with `curl -fsSL https://{{rootDomain}}/_nap/api/instructions/<topic>`.
 - `channels`: multiplayer, presence, and messages between the people on a page (`nap.channel`).
 - `voice`: a live audio call between the people on a page (`nap.voice`).
 - `fetch`: reading public APIs from other origins (`nap.fetch`).
+<!-- if notifications -->
+- `notifications`: telling the people on this Nap that something happened, on their phones and in their browsers (`nap.notify`).
+<!-- /if -->
 - `api`: the HTTP API without the script: sign-in, publishing, files, versions, restore, comments, and limits.
 - `drafts`: publishing without a token through a claim link the user opens.
 {{extensionTopics}}

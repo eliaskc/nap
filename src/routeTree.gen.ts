@@ -22,6 +22,7 @@ import { Route as ApiUploadRouteImport } from './routes/api/upload'
 import { Route as ApiTokensRouteImport } from './routes/api/tokens'
 import { Route as ApiTestflightRouteImport } from './routes/api/testflight'
 import { Route as ApiSitesRouteImport } from './routes/api/sites'
+import { Route as ApiPushRouteImport } from './routes/api/push'
 import { Route as ApiProfileRouteImport } from './routes/api/profile'
 import { Route as ApiPeopleRouteImport } from './routes/api/people'
 import { Route as ApiMeRouteImport } from './routes/api/me'
@@ -102,6 +103,11 @@ const ApiTestflightRoute = ApiTestflightRouteImport.update({
 const ApiSitesRoute = ApiSitesRouteImport.update({
   id: '/api/sites',
   path: '/api/sites',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiPushRoute = ApiPushRouteImport.update({
+  id: '/api/push',
+  path: '/api/push',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiProfileRoute = ApiProfileRouteImport.update({
@@ -197,6 +203,7 @@ export interface FileRoutesByFullPath {
   '/api/me': typeof ApiMeRoute
   '/api/people': typeof ApiPeopleRoute
   '/api/profile': typeof ApiProfileRoute
+  '/api/push': typeof ApiPushRoute
   '/api/sites': typeof ApiSitesRouteWithChildren
   '/api/testflight': typeof ApiTestflightRoute
   '/api/tokens': typeof ApiTokensRouteWithChildren
@@ -228,6 +235,7 @@ export interface FileRoutesByTo {
   '/api/me': typeof ApiMeRoute
   '/api/people': typeof ApiPeopleRoute
   '/api/profile': typeof ApiProfileRoute
+  '/api/push': typeof ApiPushRoute
   '/api/sites': typeof ApiSitesRouteWithChildren
   '/api/testflight': typeof ApiTestflightRoute
   '/api/tokens': typeof ApiTokensRouteWithChildren
@@ -260,6 +268,7 @@ export interface FileRoutesById {
   '/api/me': typeof ApiMeRoute
   '/api/people': typeof ApiPeopleRoute
   '/api/profile': typeof ApiProfileRoute
+  '/api/push': typeof ApiPushRoute
   '/api/sites': typeof ApiSitesRouteWithChildren
   '/api/testflight': typeof ApiTestflightRoute
   '/api/tokens': typeof ApiTokensRouteWithChildren
@@ -293,6 +302,7 @@ export interface FileRouteTypes {
     | '/api/me'
     | '/api/people'
     | '/api/profile'
+    | '/api/push'
     | '/api/sites'
     | '/api/testflight'
     | '/api/tokens'
@@ -324,6 +334,7 @@ export interface FileRouteTypes {
     | '/api/me'
     | '/api/people'
     | '/api/profile'
+    | '/api/push'
     | '/api/sites'
     | '/api/testflight'
     | '/api/tokens'
@@ -355,6 +366,7 @@ export interface FileRouteTypes {
     | '/api/me'
     | '/api/people'
     | '/api/profile'
+    | '/api/push'
     | '/api/sites'
     | '/api/testflight'
     | '/api/tokens'
@@ -387,6 +399,7 @@ export interface RootRouteChildren {
   ApiMeRoute: typeof ApiMeRoute
   ApiPeopleRoute: typeof ApiPeopleRoute
   ApiProfileRoute: typeof ApiProfileRoute
+  ApiPushRoute: typeof ApiPushRoute
   ApiSitesRoute: typeof ApiSitesRouteWithChildren
   ApiTestflightRoute: typeof ApiTestflightRoute
   ApiTokensRoute: typeof ApiTokensRouteWithChildren
@@ -490,6 +503,13 @@ declare module '@tanstack/react-router' {
       path: '/api/sites'
       fullPath: '/api/sites'
       preLoaderRoute: typeof ApiSitesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/push': {
+      id: '/api/push'
+      path: '/api/push'
+      fullPath: '/api/push'
+      preLoaderRoute: typeof ApiPushRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/profile': {
@@ -685,6 +705,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiMeRoute: ApiMeRoute,
   ApiPeopleRoute: ApiPeopleRoute,
   ApiProfileRoute: ApiProfileRoute,
+  ApiPushRoute: ApiPushRoute,
   ApiSitesRoute: ApiSitesRouteWithChildren,
   ApiTestflightRoute: ApiTestflightRoute,
   ApiTokensRoute: ApiTokensRouteWithChildren,

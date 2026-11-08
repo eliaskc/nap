@@ -109,7 +109,14 @@ the secrets and a deploy workflow that deploys this code with them.
 9. **Extensions (optional).** Add APIs of your own to the kit pages get, in
    `instance/extensions/<name>/` (see "Extensions" below). Their secrets go in
    one secret, `NAP_EXTENSION_SECRETS`, as a JSON object.
-10. **Icon (optional).** Nap's icon (`brand/AppIcon.icon`, made in Icon
+10. **Notifications (optional).** Set `notifications: true` in
+    `instance/config.ts`, and pages and apps can send them (`nap.notify`).
+    Browsers get them once the person turns them on with the bell; Nap makes
+    the web push keys itself. For the iOS app, create an APNs key in the Apple
+    developer account (Keys, Apple Push Notifications service, Sandbox &
+    Production, team scoped): the `.p8` is the secret `NAP_APNS_PRIVATE_KEY`
+    and its key ID the variable `NAP_APNS_KEY_ID`.
+11. **Icon (optional).** Nap's icon (`brand/AppIcon.icon`, made in Icon
     Composer) is the icon of the dashboard and of new app launchers. For your
     own, put an Icon Composer icon at `instance/icon/AppIcon.icon` and run
     `node scripts/icons.mjs instance/icon` on a Mac. Commit both the icon and
@@ -257,6 +264,17 @@ The same `nap.json` (`src/lib/site-manifest.ts`, cached per immutable version) c
 as a single-page app: with `"spa": true`, a page path that has no file gets the root
 `index.html`, so client-side routers work on reloads and deep links.
 Artifacts cannot use it.
+
+### Notifications
+
+With `notifications: true`, a page calls `nap.notify({ title, body, open })` (`/_nap/notify`,
+`src/lib/notifications.ts`), and an app the same through the agent API with its token. Nap sends
+it to everyone else who can view the page, never the sender: to browsers that turned it on
+(web push, with a VAPID key pair Nap makes and keeps in `nap_keys`, and payloads encrypted to
+each browser) and to phones with the app (APNs, with the instance's key). Where they go is
+`push_targets`, by email; dead subscriptions and uninstalled apps are dropped when a push
+service says so. A tap opens a page on the Nap's own domains only. Each send is logged in
+`notifications`, which the per-sender and per-page rate limits count.
 
 ### The artifact viewer
 

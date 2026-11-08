@@ -774,7 +774,9 @@ function WhatsNew({ live, history }: { live: LiveBuild | null; history: Array<Li
               <i
                 className={cn(
                   "absolute top-[5px] -left-[18px] size-[9px] rounded-full ring-3 ring-(--sheet-bg)",
-                  first ? "bg-emerald-500 shadow-[0_0_0_5px_rgb(16_185_129/0.2)]" : "bg-muted-foreground/45",
+                  first
+                    ? "bg-emerald-500 shadow-[0_0_0_5px_rgb(16_185_129/0.2)]"
+                    : "bg-muted-foreground/45",
                 )}
               />
               <span className="flex items-baseline justify-between gap-3">

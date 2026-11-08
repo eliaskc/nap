@@ -64,6 +64,13 @@ export type NapConfig = {
     remarkable?: Record<string, never>;
   } | null;
   /**
+   * Notifications: pages and apps send them with nap.notify, to everyone else who can see the
+   * page. Browsers get them once the person turns them on (the bell in the dashboard's bar); the
+   * iOS app gets them when the deployment has an APNs key (NAP_APNS_KEY_ID and
+   * NAP_APNS_PRIVATE_KEY). Off when left out.
+   */
+  notifications?: boolean;
+  /**
    * Example requests the dashboard rotates through under "Ask your agent", such as
    * `{ kind: "site", text: "where we vote on the offsite venue" }`. Each reads after
    * "Make me a site", "Make me an artifact", or "Make me an app". Optional: Nap has generic ones.

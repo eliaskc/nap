@@ -230,6 +230,17 @@ export interface NapFetchOptions {
   signal?: AbortSignal;
 }
 
+// Notifications (nap.notify)
+
+export interface NapNotification {
+  /** Up to 80 characters. */
+  title: string;
+  /** Up to 240 characters. */
+  body?: string;
+  /** Where a tap goes: a path on this page's site (default its home page), or a URL on this Nap. */
+  open?: string;
+}
+
 export interface Nap {
   db: {
     collection<T = Record<string, unknown>>(
@@ -241,6 +252,12 @@ export interface Nap {
   voice<M = unknown>(name?: string): NapVoiceCall<M>;
   /** Fetches a URL through Nap, for APIs that do not allow other origins. The page lists the hosts in nap.json ("fetch"). */
   fetch(url: string | URL, options?: NapFetchOptions): Promise<Response>;
+  /**
+   * Sends a notification to everyone else who can see this page, on their phones (the app) and
+   * in browsers with notifications on. Never to the sender. Only on Naps with notifications on;
+   * a few a minute at most. Resolves with how many people it went to.
+   */
+  notify(notification: NapNotification): Promise<{ sent: number }>;
   /** The person viewing the page, with their name and look. */
   me(): Promise<NapIdentity>;
   /** Everyone on this Nap, or only these emails, with their names and looks. */

@@ -14,6 +14,9 @@ export type R2Credentials = {
 
 export type AppStoreConnectKey = { keyId: string; issuerId: string; privateKey: string };
 
+/** The APNs key (Keys → Apple Push Notifications service), for notifications to the app. */
+export type ApnsKey = { keyId: string; privateKey: string };
+
 /** A Cloudflare Realtime TURN key, for voice and video between the people on a nap. */
 export type TurnKey = { keyId: string; token: string };
 
@@ -26,6 +29,8 @@ export class Settings extends Context.Service<
     readonly r2: R2Credentials | null;
     /** Apps: the App Store Connect team key. Null when it is not set up. */
     readonly appStoreConnect: AppStoreConnectKey | null;
+    /** Notifications to the iOS app. Null when there is no APNs key. */
+    readonly apns: ApnsKey | null;
     /** Local stages only: a signer run by plain Docker instead of the container binding. */
     readonly signerUrl: string | null;
     /** /_nap/rtc: the TURN key. Null without one; pages then get STUN only. */
@@ -44,6 +49,8 @@ export type SettingsEnv = {
   NAP_ASC_KEY_ID?: string;
   NAP_ASC_ISSUER_ID?: string;
   NAP_ASC_PRIVATE_KEY?: string;
+  NAP_APNS_KEY_ID?: string;
+  NAP_APNS_PRIVATE_KEY?: string;
   NAP_SIGNER_URL?: string;
   NAP_TURN_KEY_ID?: string;
   NAP_TURN_KEY_API_TOKEN?: string;
@@ -59,6 +66,8 @@ export function settingsFromEnv(env: SettingsEnv, rootDomain: string): Settings[
   const keyId = text(env.NAP_ASC_KEY_ID);
   const issuerId = text(env.NAP_ASC_ISSUER_ID);
   const privateKey = text(env.NAP_ASC_PRIVATE_KEY);
+  const apnsKeyId = text(env.NAP_APNS_KEY_ID);
+  const apnsPrivateKey = text(env.NAP_APNS_PRIVATE_KEY);
   const turnKeyId = text(env.NAP_TURN_KEY_ID);
   const turnToken = text(env.NAP_TURN_KEY_API_TOKEN);
   return Settings.of({
@@ -68,6 +77,7 @@ export function settingsFromEnv(env: SettingsEnv, rootDomain: string): Settings[
         ? { accountId, bucket, accessKeyId, secretAccessKey }
         : null,
     appStoreConnect: keyId && issuerId && privateKey ? { keyId, issuerId, privateKey } : null,
+    apns: apnsKeyId && apnsPrivateKey ? { keyId: apnsKeyId, privateKey: apnsPrivateKey } : null,
     signerUrl: text(env.NAP_SIGNER_URL) || null,
     turn: turnKeyId && turnToken ? { keyId: turnKeyId, token: turnToken } : null,
     extensionSecrets: parseExtensionSecrets(text(env.NAP_EXTENSION_SECRETS)),
@@ -81,7 +91,9 @@ export function parseExtensionSecrets(value: string): Record<string, string> {
     const parsed: unknown = JSON.parse(value);
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
     return Object.fromEntries(
-      Object.entries(parsed).filter((entry): entry is [string, string] => typeof entry[1] === "string"),
+      Object.entries(parsed).filter(
+        (entry): entry is [string, string] => typeof entry[1] === "string",
+      ),
     );
   } catch {
     return {};

@@ -23,13 +23,11 @@ registerHooks({
     return next(specifier, context);
   },
 });
-const { handleExtensionRequest, clientTypesWithExtensions } = await import(
-  "../src/lib/extensions.ts"
-);
+const { handleExtensionRequest, clientTypesWithExtensions } =
+  await import("../src/lib/extensions.ts");
 const { respond } = await import("../src/server/runtime.ts");
-const { findExtensions, clientModuleSource, serverModuleSource } = await import(
-  "../scripts/lib/extensions.ts"
-);
+const { findExtensions, clientModuleSource, serverModuleSource } =
+  await import("../scripts/lib/extensions.ts");
 const { renderInstructions } = await import("../src/lib/instructions-text.ts");
 const { parseExtensionSecrets } = await import("../src/server/platform.ts");
 const { bundleClient } = await import("../scripts/lib/client-bundle.ts");
@@ -82,7 +80,6 @@ function environment(secrets = {}) {
   return { DB, SITES, objects, NAP_EXTENSION_SECRETS: JSON.stringify(secrets) };
 }
 
-
 /** An extension that echoes what Nap gave it. */
 const echo = {
   name: "echo",
@@ -126,14 +123,7 @@ function call(env, slug, path, { email = OWNER, frame = false, headers = {} } = 
   const request = new Request(`https://${slug}.nap.test/_nap/ext/${path}`, { headers });
   return respond(
     env,
-    handleExtensionRequest(
-      [echo, broken],
-      slug,
-      request,
-      { email, name: email },
-      path,
-      { frame },
-    ),
+    handleExtensionRequest([echo, broken], slug, request, { email, name: email }, path, { frame }),
   );
 }
 
@@ -228,11 +218,19 @@ test("extension types follow Nap's, and topics join the index", () => {
   ]);
   assert.match(types, /^base\n\n\/\/ nap\.echo\n\nexport interface Nap/);
 
-  const config = { rootDomain: "nap.example.com", orgName: "E", defaultAccess: "private", admin: "A", apps: null };
+  const config = {
+    rootDomain: "nap.example.com",
+    orgName: "E",
+    defaultAccess: "private",
+    admin: "A",
+    apps: null,
+  };
   const index = readFileSync("src/content/instructions/index.md", "utf8");
   const plain = renderInstructions(index, config);
   assert.doesNotMatch(plain, /extensionTopics/);
-  const withEcho = renderInstructions(index, config, undefined, [{ name: "echo", summary: "Echoes" }]);
+  const withEcho = renderInstructions(index, config, undefined, [
+    { name: "echo", summary: "Echoes" },
+  ]);
   assert.match(withEcho, /^- `echo`: Echoes \(`nap\.echo`\)\.$/m);
 });
 

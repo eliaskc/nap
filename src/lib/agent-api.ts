@@ -32,8 +32,27 @@ import { peopleResponse } from "~/lib/welcome";
 import { handleLiveRequest, publishChange } from "~/lib/site-live";
 import { handleChannelRequest } from "~/lib/site-channel";
 import { handleRtcRequest } from "~/lib/site-rtc";
+import { handleSiteFetch } from "~/lib/site-fetch";
+import { EXTENSIONS } from "~/lib/extension-registry";
+import { handleExtensionRequest } from "~/lib/extensions";
+import {
+  handleNotifyRequest,
+  notificationsOn,
+  removeTarget,
+  saveApnsTarget,
+  sendNotification,
+  sendTest,
+} from "~/lib/notifications";
 import { Database } from "~/server/database";
-import { fail, failNoStore, HttpError, json, noStore, readParams } from "~/server/http";
+import {
+  fail,
+  failNoStore,
+  HttpError,
+  json,
+  noStore,
+  readJsonObject,
+  readParams,
+} from "~/server/http";
 import { RateLimiter, Settings } from "~/server/platform";
 import { Storage } from "~/server/storage";
 
@@ -156,6 +175,43 @@ export const handleAgentApi = Effect.fn("handleAgentApi")(function* (request: Re
     return json({ ok: true, ...publishedBody(nap, napUrl) }, { status: 201, headers: noStore });
   }
 
+  // Notifications from the app itself (NapKit's Nap.notify), to everyone else with the app or
+  // notifications on: { title, body?, open? }.
+  if (path === "/notify" && method === "POST") {
+    const result = yield* sendNotification(
+      { kind: "app", place },
+      agent,
+      yield* readJsonObject(request),
+    );
+    return json(result, { headers: noStore });
+  }
+  // A test to the caller's own phones and browsers.
+  if (path === "/push/test" && method === "POST") {
+    return json(yield* sendTest(agent, place), { headers: noStore });
+  }
+  // A phone with the app: its APNs device token, so notifications reach it. DELETE turns it off.
+  if (path === "/push/devices" && (method === "POST" || method === "DELETE")) {
+    const body = yield* readJsonObject(request);
+    const token = typeof body.token === "string" ? body.token.trim().toLowerCase() : "";
+    if (!/^[0-9a-f]{64,200}$/.test(token))
+      return yield* failNoStore(400, "Give the APNs device token, in hex");
+    if (method === "DELETE") {
+      yield* removeTarget(agent.email, token);
+      return json({ ok: true }, { headers: noStore });
+    }
+    if (!notificationsOn()) {
+      return yield* failNoStore(404, "Notifications are off on this Nap", {
+        code: "notifications_off",
+      });
+    }
+    yield* saveApnsTarget(
+      agent.email,
+      { token, environment: body.environment === "sandbox" ? "sandbox" : "production" },
+      typeof body.label === "string" ? body.label : agent.client,
+    );
+    return json({ ok: true }, { headers: noStore });
+  }
+
   // Native apps: the source repo, and builds per platform (iOS: signed for TestFlight). See apps.ts.
   if (path === "/apps" || path.startsWith("/apps/")) {
     if (path.match(/^\/apps\/[^/]+\/builds$/) && method === "POST") yield* limitUploads(agent);
@@ -201,6 +257,27 @@ export const handleAgentApi = Effect.fn("handleAgentApi")(function* (request: Re
     return yield* handleChannelRequest(nap.slug, rest.slice("/channel/".length), request, agent);
   }
   if (rest === "/rtc") return yield* handleRtcRequest(nap.slug, request, agent);
+  // The rest of what a page can do, for NapKit: nap.fetch, extensions, and nap.notify.
+  if (rest === "/fetch") {
+    return yield* handleSiteFetch(nap.slug, request, agent.email, {
+      frame: nap.kind === "artifact",
+    });
+  }
+  if (rest.startsWith("/ext/")) {
+    return yield* handleExtensionRequest(
+      EXTENSIONS,
+      nap.slug,
+      request,
+      agent,
+      rest.slice("/ext/".length),
+      {
+        frame: nap.kind === "artifact",
+      },
+    );
+  }
+  if (rest === "/notify") {
+    return yield* handleNotifyRequest(nap.slug, request, agent, place, { token: true });
+  }
 
   if (rest === "/versions" && method === "POST") {
     const published = yield* publish(request, url, agent, nap.slug);

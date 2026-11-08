@@ -7,6 +7,7 @@ const RESERVED = new Set([
   "channel",
   "voice",
   "fetch",
+  "notify",
   "me",
   "people",
   "avatar",
@@ -70,7 +71,8 @@ export function extensionFiles(extensions: Array<FoundExtension>) {
  * instructions.
  */
 export function serverModuleSource(extensions: Array<FoundExtension>) {
-  const read = (file: string | null) => (file ? JSON.stringify(readFileSync(file, "utf8")) : "null");
+  const read = (file: string | null) =>
+    file ? JSON.stringify(readFileSync(file, "utf8")) : "null";
   return [
     ...extensions.map(
       (extension, index) => `import server${index} from ${JSON.stringify(extension.server)};`,

@@ -4,6 +4,7 @@ import type { NapConfig } from "../../nap.config.ts";
 /** Topics that only some deployments have, by the setting that turns them on. */
 export const OPTIONAL_TOPICS: Record<string, (config: NapConfig) => boolean> = {
   apps: (config) => Boolean(config.apps),
+  notifications: (config) => config.notifications === true,
 };
 
 /**
@@ -20,6 +21,7 @@ export function renderInstructions(
 ) {
   const flags: Record<string, boolean> = {
     apps: Boolean(config.apps),
+    notifications: config.notifications === true,
     ios: Boolean(config.apps?.ios),
     remarkable: Boolean(config.apps?.remarkable),
     private: config.defaultAccess === "private",

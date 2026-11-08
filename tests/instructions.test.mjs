@@ -17,6 +17,7 @@ const config = (overrides = {}) => ({
     app: "nap",
     ios: { teamId: "T", appStoreId: "1", bundleId: "com.example.nap", profileName: "S" },
   },
+  notifications: true,
   ...overrides,
 });
 const indexTopics = (text) => [...text.matchAll(/^- `([a-z]+)`:/gm)].map((match) => match[1]);
@@ -38,6 +39,15 @@ test("without apps, the index leaves out the apps topic", () => {
   assert.ok(!listed.includes("apps"));
   assert.equal(OPTIONAL_TOPICS.apps(config({ apps: null })), false);
   assert.equal(OPTIONAL_TOPICS.apps(config()), true);
+});
+
+test("notifications are a topic only on Naps that have them", () => {
+  const listed = indexTopics(
+    renderInstructions(read("index"), config({ notifications: undefined })),
+  );
+  assert.ok(!listed.includes("notifications"));
+  assert.equal(OPTIONAL_TOPICS.notifications(config({ notifications: undefined })), false);
+  assert.equal(OPTIONAL_TOPICS.notifications(config()), true);
 });
 
 test("the default access decides what the index says about sharing", () => {

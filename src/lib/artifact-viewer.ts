@@ -4,7 +4,8 @@ import { handleSiteCommentsRequest } from "~/lib/comments";
 import { ensureProfile, getIdentity, objectKey, type Identity } from "~/lib/nap-server";
 import { toolbarPage } from "~/lib/nap-toolbar";
 import { findRedirect } from "~/lib/rekey";
-import { ARTIFACT_PATH, napUrl, type NapPlace } from "~/lib/nap-urls";
+import { ARTIFACT_PATH, isLocalHostname, napUrl, type NapPlace } from "~/lib/nap-urls";
+import { handleNotifyRequest } from "~/lib/notifications";
 import { handleSiteAccessRequest } from "~/lib/site-access";
 import { handleSiteDataRequest } from "~/lib/site-data";
 import { serveSiteDataClient, serveVoiceEngine } from "~/lib/site-data-client";
@@ -29,7 +30,7 @@ import {
   requireJsonBody,
   requireSameSite,
 } from "~/server/http";
-import { inBackground } from "~/server/platform";
+import { inBackground, Settings } from "~/server/platform";
 import { Storage } from "~/server/storage";
 import { recordVisit } from "~/lib/visits";
 import { randomString, sha256Hex } from "~/server/tokens";
@@ -301,6 +302,23 @@ export const handleFrameRequest = Effect.fn("handleFrameRequest")(function* (req
   if (rest === "/_nap/fetch") {
     return withCors(
       yield* recoverHttpError(handleSiteFetch(frame.slug, request, frame.email, { frame: true })),
+    );
+  }
+  if (rest === "/_nap/notify") {
+    const { rootDomain } = yield* Settings;
+    const local = isLocalHostname(url.hostname) ? url.origin : null;
+    return withCors(
+      yield* recoverHttpError(
+        handleNotifyRequest(
+          frame.slug,
+          request,
+          identity,
+          { rootDomain, localOrigin: local },
+          {
+            frame: true,
+          },
+        ),
+      ),
     );
   }
   if (rest.startsWith("/_nap/ext/")) {

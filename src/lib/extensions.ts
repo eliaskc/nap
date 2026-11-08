@@ -1,9 +1,5 @@
 import { Effect, Schema } from "effect";
-import type {
-  NapExtension,
-  NapExtensionCache,
-  NapExtensionContext,
-} from "../../nap.extension.ts";
+import type { NapExtension, NapExtensionCache, NapExtensionContext } from "../../nap.extension.ts";
 import type { Identity } from "~/lib/nap-server";
 import { canViewSite } from "~/lib/site-data";
 import { Database } from "~/server/database";
@@ -131,10 +127,7 @@ function log(extension: string, message: string, fields: Record<string, unknown>
 }
 
 /** Nap's client types with each extension's types.d.ts after them. */
-export function clientTypesWithExtensions(
-  base: string,
-  extensions: ReadonlyArray<ExtensionEntry>,
-) {
+export function clientTypesWithExtensions(base: string, extensions: ReadonlyArray<ExtensionEntry>) {
   const added = extensions
     .filter((extension) => extension.types)
     .map((extension) => `\n// nap.${extension.name}\n\n${extension.types!.trim()}\n`);

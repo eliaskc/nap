@@ -4,6 +4,7 @@ import channels from "~/content/instructions/channels.md?raw";
 import data from "~/content/instructions/data.md?raw";
 import drafts from "~/content/instructions/drafts.md?raw";
 import fetch from "~/content/instructions/fetch.md?raw";
+import notifications from "~/content/instructions/notifications.md?raw";
 import index from "~/content/instructions/index.md?raw";
 import sites from "~/content/instructions/sites.md?raw";
 import source from "~/content/instructions/source.md?raw";
@@ -24,6 +25,7 @@ const TOPICS: Record<string, string> = {
   channels,
   voice,
   fetch,
+  notifications,
   api,
   drafts,
   apps,

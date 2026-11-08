@@ -37,6 +37,7 @@ import {
 } from "~/dashboard/data";
 import { formatDateTime } from "~/dashboard/format";
 import { GetAppButton } from "~/dashboard/install";
+import { NotificationsButton } from "~/dashboard/notifications";
 import { KindIcon } from "~/dashboard/kinds";
 import {
   PANEL_CLASS,
@@ -115,6 +116,7 @@ export function TopBar({
         <Group floating flat={VARIANTS[variant].mode === "tidy"}>
           <UploadButton />
           <GetAppButton />
+          <NotificationsButton />
           <ConnectedAgents />
           {profile && (
             <GroupButton

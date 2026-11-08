@@ -15,6 +15,7 @@ import { handleSiteAccessRequest } from "~/lib/site-access";
 import { handleSiteDataRequest, siteDataTarget } from "~/lib/site-data";
 import { serveClientTypes, serveSiteDataClient, serveVoiceEngine } from "~/lib/site-data-client";
 import { handleLiveRequest, publishChange } from "~/lib/site-live";
+import { handleNotifyRequest } from "~/lib/notifications";
 import { handleChannelRequest } from "~/lib/site-channel";
 import { handleRtcRequest } from "~/lib/site-rtc";
 import { handleSiteFetch } from "~/lib/site-fetch";
@@ -137,6 +138,10 @@ const routeRequest = Effect.fn("routeRequest")(function* (
         path,
       );
     }
+    const localNotifyMatch = url.pathname.match(/^\/s\/([^/]+)\/_nap\/notify$/);
+    if (localNotifyMatch) {
+      return yield* handleNotifyRequest(localNotifyMatch[1], request, getIdentity(request), place);
+    }
     const localFetchMatch = url.pathname.match(/^\/s\/([^/]+)\/_nap\/fetch$/);
     if (localFetchMatch) {
       return yield* handleSiteFetch(localFetchMatch[1], request, getIdentity(request).email);
@@ -198,6 +203,9 @@ const routeRequest = Effect.fn("routeRequest")(function* (
     }
     if (url.pathname === "/_nap/fetch") {
       return yield* handleSiteFetch(slug, request, getIdentity(request).email);
+    }
+    if (url.pathname === "/_nap/notify") {
+      return yield* handleNotifyRequest(slug, request, getIdentity(request), place);
     }
     if (url.pathname.startsWith("/_nap/ext/")) {
       const path = url.pathname.slice("/_nap/ext/".length);
