@@ -748,62 +748,66 @@ function when(iso: string) {
   return date.toLocaleDateString(undefined, { day: "numeric", month: "short" });
 }
 
+/** How many builds the timeline shows before "N earlier builds". */
+const TIMELINE_SHOWN = 4;
+
 /**
- * Every recent build is one line; the open one shows its notes. The live one starts open, so the
- * section reads as before, and the history costs a line per build.
+ * A timeline down the recent builds. The live one reads as now; each older one is smaller and a
+ * step dimmer, so the past is there without competing.
  */
 function WhatsNew({ live, history }: { live: LiveBuild | null; history: Array<LiveBuild> }) {
   const builds = history.length ? history : live ? [live] : [];
-  const [open, setOpen] = React.useState<string | null>(live?.id ?? builds[0]?.id ?? null);
+  const [all, setAll] = React.useState(false);
   if (builds.length === 0) return <p className="text-sm text-muted-foreground">No builds yet.</p>;
+  const shown = all ? builds : builds.slice(0, TIMELINE_SHOWN);
   return (
-    <div className="flex flex-col border-t">
-      {builds.map((build) => {
-        const on = open === build.id;
-        return (
-          <button
-            key={build.id}
-            type="button"
-            aria-expanded={on}
-            onClick={() => setOpen(on ? null : build.id)}
-            className={cn(
-              "flex w-full flex-col gap-1 border-b px-0.5 py-2.5 text-left transition-colors",
-              !on && "hover:bg-foreground/[0.03]",
-            )}
-          >
-            <span className="flex items-baseline gap-3">
-              <b
+    <div className="flex flex-col">
+      <ol className="relative flex flex-col gap-4 pl-[18px] before:absolute before:top-[7px] before:bottom-2 before:left-1 before:w-[1.5px] before:bg-border">
+        {shown.map((build, index) => {
+          const first = index === 0;
+          return (
+            <li
+              key={build.id}
+              className="relative flex flex-col gap-0.5"
+              style={{ opacity: first ? 1 : Math.max(0.45, 0.85 - index * 0.12) }}
+            >
+              <i
                 className={cn(
-                  "font-semibold",
-                  on ? "text-[14.5px]" : "text-[13.5px] font-medium text-foreground/70",
+                  "absolute top-[5px] -left-[18px] size-[9px] rounded-full ring-3 ring-(--sheet-bg)",
+                  first ? "bg-emerald-500 shadow-[0_0_0_5px_rgb(16_185_129/0.2)]" : "bg-muted-foreground/45",
+                )}
+              />
+              <span className="flex items-baseline justify-between gap-3">
+                <b className={first ? "text-[14.5px] font-semibold" : "text-[13px] font-medium"}>
+                  Build {build.buildNumber}
+                </b>
+                <span className="text-[12.5px] whitespace-nowrap text-muted-foreground">
+                  {when(build.createdAt)} · {build.byName}
+                </span>
+              </span>
+              <p
+                className={cn(
+                  "leading-normal",
+                  first ? "text-[14.5px] text-foreground/80" : "text-[13px] text-muted-foreground",
+                  !build.notes && "italic",
                 )}
               >
-                Build {build.buildNumber}
-                {build.id === live?.id && history.length > 1 && (
-                  <span className="ml-2 rounded-full bg-kind-app-soft px-1.5 py-px align-[1px] text-[11px] font-semibold text-kind-app">
-                    Latest
-                  </span>
-                )}
-              </b>
-              <span className="ml-auto text-[12.5px] whitespace-nowrap text-muted-foreground">
-                {when(build.createdAt)} · {build.byName}
-              </span>
-              <span aria-hidden className="w-3.5 text-center text-[15px] text-muted-foreground/70">
-                {on ? "−" : "+"}
-              </span>
-            </span>
-            {on ? (
-              <span className="text-sm leading-normal text-foreground/80">
                 {build.notes || "No notes for this build."}
-              </span>
-            ) : (
-              <span className="truncate text-[12.5px] text-muted-foreground/70">
-                {build.notes || "No notes"}
-              </span>
-            )}
-          </button>
-        );
-      })}
+              </p>
+            </li>
+          );
+        })}
+      </ol>
+      {!all && builds.length > TIMELINE_SHOWN && (
+        <button
+          type="button"
+          onClick={() => setAll(true)}
+          className="mt-3.5 ml-[18px] self-start text-[12.5px] text-muted-foreground underline underline-offset-2 hover:text-foreground"
+        >
+          {builds.length - TIMELINE_SHOWN} earlier{" "}
+          {builds.length - TIMELINE_SHOWN === 1 ? "build" : "builds"}
+        </button>
+      )}
     </div>
   );
 }
