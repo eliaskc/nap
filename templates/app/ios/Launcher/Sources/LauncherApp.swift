@@ -58,7 +58,7 @@ struct LauncherView: View {
         if !account.signedIn {
           Section {
             VStack(alignment: .leading, spacing: 10) {
-              Text("Sign in to \(Nap.origin.host() ?? "Nap") so the apps can play together and you get notifications.")
+              Text("Sign in to \(Nap.origin.host() ?? "Nap") once, for every app here.")
                 .font(.subheadline)
               NapSignInButton()
             }
@@ -75,7 +75,9 @@ struct LauncherView: View {
         if account.signedIn {
           Menu {
             Text(account.displayName)
-            Button("Send a test notification", systemImage: "bell") { sendTest() }
+            if push.enabled == true {
+              Button("Send a test notification", systemImage: "bell") { sendTest() }
+            }
             Button("Sign out", systemImage: "rectangle.portrait.and.arrow.right", role: .destructive) {
               account.signOut()
             }

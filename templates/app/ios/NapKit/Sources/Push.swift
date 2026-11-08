@@ -9,6 +9,9 @@ import UserNotifications
 public final class NapPush {
   public static let shared = NapPush()
 
+  /// Whether this Nap sends notifications: nil until known. The launcher shows notification
+  /// settings only when it does.
+  public private(set) var enabled: Bool?
   /// Whether this phone gets notifications: nil until known.
   public private(set) var allowed: Bool?
   /// What the last tapped notification opens: the launcher clears it once it has.
@@ -19,7 +22,10 @@ public final class NapPush {
   /// Asks to allow notifications (once: iOS remembers the answer) and registers for them, on
   /// Naps that send them.
   public func start() async {
-    guard NapAccount.shared.signedIn, await Nap.canNotify() else { return }
+    guard NapAccount.shared.signedIn else { return }
+    let enabled = await Nap.canNotify()
+    self.enabled = enabled
+    guard enabled else { return }
     let center = UNUserNotificationCenter.current()
     let granted = (try? await center.requestAuthorization(options: [.alert, .sound, .badge])) ?? false
     allowed = granted
@@ -95,7 +101,8 @@ public struct NapOpen: Equatable, Sendable {
 
 /// The launcher's app delegate: device tokens, notifications while open, and taps.
 /// `@UIApplicationDelegateAdaptor(NapAppDelegate.self) var delegate` in the App.
-public final class NapAppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
+@MainActor
+public final class NapAppDelegate: NSObject, UIApplicationDelegate, @preconcurrency UNUserNotificationCenterDelegate {
   public func application(
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
@@ -112,19 +119,26 @@ public final class NapAppDelegate: NSObject, UIApplicationDelegate, UNUserNotifi
     // No push capability in this build, or no network: notifications stay off.
   }
 
+  // The completion-handler versions, never the async ones: iOS calls these on the main thread
+  // and UIKit wants the answer there, while the async versions answer from another thread and
+  // crash the app with "Call must be made on main thread".
+
   // Show notifications while the launcher is open, too.
-  public nonisolated func userNotificationCenter(
-    _ center: UNUserNotificationCenter, willPresent notification: UNNotification
-  ) async -> UNNotificationPresentationOptions {
-    [.banner, .list, .sound]
+  public func userNotificationCenter(
+    _ center: UNUserNotificationCenter, willPresent notification: UNNotification,
+    withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+  ) {
+    completionHandler([.banner, .list, .sound])
   }
 
-  public nonisolated func userNotificationCenter(
-    _ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse
-  ) async {
+  public func userNotificationCenter(
+    _ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse,
+    withCompletionHandler completionHandler: @escaping () -> Void
+  ) {
     let info = response.notification.request.content.userInfo
     let url = (info["url"] as? String).flatMap(URL.init(string:))
     let source = info["source"] as? String ?? ""
-    await MainActor.run { NapPush.shared.opened = NapOpen(url: url, source: source) }
+    NapPush.shared.opened = NapOpen(url: url, source: source)
+    completionHandler()
   }
 }
