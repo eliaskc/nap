@@ -13,7 +13,7 @@ Nap is a TanStack Start app on Cloudflare Workers. It provides a private dashboa
 - Runtime: Cloudflare Workers
 - UI: React, Tailwind CSS v4, shadcn/ui with Base UI
 - Infrastructure: `alchemy.run.ts`, with pinned Alchemy and Effect versions
-- Bindings: `DB` = D1, `SITES` = R2, `LIVE` = Durable Object for live collection updates, `CHANNELS` = Durable Object per multiplayer channel, `SOURCES` = Cloudflare Artifacts namespace with one Git repo per site that keeps its source in Nap (sites with a build step; never artifacts) and one per app, `SIGNER` = Cloudflare Container (`containers/signer`) that signs iOS builds for TestFlight, inferred from `NapWorker`
+- Bindings: `DB` = D1, `SITES` = R2, `LIVE` = Durable Object for live collection updates, `CHANNELS` = Durable Object per multiplayer channel, `LOADER` = Worker Loader that runs a site's channel server (its own JavaScript, named in nap.json) as a sandboxed facet of the channel object, only with `channelServers` on, `SOURCES` = Cloudflare Artifacts namespace with one Git repo per site that keeps its source in Nap (sites with a build step; never artifacts) and one per app, `SIGNER` = Cloudflare Container (`containers/signer`) that signs iOS builds for TestFlight, inferred from `NapWorker`
 
 ## Rules
 

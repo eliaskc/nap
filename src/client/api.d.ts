@@ -147,14 +147,26 @@ export interface NapChannel<S = unknown, M = unknown> {
   readonly status: NapChannelStatus;
   /** Everyone connected, this page included (self: true), oldest first. */
   readonly peers: Array<NapPeer<S>>;
-  /** The longest-connected peer. Every page agrees on it, so it can run shared state. */
+  /**
+   * Whether the site runs a server for this channel (`servers` in nap.json). Known once
+   * connected. Pages reach it with `send(data, { to: "server" })`; its messages come from the
+   * peer id "server".
+   */
+  readonly server: boolean;
+  /**
+   * The longest-connected peer. Every page agrees on it, so it can run shared state. Null when
+   * the channel has a server.
+   */
   readonly host: NapPeer<S> | null;
   readonly isHost: boolean;
   on<E extends keyof NapChannelEvents<S, M>>(
     event: E,
     listener: (value: NapChannelEvents<S, M>[E]) => void,
   ): () => void;
-  /** To every other page, or to one peer id with `{ to }`. False when not connected. */
+  /**
+   * To every other page, to one peer id with `{ to }`, or to the channel's server with
+   * `{ to: "server" }`. False when not connected.
+   */
   send(data: M, options?: { to?: string }): boolean;
   /** This page's state for everyone, up to 1 KB. Sent at most 20 times a second. */
   setPresence(state: S | null): void;

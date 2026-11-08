@@ -369,6 +369,7 @@ function createNap(env, site) {
         var peers = new Map()
         var socket = null
         var selfId = null
+        var hasServer = false
         var status = "connecting"
         var retries = 0
         var retryTimer = null
@@ -421,6 +422,7 @@ function createNap(env, site) {
                 try { message = JSON.parse(event.data) } catch (e) { return }
                 if (message.t === "welcome") {
                     selfId = message.id
+                    hasServer = message.server === true
                     retries = 0
                     peers.clear()
                     ;(message.peers || []).forEach(function (p) { peers.set(p.id, peer(p)) })
@@ -477,8 +479,9 @@ function createNap(env, site) {
             get id() { return selfId },
             get status() { return status },
             get peers() { return list() },
-            get host() { return list()[0] || null },
-            get isHost() { var first = list()[0]; return Boolean(first && first.self) },
+            get server() { return hasServer },
+            get host() { return hasServer ? null : list()[0] || null },
+            get isHost() { var first = list()[0]; return Boolean(!hasServer && first && first.self) },
             on: function (event, listener) {
                 var set = listeners[event]
                 if (!set) throw new TypeError("Unknown channel event: " + event)

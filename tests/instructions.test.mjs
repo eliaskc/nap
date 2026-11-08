@@ -50,6 +50,17 @@ test("notifications are a topic only on Naps that have them", () => {
   assert.equal(OPTIONAL_TOPICS.notifications(config()), true);
 });
 
+test("channel servers show in the index and the channels topic only where they are on", () => {
+  const off = config();
+  const on = config({ channelServers: true });
+  assert.match(renderInstructions(read("index"), off), /There is no server code/);
+  assert.doesNotMatch(renderInstructions(read("index"), off), /channel's own server/);
+  assert.doesNotMatch(renderInstructions(read("index"), on), /There is no server code/);
+  assert.match(renderInstructions(read("index"), on), /channel's own server/);
+  assert.doesNotMatch(renderInstructions(read("channels"), off), /Channel servers/);
+  assert.match(renderInstructions(read("channels"), on), /## Channel servers/);
+});
+
 test("the default access decides what the index says about sharing", () => {
   const privately = renderInstructions(read("index"), config());
   assert.match(privately, /New pages are private/);

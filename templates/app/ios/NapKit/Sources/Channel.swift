@@ -46,6 +46,9 @@ public final class NapChannel<M: Codable & Sendable> {
   public private(set) var isOpen = false
   /// This device's id on the channel, while it is open.
   public private(set) var selfId: String?
+  /// Whether the site runs a server for this channel (`servers` in its nap.json). Send to it with
+  /// `send(_:to: "server")`; its messages come from the peer id "server".
+  public private(set) var hasServer = false
 
   @ObservationIgnored public var onPresence: (([NapPeer]) -> Void)?
   @ObservationIgnored public var onJoin: ((NapPeer) -> Void)?
@@ -88,7 +91,8 @@ public final class NapChannel<M: Codable & Sendable> {
 
   private struct Outgoing: Encodable { var t = "send"; var data: M; var to: String? }
 
-  /// Sends a message to everyone else, or to one peer by id. False while the channel is closed.
+  /// Sends a message to everyone else, to one peer by id, or to the channel's server with
+  /// `to: "server"`. False while the channel is closed.
   @discardableResult
   public func send(_ data: M, to: String? = nil) -> Bool {
     guard isOpen, !isWatching, let socket, let text = try? JSONEncoder().encode(Outgoing(data: data, to: to)) else {
@@ -162,9 +166,10 @@ public final class NapChannel<M: Codable & Sendable> {
     var from: From?
     var data: M?
     var error: String?
+    var server: Bool?
     struct From: Decodable { var id: String; var email: String?; var name: String?; var shape: String?; var color: String? }
 
-    private enum Keys: String, CodingKey { case t, id, peers, peer, state, from, data, error }
+    private enum Keys: String, CodingKey { case t, id, peers, peer, state, from, data, error, server }
     init(from decoder: Decoder) throws {
       let c = try decoder.container(keyedBy: Keys.self)
       t = try c.decode(String.self, forKey: .t)
@@ -176,6 +181,7 @@ public final class NapChannel<M: Codable & Sendable> {
       // A message of another shape (another version of the page) is dropped, not fatal.
       data = t == "message" ? try? c.decodeIfPresent(M.self, forKey: .data) : nil
       error = try? c.decodeIfPresent(String.self, forKey: .error)
+      server = try? c.decodeIfPresent(Bool.self, forKey: .server)
     }
   }
 
@@ -186,6 +192,7 @@ public final class NapChannel<M: Codable & Sendable> {
     switch message.t {
     case "welcome":
       selfId = message.id
+      hasServer = message.server == true
       retries = 0
       map = [:]
       for var peer in message.peers ?? [] {

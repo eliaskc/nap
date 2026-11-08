@@ -139,6 +139,43 @@ test("channel: one object per name, presence, messages, host", () => {
   assert.notEqual(nap.channel("lobby"), room, "a new object after leave");
 });
 
+test('channel: with a server, nobody hosts and pages talk to it as "server"', () => {
+  const nap = page();
+  const room = nap.channel("game-1");
+  const [socket] = FakeSocket.all;
+  socket.open();
+  assert.equal(room.server, false, "unknown until connected");
+  socket.receive({ t: "welcome", id: "a", peers: [peer("a", 1)], server: true });
+  assert.equal(room.server, true);
+  assert.equal(room.host, null);
+  assert.equal(room.isHost, false);
+
+  const messages = [];
+  room.on("message", (message) => messages.push(message));
+  const from = { id: "server", email: "", name: "Server", shape: "", color: "" };
+  socket.receive({ t: "message", from, data: { tick: 1 } });
+  assert.equal(messages[0].from.id, "server");
+  assert.equal(messages[0].from.self, false);
+  assert.deepEqual(messages[0].data, { tick: 1 });
+
+  room.send({ move: 1 }, { to: "server" });
+  assert.deepEqual(socket.messages(), [{ t: "send", data: { move: 1 }, to: "server" }]);
+
+  const errors = [];
+  room.on("error", (error) => errors.push(error));
+  const logged = [];
+  const original = console.error;
+  console.error = (line) => logged.push(line);
+  try {
+    socket.receive({ t: "error", error: "boom", server: true });
+  } finally {
+    console.error = original;
+  }
+  assert.equal(errors[0].status, 500);
+  assert.match(logged[0], /game-1.*boom/);
+  room.leave();
+});
+
 test("channel: reconnects after a drop, but not when access is gone", (t) => {
   t.mock.timers.enable({ apis: ["setTimeout", "setInterval", "Date"] });
   const nap = page();

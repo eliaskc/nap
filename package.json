@@ -16,7 +16,7 @@
     "plan": "bun scripts/infra/run.mjs plan",
     "infra:inventory": "bun scripts/infra/inventory.mjs",
     "logs": "alchemy logs --stage prod --profile ${ALCHEMY_PROFILE:-nap}",
-    "test:http": "node scripts/agent-publish/test-local.mjs && node scripts/agent-api/test-local.mjs",
+    "test:http": "node scripts/agent-publish/test-local.mjs && node scripts/agent-api/test-local.mjs && node scripts/channel-servers/test-local.mjs",
     "test:voice": "node scripts/voice/test-browser.mjs",
     "test:sources": "node scripts/sources/test-remote.mjs",
     "test:apps": "node scripts/apps/test-testflight.mjs",

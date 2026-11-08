@@ -232,8 +232,35 @@ Object per nap and channel name, named `<slug>/<channel>`. Pages connect to
 presence state. Nothing is stored: presence lives in each socket's
 attachment, so it survives hibernation. The object stamps every message with
 the sender from the identity the Worker checked, rate-limits each socket, and
-rechecks access at most once a minute while messages flow. Nap runs no game
-logic; pages agree on the longest-connected peer as the host for shared state.
+rechecks access at most once a minute while messages flow. Without a server,
+pages agree on the longest-connected peer as the host for shared state.
+
+#### Channel servers
+
+With `channelServers: true` (Workers Paid plan; always on local stages), a
+site can name its own JavaScript for channels in its live `nap.json`
+(`"servers": { "game-*": "server.js" }`), and that code is the channel's
+authoritative host instead of a page (`src/lib/channel-server.ts`). The
+channel object stays in charge: it keeps the sockets, identity, rate limits,
+and access checks, and loads the file from the site's version in R2 into a
+Dynamic Worker (Worker Loader), keyed by slug, version, and path. It runs the
+code as a Durable Object facet, a child of the channel object with its own
+SQLite storage that cannot reach the channel object's. The Dynamic Worker has
+no bindings and no network (`globalOutbound: null`): it only hears the joins,
+leaves, presence, and `to: "server"` messages the channel object passes it,
+one at a time, and answers with the messages to send.
+
+The server starts when the first person joins, with the version live then,
+and stops when the last one leaves; a new version takes over in the next
+session, and the facet's storage carries over. While it runs, a timer ticks
+it at its own rate (up to 30 Hz) or simply keeps the object awake, so the
+server keeps its memory; a running server costs Durable Object duration and
+one Dynamic Worker request per tick. Errors go to Workers Logs and to the
+pages as `error` events. `pnpm test:http` runs it end to end
+(`scripts/channel-servers/test-local.mjs`).
+
+Native game servers (an engine's dedicated server over UDP, such as
+Counter-Strike's) do not fit this: see `PROJECT.md`.
 
 ### Voice
 

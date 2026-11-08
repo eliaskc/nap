@@ -28,6 +28,7 @@ export function channel(name: string): NapChannel {
   const peers = new Map<string, NapPeer>();
   let socket: WebSocket | null = null;
   let selfId: string | null = null;
+  let hasServer = false;
   let status: NapChannelStatus = "connecting";
   let retries = 0;
   let retryTimer: ReturnType<typeof setTimeout> | undefined;
@@ -86,6 +87,7 @@ export function channel(name: string): NapChannel {
       }
       if (message.t === "welcome") {
         selfId = message.id;
+        hasServer = message.server === true;
         retries = 0;
         peers.clear();
         for (const p of message.peers as Array<RawPeer>) peers.set(p.id, peer(p));
@@ -115,9 +117,14 @@ export function channel(name: string): NapChannel {
         changed.state = message.state;
         emit("presence", list());
       } else if (message.t === "message") {
-        emit("message", { from: peers.get(message.from.id) || message.from, data: message.data });
+        const from =
+          peers.get(message.from.id) ||
+          ({ joinedAt: 0, state: null, ...message.from, self: false } as NapPeer);
+        emit("message", { from, data: message.data });
       } else if (message.t === "error") {
-        emit("error", new NapError(message.error, 400));
+        // Channel server errors go to the console too, where agents look first.
+        if (message.server) console.error("Nap channel server (" + name + "): " + message.error);
+        emit("error", new NapError(message.error, message.server ? 500 : 400));
       }
     };
     current.onclose = (event) => {
@@ -154,13 +161,20 @@ export function channel(name: string): NapChannel {
     get peers() {
       return list();
     },
-    /** The longest-connected peer. Every page agrees on it, so it can run shared state. */
+    /** Whether the site runs a server for this channel. Pages reach it with { to: "server" }. */
+    get server() {
+      return hasServer;
+    },
+    /**
+     * The longest-connected peer. Every page agrees on it, so it can run shared state. None when
+     * the channel has a server, which runs it instead.
+     */
     get host() {
-      return list()[0] || null;
+      return hasServer ? null : list()[0] || null;
     },
     get isHost() {
       const first = list()[0];
-      return Boolean(first && first.self);
+      return Boolean(!hasServer && first && first.self);
     },
     on<E extends keyof Events>(event: E, listener: (value: Events[E]) => void) {
       const set = Object.hasOwn(listeners, event)
@@ -170,7 +184,7 @@ export function channel(name: string): NapChannel {
       set.add(listener);
       return () => void set.delete(listener);
     },
-    /** To every other page, or to one peer id with { to }. False if not connected. */
+    /** To every other page, to one peer id with { to }, or to the server with { to: "server" }. */
     send(data: unknown, options: { to?: string } = {}) {
       return raw({ t: "send", data, to: options.to });
     },

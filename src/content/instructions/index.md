@@ -1,6 +1,17 @@
 # Nap at {{rootDomain}}
 
-Nap hosts small web things for {{orgName}}: prototypes, demos, reports, docs, little tools, dashboards, games. Anything that builds to static files with an index.html fits. Pages can also store data and talk to each other live through Nap. There is no server code, and no secrets at request time.
+Nap hosts small web things for {{orgName}}: prototypes, demos, reports, docs, little tools, dashboards, games. Anything that builds to static files with an index.html fits. Pages can also store data and talk to each other live through Nap.
+
+<!-- if !channelServers -->
+
+There is no server code, and no secrets at request time.
+
+<!-- /if -->
+<!-- if channelServers -->
+
+The only server code is a multiplayer channel's own server (`channels` topic), and there are no secrets at request time.
+
+<!-- /if -->
 
 You build and publish yourself. Do not hand routine build or publish steps back to the user.
 
@@ -12,6 +23,9 @@ This page covers the common case. Read a topic below when you need it.
 - Follow the system light or dark mode; the Nap bar does. With plain CSS, use `color-scheme: light dark` and `@media (prefers-color-scheme: dark)`. With a `.dark` class theme (Tailwind, shadcn), put this in `<head>`:
   `<script>(()=>{const m=matchMedia("(prefers-color-scheme: dark)"),r=document.documentElement,s=()=>{r.classList.toggle("dark",m.matches);r.style.colorScheme=m.matches?"dark":"light"};s();m.addEventListener("change",s)})()</script>`
 - Never upload servers, API routes, SSR, `.env` files, or secrets. Treat everything on Nap as internal, not secret.
+<!-- if channelServers -->
+- The one exception is a multiplayer channel's server, which Nap runs itself (`channels` topic).
+<!-- /if -->
 
 ## Artifact or site
 

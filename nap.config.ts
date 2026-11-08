@@ -71,6 +71,12 @@ export type NapConfig = {
    */
   notifications?: boolean;
   /**
+   * Channel servers: a site may name JavaScript in its nap.json that Nap runs for a channel, as
+   * the authoritative host of a multiplayer game (src/lib/site-channel.ts). It runs in a Dynamic
+   * Worker, which needs the Workers Paid plan. Off when left out.
+   */
+  channelServers?: boolean;
+  /**
    * Example requests the dashboard rotates through under "Ask your agent", such as
    * `{ kind: "site", text: "where we vote on the offsite venue" }`. Each reads after
    * "Make me a site", "Make me an artifact", or "Make me an app". Optional: Nap has generic ones.

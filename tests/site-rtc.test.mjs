@@ -177,9 +177,9 @@ test("nap.json is read once per version, and a broken file means the defaults", 
   const env = { DB: database(), SITES };
   const read = (slug) => runNap(env, siteManifest(slug, "v1"));
   const data = { allow: {} };
-  assert.deepEqual(await read("a"), { spa: true, fetch: ["api.example.com"], data });
-  assert.deepEqual(await read("a"), { spa: true, fetch: ["api.example.com"], data });
+  assert.deepEqual(await read("a"), { spa: true, fetch: ["api.example.com"], data, servers: [] });
+  assert.deepEqual(await read("a"), { spa: true, fetch: ["api.example.com"], data, servers: [] });
   assert.equal(reads, 1);
-  assert.deepEqual(await read("b"), { spa: false, fetch: [], data });
-  assert.deepEqual(await read("c"), { spa: false, fetch: [], data });
+  assert.deepEqual(await read("b"), { spa: false, fetch: [], data, servers: [] });
+  assert.deepEqual(await read("c"), { spa: false, fetch: [], data, servers: [] });
 });

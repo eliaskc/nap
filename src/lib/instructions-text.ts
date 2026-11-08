@@ -9,7 +9,8 @@ export const OPTIONAL_TOPICS: Record<string, (config: NapConfig) => boolean> = {
 
 /**
  * Fills in one instructions page for a deployment. Text between <!-- if <flag> --> and
- * <!-- /if --> shows only when the flag is on: "apps" when apps are on, "ios" and "remarkable" for
+ * <!-- /if --> shows only when the flag is on (with <!-- if !<flag> -->, only when it
+ * is off): "apps" when apps are on, "channelServers", "ios" and "remarkable" for
  * the platforms it has, and "private" or "everyone" for the default access.
  * {{extensionTopics}} on a line of its own becomes the deployment's extension topics.
  */
@@ -22,16 +23,17 @@ export function renderInstructions(
   const flags: Record<string, boolean> = {
     apps: Boolean(config.apps),
     notifications: config.notifications === true,
+    channelServers: config.channelServers === true,
     ios: Boolean(config.apps?.ios),
     remarkable: Boolean(config.apps?.remarkable),
     private: config.defaultAccess === "private",
     everyone: config.defaultAccess === "everyone",
   };
   const shown = text.replace(
-    /<!-- if (\w+) -->\n([\s\S]*?)<!-- \/if -->\n/g,
-    (_, flag: string, inner: string) => {
+    /<!-- if (!?)(\w+) -->\n([\s\S]*?)<!-- \/if -->\n/g,
+    (_, not: string, flag: string, inner: string) => {
       if (!(flag in flags)) throw new Error(`Unknown instructions flag: ${flag}`);
-      return flags[flag] ? inner : "";
+      return flags[flag] !== Boolean(not) ? inner : "";
     },
   );
   const topics = extensionTopics

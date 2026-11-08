@@ -218,6 +218,12 @@ export class NapWorker extends Cloudflare.Website.Vite<NapWorker>()(
         LIVE: Cloudflare.DurableObject<SiteLive>("LIVE", { className: "SiteLive" }),
         // Multiplayer channels: one object per site and channel name, holding only WebSockets.
         CHANNELS: Cloudflare.DurableObject<SiteChannel>("CHANNELS", { className: "SiteChannel" }),
+        // Channel servers (napConfig.channelServers, and always on local stages): loads a site's
+        // server code into its channel object as a sandboxed Dynamic Worker. Dynamic Workers
+        // need the Workers Paid plan.
+        ...(napConfig.channelServers || isLocalStage()
+          ? { LOADER: Cloudflare.WorkerLoader("LOADER") }
+          : {}),
         // The app signer: a container that signs unsigned iOS builds with rcodesign
         // (containers/signer). One instance that sleeps when idle; it has no internet access.
         // standard-1 (half a CPU, 4 GB): lite took two minutes to sign a 19 MB app.
