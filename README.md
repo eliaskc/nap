@@ -428,7 +428,9 @@ agent → local build → publish with sourceCommit → Nap checks the commit �
   (`createSource`), so its first version is built from a commit; the upload
   holds the repo until it is committed, and an expired upload deletes it.
   Nap logs who got a token, never the token. Nobody has a lasting Git
-  credential.
+  credential. Clones that `publish.mjs` makes or sets up name it as their Git
+  credential helper for the repo, so plain git and jj ask it for a new token
+  each time; the token is never stored.
 - **Publishing.** `sites.source_repo` names the repo. A new version of such a
   site must name its commit, which must be the head of `main` and contain the
   live version's commit. Artifacts allows force-pushes, so this check, not

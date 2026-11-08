@@ -20,20 +20,24 @@ A site can keep its source in a Git repo on Nap, one repo per site. The next age
 
 `GET /_nap/api/naps/<id>` has `"source": {"branch":"main"}` when there is a repo. Then never edit or upload its built files. Instead:
 
-1. Get the source: `node nap-publish.mjs clone <id> [dir]`, or pull an existing clone: `node nap-publish.mjs run <id> -- git pull nap main`. Read its README and AGENTS.md.
+1. Get the source: `node nap-publish.mjs clone <id> [dir]`, or pull an existing clone. Read its README and AGENTS.md.
 2. Change it, build, and run its tests.
 3. Commit with a message that says what changed.
 4. Publish that commit with `--source` as above. If you pushed yourself, use `--source-commit <sha>` instead. Never force-push main.
 5. 409 `source_not_head`: main moved after your push. Pull, build, and publish again. `source_commit_required`: you left out the commit.
 
-`node nap-publish.mjs run <id> -- <git or jj command>` runs any command with a fresh token, passed through the environment and never written to a file. `GET /_nap/api/naps/<id>/source` shows the head of main, the live version's commit, and whether they are in sync.
+## Git and jj
+
+In a clone that `clone` made, or that publishing with `--source` pushed from, use git and jj as usual (`git pull nap main`, `jj git fetch`): the clone asks Nap for a fresh token by itself, and nothing is stored. A clone made any other way: run `node nap-publish.mjs setup <id> [dir]` once in it. If git says `told us to quit`, read the line above it (usually: sign in again).
+
+`node nap-publish.mjs run <id> -- <git or jj command>` also works in any folder: it runs one command with a fresh token in its environment. `GET /_nap/api/naps/<id>/source` shows the head of main, the live version's commit, and whether they are in sync.
 
 ## Rules
 
 - Keep the repo self-contained: a lockfile, the build command in package.json, a .gitignore for node_modules and build output, and a short README that says how to build.
 - Never commit secrets or .env files. Everyone who can view the site can read and push to the repo.
 - Restoring an old version in Nap does not change the repo. To undo for good, revert in the repo and publish.
-- A source folder inside a bigger repo: split it out (`git subtree split --prefix=<folder> -b <branch>`), create the repo with `node nap-publish.mjs source <id> --create`, push the branch to main with `run`, and publish with `--source-commit`.
+- A source folder inside a bigger repo: split it out (`git subtree split --prefix=<folder> -b <branch>`), create the repo with `node nap-publish.mjs source <id> --create`, run `setup <id>` in the repo, push the branch to main, and publish with `--source-commit`.
 
 ## Without the script
 

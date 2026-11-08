@@ -18,7 +18,7 @@ This Nap has one app on Nap, `{{napApp}}`: one Git repo with a folder per platfo
 
 Working on the repo:
 
-- Get the source: node nap-publish.mjs app clone {{napApp}} [dir]. Pull before you start (node nap-publish.mjs app run {{napApp}} -- git -C <dir> pull nap main). If it does not exist yet, create it from the template once: node nap-publish.mjs app init {{napApp}} [dir] --title 'Name'.
+- Get the source: node nap-publish.mjs app clone {{napApp}} [dir]. Pull before you start (git -C <dir> pull nap main; plain git and jj work in clones the script made, and node nap-publish.mjs app setup {{napApp}} <dir> sets up any other clone once). If it does not exist yet, create it from the template once: node nap-publish.mjs app init {{napApp}} [dir] --title 'Name'.
 - Read the repo's AGENTS.md, and the platform's (such as ios/AGENTS.md), before you change it.
 - A new app is a new folder on each platform it is on, with the same slug: copy the platform's template app, hello (ios/Apps/hello on iOS). Never make a second app on Nap.
 - A publish answers 409 "source_not_head" when someone pushed after you: pull, build, and publish again. "source_not_descendant" means your history drops a published commit: merge it back in. Never force-push main.

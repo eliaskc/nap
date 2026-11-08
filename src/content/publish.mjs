@@ -7,12 +7,14 @@
 //   node publish.mjs <folder or file.html> [options]
 //   node publish.mjs source <id> [--create]     Show a site's source repo, or create it.
 //   node publish.mjs clone <id> [dir]           Clone a site's source repo with Git.
+//   node publish.mjs setup <id> [dir]           Let plain git and jj in an existing clone reach it.
 //   node publish.mjs run <id> -- <command...>   Run git or jj with access to the source repo.
 //
 // Native iOS apps (SwiftUI, built on a Mac; Nap signs them):
 //   node publish.mjs app list
 //   node publish.mjs app init <app> [dir] [--title "Name"]   Create an app from the template.
 //   node publish.mjs app clone <app> [dir]
+//   node publish.mjs app setup <app> [dir]                   Like setup, for an app's clone.
 //   node publish.mjs app run <app> -- <command...>           git or jj with access to its repo.
 //   node publish.mjs app napkit <ios dir>                    Update NapKit (NapKit/Sources) to this Nap's.
 //   node publish.mjs app publish <app> <build.zip> --target <platform> --source <dir> [--notes "..."]
@@ -43,6 +45,11 @@
 //
 // The source repo commands get a Git token that lasts 15 minutes and pass it to git through the
 // environment (GIT_CONFIG_*), so it is never written to disk. run asks for a new one every time.
+// clone, app clone, app init, setup, and publishing with --source also set up the clone, so
+// plain git and jj work in it: its config names this script (a copy next to the token) as the
+// Git credential helper for the repo on Nap, and git asks it for a new token when it needs one
+// (git-credential, below). Nothing is stored; without a sign-in, git fails without a prompt.
+//   node publish.mjs git-credential <site|app> <id> get   Called by git, not by you.
 //
 // Exit codes: 0 published, 1 error, 3 not signed in (run login), 4 the user must open Nap first.
 
@@ -251,7 +258,7 @@ async function publish(options) {
     if (options["expected-version"]) body.expectedVersion = options["expected-version"];
     if (options["source-commit"]) body.sourceCommit = options["source-commit"];
     if (local) {
-      pushSource(local, await sourceForUpdate(token, body.id), body.id);
+      await pushSource(local, await sourceForUpdate(token, body.id), { kind: "site", id: body.id });
       body.sourceCommit = local.head;
     }
   } else {
@@ -272,7 +279,9 @@ async function publish(options) {
     );
   const { uploadId, commitUrl } = started.data;
   // A new site: Nap created its repo with the upload. Push before the files go up.
-  if (local && started.data.source) pushSource(local, started.data.source, started.data.id);
+  if (local && started.data.source) {
+    await pushSource(local, started.data.source, { kind: "site", id: started.data.id });
+  }
   const byPath = new Map(files.map((file) => [file.path, file]));
   const queue = [...started.data.files];
   let done = 0;
@@ -364,8 +373,9 @@ async function sourceForUpdate(token, id) {
 }
 
 /** Pushes the local HEAD to main of the site's repo, and adds the remote "nap" for later. */
-function pushSource(local, source, id) {
+async function pushSource(local, source, target) {
   const env = gitEnv(source);
+  const pull = target.kind === "app" ? `app run ${target.id}` : `run ${target.id}`;
   const remotes = spawnSync("git", ["-C", local.dir, "remote", "get-url", "nap"], {
     encoding: "utf8",
   });
@@ -374,6 +384,7 @@ function pushSource(local, source, id) {
       stdio: "ignore",
     });
   }
+  await connectClone(local.dir, source.remote, target);
   console.log(`Pushing ${local.head.slice(0, 7)} to main of the repo on Nap...`);
   const pushed = spawnSync(
     "git",
@@ -383,7 +394,7 @@ function pushSource(local, source, id) {
   if (pushed.status === 0) return;
   if (/rejected|non-fast-forward|fetch first/.test(pushed.stderr)) {
     throw new ExitError(
-      `main on Nap has commits you do not have. Pull them (node publish.mjs ${id.startsWith("app ") ? id : `run ${id}`} -- git -C ${local.dir} pull nap main), build again, and publish. Never force-push.`,
+      `main on Nap has commits you do not have. Pull them (git -C ${local.dir} pull nap main, or node publish.mjs ${pull} -- git -C ${local.dir} pull nap main), build again, and publish. Never force-push.`,
     );
   }
   throw new ExitError(`git push failed:\n${pushed.stderr.trim()}`);
@@ -431,6 +442,71 @@ function gitEnv(source) {
   };
 }
 
+/** Quotes a value for the shell git runs "!" credential helpers with. */
+const shellQuote = (value) => `'${String(value).replaceAll("'", `'\\''`)}'`;
+
+/**
+ * Sets up a clone so plain git and jj reach its repo on Nap: this script, copied next to the
+ * token so it outlives the temporary download, becomes the credential helper for that one remote
+ * URL. The empty helper first drops any other helper (such as a login window) for the URL.
+ */
+async function connectClone(dir, remote, target) {
+  await mkdir(CONFIG_DIR, { recursive: true, mode: 0o700 });
+  const script = join(CONFIG_DIR, "publish.mjs");
+  const self = await readFile(new URL(import.meta.url), "utf8");
+  if ((await readFile(script, "utf8").catch(() => "")) !== self) {
+    await writeFile(script, self, { mode: 0o644 });
+  }
+  const env = process.env.NAP_URL ? `NAP_URL=${shellQuote(NAP_URL)} ` : "";
+  const helper = `!${env}node ${shellQuote(script)} git-credential ${target.kind} ${shellQuote(target.id)}`;
+  const key = `credential.${remote}.helper`;
+  const git = (...args) => spawnSync("git", ["-C", dir, "config", "--local", ...args]);
+  git("--unset-all", key);
+  git("--add", key, "");
+  const added = git("--add", key, helper);
+  if (added.status !== 0) throw new ExitError(`Could not set up git in ${dir}.`);
+}
+
+/**
+ * The Git credential helper (git calls it with get, store, or erase). For get, it answers with a
+ * new token for the repo. On any problem it answers quit=1, so git stops instead of prompting.
+ */
+async function gitCredential(options) {
+  const [, kind, id, operation] = options._;
+  for await (const chunk of process.stdin) void chunk; // Read what git sends, then answer.
+  if (operation !== "get") return;
+  try {
+    const token = await signedIn();
+    const path =
+      kind === "app"
+        ? `/apps/${encodeURIComponent(id)}/source/token`
+        : `/naps/${encodeURIComponent(id)}/source/token`;
+    const access = await api(path, { token, body: { access: "write" } });
+    if (!access.ok) throw failed(`No access to the repo of ${id} on Nap`, access);
+    const [secret, query] = access.data.source.token.split("?");
+    const expires = new URLSearchParams(query || "").get("expires");
+    // Artifacts takes the token as the password and ignores the username.
+    process.stdout.write(
+      `username=x\npassword=${secret}\n${expires ? `password_expiry_utc=${expires}\n` : ""}`,
+    );
+  } catch (error) {
+    console.error(`Nap: ${error instanceof ExitError ? error.message : error}`);
+    process.stdout.write("quit=1\n");
+  }
+}
+
+/** Sets up an existing clone (the current folder by default) for its repo on Nap. */
+async function setup(source, target, dir) {
+  const urls = spawnSync("git", ["-C", dir, "remote", "-v"], { encoding: "utf8" });
+  if (urls.status !== 0) throw new ExitError(`${dir} is not a Git repo.`);
+  if (!urls.stdout.includes(source.remote)) {
+    spawnSync("git", ["-C", dir, "remote", "add", "nap", source.remote], { stdio: "ignore" });
+    console.log(`Added the remote "nap" for ${source.remote}.`);
+  }
+  await connectClone(dir, source.remote, target);
+  console.log(`Set up ${dir}: git and jj reach the repo on Nap without a token now.`);
+}
+
 function runCommand(command, env) {
   const result = spawnSync(command[0], command.slice(1), { stdio: "inherit", env });
   if (result.error) throw new ExitError(`Could not run ${command[0]}: ${result.error.message}`);
@@ -450,8 +526,8 @@ async function source(options) {
     console.log(`Created the source repo ${created.data.source.repo}.`);
     console.log(`Remote: ${created.data.source.remote} (branch ${created.data.source.branch})`);
     const site = decodeURIComponent(id);
-    console.log(`Next: git remote add nap ${created.data.source.remote}`);
-    console.log(`Then: node publish.mjs run ${site} -- git push nap HEAD:main`);
+    console.log(`Next, in the clone: node publish.mjs setup ${site}`);
+    console.log("Then: git push nap HEAD:main");
     return;
   }
   const info = await api(`/naps/${id}/source`, { token, method: "GET" });
@@ -467,7 +543,9 @@ async function clone(options) {
   const token = await signedIn();
   const id = napId(options);
   const { source, env } = await sourceAccess(token, id);
-  runCommand(["git", "clone", source.remote, options._[2] || decodeURIComponent(id)], env);
+  const dir = options._[2] || decodeURIComponent(id);
+  runCommand(["git", "clone", source.remote, dir], env);
+  await connectClone(dir, source.remote, { kind: "site", id: decodeURIComponent(id) });
 }
 
 async function run(options) {
@@ -545,7 +623,7 @@ async function appCommand(options) {
     git("add", "-A");
     git("commit", "-q", "-m", "feat: start from the Nap app template");
     const head = git("rev-parse", "HEAD");
-    pushSource({ dir, head }, created.data.source, `app run ${slug}`);
+    await pushSource({ dir, head }, created.data.source, { kind: "app", id: slug });
     console.log(`Created the app ${slug} in ${dir}. Its repo on Nap is the remote "nap".`);
     console.log(`Next: cd ${dir}/ios && scripts/publish "First build"`);
     return;
@@ -555,6 +633,13 @@ async function appCommand(options) {
     const source = await appSourceAccess(token, app);
     const dir = options._[3] || decodeURIComponent(app);
     runCommand(["git", "clone", "-o", "nap", source.remote, dir], gitEnv(source));
+    await connectClone(dir, source.remote, { kind: "app", id: decodeURIComponent(app) });
+    return;
+  }
+  if (command === "setup") {
+    const app = appSlug(options);
+    const source = await appSourceAccess(token, app);
+    await setup(source, { kind: "app", id: decodeURIComponent(app) }, options._[3] || ".");
     return;
   }
   if (command === "run") {
@@ -591,7 +676,7 @@ async function appCommand(options) {
     if (!options.source) throw new ExitError("Give --source: the app's Git repo you built from.");
     const local = localSource(options.source);
     const source = await appSourceAccess(token, app);
-    pushSource(local, source, `app run ${decodeURIComponent(app)}`);
+    await pushSource(local, source, { kind: "app", id: decodeURIComponent(app) });
     const size = (await stat(zip)).size;
     console.log(`Uploading ${target || "the build"} (${mb(size)})...`);
     const apps = await launcherApps(local.dir, target || "ios");
@@ -615,7 +700,7 @@ async function appCommand(options) {
     return;
   }
   throw new ExitError(
-    "Usage: node publish.mjs app list | init | clone | run | napkit | publish. See --help.",
+    "Usage: node publish.mjs app list | init | clone | setup | run | napkit | publish. See --help.",
   );
 }
 
@@ -661,6 +746,13 @@ try {
     await source(options);
   } else if (options._[0] === "clone") {
     await clone(options);
+  } else if (options._[0] === "setup") {
+    const token = await signedIn();
+    const id = napId(options);
+    const { source } = await sourceAccess(token, id);
+    await setup(source, { kind: "site", id: decodeURIComponent(id) }, options._[2] || ".");
+  } else if (options._[0] === "git-credential") {
+    await gitCredential(options);
   } else if (options._[0] === "run") {
     await run(options);
   } else if (options._[0] === "app") {
