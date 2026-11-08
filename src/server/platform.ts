@@ -17,6 +17,12 @@ export type AppStoreConnectKey = { keyId: string; issuerId: string; privateKey: 
 /** The APNs key (Keys → Apple Push Notifications service), for notifications to the app. */
 export type ApnsKey = { keyId: string; privateKey: string };
 
+/**
+ * A Google Cloud service account (its JSON key) with access to the Android app in Play Console,
+ * for the Google Play Developer API.
+ */
+export type PlayServiceAccount = { clientEmail: string; privateKey: string };
+
 /** A Cloudflare Realtime TURN key, for voice and video between the people on a nap. */
 export type TurnKey = { keyId: string; token: string };
 
@@ -29,6 +35,8 @@ export class Settings extends Context.Service<
     readonly r2: R2Credentials | null;
     /** Apps: the App Store Connect team key. Null when it is not set up. */
     readonly appStoreConnect: AppStoreConnectKey | null;
+    /** Android apps: uploads to Google Play. Null when there is no service account. */
+    readonly play: PlayServiceAccount | null;
     /** Notifications to the iOS app. Null when there is no APNs key. */
     readonly apns: ApnsKey | null;
     /** Local stages only: a signer run by plain Docker instead of the container binding. */
@@ -51,6 +59,7 @@ export type SettingsEnv = {
   NAP_ASC_PRIVATE_KEY?: string;
   NAP_APNS_KEY_ID?: string;
   NAP_APNS_PRIVATE_KEY?: string;
+  NAP_PLAY_SERVICE_ACCOUNT?: string;
   NAP_SIGNER_URL?: string;
   NAP_TURN_KEY_ID?: string;
   NAP_TURN_KEY_API_TOKEN?: string;
@@ -77,11 +86,25 @@ export function settingsFromEnv(env: SettingsEnv, rootDomain: string): Settings[
         ? { accountId, bucket, accessKeyId, secretAccessKey }
         : null,
     appStoreConnect: keyId && issuerId && privateKey ? { keyId, issuerId, privateKey } : null,
+    play: parsePlayServiceAccount(text(env.NAP_PLAY_SERVICE_ACCOUNT)),
     apns: apnsKeyId && apnsPrivateKey ? { keyId: apnsKeyId, privateKey: apnsPrivateKey } : null,
     signerUrl: text(env.NAP_SIGNER_URL) || null,
     turn: turnKeyId && turnToken ? { keyId: turnKeyId, token: turnToken } : null,
     extensionSecrets: parseExtensionSecrets(text(env.NAP_EXTENSION_SECRETS)),
   });
+}
+
+/** A service account's JSON key, as Google Cloud downloads it. Anything else counts as none. */
+export function parsePlayServiceAccount(value: string): PlayServiceAccount | null {
+  if (!value) return null;
+  try {
+    const parsed = JSON.parse(value) as { client_email?: unknown; private_key?: unknown };
+    const clientEmail = typeof parsed.client_email === "string" ? parsed.client_email : "";
+    const privateKey = typeof parsed.private_key === "string" ? parsed.private_key : "";
+    return clientEmail && privateKey ? { clientEmail, privateKey } : null;
+  } catch {
+    return null;
+  }
 }
 
 /** A JSON object of strings. Anything else counts as no secrets, so pages still load. */

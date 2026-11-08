@@ -10,6 +10,12 @@ This Nap has one app on Nap, `{{napApp}}`: one Git repo with a folder per platfo
 
 <!-- /if -->
 
+<!-- if android -->
+
+- `android/`: Kotlin and Jetpack Compose, in a launcher that people install from Google Play (internal testing). Needs git, Node 20+, a JDK (mise install, from android/mise.toml), and the Android SDK (Android Studio's, or ANDROID_HOME).
+
+<!-- /if -->
+
 <!-- if remarkable -->
 
 - `remarkable/`: QML, in a launcher for the reMarkable 2 e-ink tablet, run by the community AppLoad launcher. Installed over USB once; it updates itself from Nap after that. Needs a Mac with git, Node 20+, Go and uv (mise install, from remarkable/mise.toml).
@@ -20,6 +26,7 @@ Working on the repo:
 
 - Get the source: node nap-publish.mjs app clone {{napApp}} [dir]. Pull before you start (git -C <dir> pull nap main; plain git and jj work in clones the script made, and node nap-publish.mjs app setup {{napApp}} <dir> sets up any other clone once). If it does not exist yet, create it from the template once: node nap-publish.mjs app init {{napApp}} [dir] --title 'Name'.
 - Read the repo's AGENTS.md, and the platform's (such as ios/AGENTS.md), before you change it.
+- If the repo has no folder for a platform this Nap has (it was made before the platform was on), add it from the template once: node nap-publish.mjs app add-platform <platform> <dir>, and commit.
 - A new app is a new folder on each platform it is on, with the same slug: copy the platform's template app, hello (ios/Apps/hello on iOS). Never make a second app on Nap.
 - A publish answers 409 "source_not_head" when someone pushed after you: pull, build, and publish again. "source_not_descendant" means your history drops a published commit: merge it back in. Never force-push main.
 
@@ -34,6 +41,20 @@ iOS:
 - Keep the launcher's app icon (ios/Launcher/Resources) and ITSAppUsesNonExemptEncryption in ios/Project.swift: TestFlight refuses builds without them.
 - Permissions, capabilities, and other Info.plist keys go in the app's app.json, never in Project.swift: "permissions" are Info.plist usage strings ({"NSCameraUsageDescription": "Why, in a sentence"}), "infoPlist" holds any other keys ({"UIBackgroundModes": ["audio"], "NSBonjourServices": ["_my-app._tcp"]}), and "capabilities" are names such as ["push-notifications", "healthkit"]. ios/AGENTS.md lists them. Nap turns capabilities on when it signs; what it cannot turn on, the publish answer lists under capabilityWarnings and the launcher shows on the app. Tell the user about those. Networking, WebSockets, and audio need nothing, except audio that keeps running when the phone locks (UIBackgroundModes in "infoPlist").
 - Tell the user the build number, that it reaches TestFlight in a few minutes, and that Get the app at https://{{rootDomain}}/app shows when it is ready. The title and summary in each app's app.json are what the dashboard lists as inside the build, so keep them short and true.
+
+<!-- /if -->
+
+<!-- if android -->
+
+Android:
+
+- The project is android/, a Gradle project: the launcher in android/launcher/, NapKit for Kotlin in android/napkit/, and one module per app in android/apps/<slug>/ (app.json, and Kotlin sources with a @Composable fun AppView() in the package nap.apps.<slug, with - as \_>). android/AGENTS.md has the details.
+- Nap data from Kotlin: NapKit (android/napkit, linked by every app), the same calls as NapKit for Swift: Nap.site("<id>") with db.collection, channel, watch, rtc, fetch, and notify; Nap.me(), Nap.people(), and Nap.account, the launcher's one sign-in (show NapSignInButton() where an app needs someone signed in). Never edit android/napkit: android/scripts/napkit updates it from Nap. Notifications do not reach Android phones yet.
+- Test on the emulator or a phone while you work: ./gradlew :launcher:installDebug in android/.
+- Permissions go in the app's own src/main/AndroidManifest.xml; never change the launcher's applicationId or add signing: Nap signs release bundles with the Play upload key.
+- Publish: commit, then android/scripts/publish 'What changed, for testers'. It builds an unsigned release bundle, pushes HEAD to main, and uploads it with that commit. Nap signs it, gives it the next build number (its version code), and uploads it to Google Play's internal testing; testers get it from Google Play in a few minutes. People join from Get the app on the dashboard.
+- If the publish answer says Nap did not upload the build to Google Play (the app's first build), or that it is a draft release, tell the user: {{admin}} uploads the signed bundle the script saved, or rolls out the draft, in Play Console.
+- Tell the user the build number, and that Get the app at https://{{rootDomain}}/app shows how to install it.
 
 <!-- /if -->
 

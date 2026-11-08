@@ -87,6 +87,10 @@ jobs:
           NAP_ASC_PRIVATE_KEY: ${{ secrets.NAP_ASC_PRIVATE_KEY }}
           NAP_ASC_KEY_ID: ${{ vars.NAP_ASC_KEY_ID }}
           NAP_ASC_ISSUER_ID: ${{ vars.NAP_ASC_ISSUER_ID }}
+          # Android apps only (napConfig.apps.android): the Play upload key and certificate (one PEM),
+          # and the JSON key of a service account with access to the app in Play Console.
+          NAP_ANDROID_UPLOAD_PEM: ${{ secrets.NAP_ANDROID_UPLOAD_PEM }}
+          NAP_PLAY_SERVICE_ACCOUNT: ${{ secrets.NAP_PLAY_SERVICE_ACCOUNT }}
           # Optional: a Cloudflare Realtime TURN key, for voice and video on naps (/_nap/rtc).
           NAP_TURN_KEY_ID: ${{ vars.NAP_TURN_KEY_ID }}
           NAP_TURN_KEY_API_TOKEN: ${{ secrets.NAP_TURN_KEY_API_TOKEN }}

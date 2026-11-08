@@ -28,22 +28,29 @@ import { napConfig } from "~/nap.config";
 
 /**
  * Get the app: the instance's one Nap app, on each platform it has (iPhone through TestFlight,
- * reMarkable over USB once). It all happens in one sheet (Base UI's Drawer) that comes up from the bottom: the bar's
+ * Android through Google Play's internal testing, reMarkable over USB once). It all happens in one sheet (Base UI's Drawer) that comes up from the bottom: the bar's
  * button opens it, and so do the nudge above the list, the playful layouts' QR spots, and any
  * link to /app (which lands on the dashboard as #app). The bar button says your next step.
  */
 
 const IOS = Boolean(napConfig.apps?.ios?.appStoreId);
-type Target = "ios" | "remarkable";
-/** The platforms this Nap has, in the switch's order. iOS only once its app record exists. */
+/** Android's internal testing opt-in link, once the app exists in Play Console. */
+const ANDROID_TESTERS_URL = napConfig.apps?.android?.testersUrl ?? null;
+type Target = "ios" | "android" | "remarkable";
+/**
+ * The platforms this Nap has, in the switch's order. iOS only once its app record exists, and
+ * Android once it has an opt-in link.
+ */
 const TARGETS: Array<Target> = [
   ...(IOS ? (["ios"] as const) : []),
+  ...(ANDROID_TESTERS_URL ? (["android"] as const) : []),
   ...(napConfig.apps?.remarkable ? (["remarkable"] as const) : []),
 ];
 export const APP_ENABLED = TARGETS.length > 0;
 
 const PLATFORM: Record<Target, { label: string; device: string; icon: typeof SmartphoneIcon }> = {
   ios: { label: "iPhone", device: "phone", icon: SmartphoneIcon },
+  android: { label: "Android", device: "phone", icon: SmartphoneIcon },
   remarkable: { label: "reMarkable", device: "reMarkable", icon: TabletIcon },
 };
 
@@ -68,6 +75,7 @@ type LiveBuild = {
   createdAt: string;
   apps: Array<BuildApp> | null;
   testFlight: { state: "processing" | "ready" | "failed"; error: string | null } | null;
+  play?: { state: "released" | "draft" | "manual"; error: string | null } | null;
 };
 type AppSheet = {
   title: string;
@@ -92,6 +100,7 @@ type InstallState = {
   refresh: () => Promise<void>;
   dismissNudge: () => void;
   isIOS: boolean;
+  isAndroid: boolean;
 };
 
 const InstallContext = React.createContext<InstallState | null>(null);
@@ -106,6 +115,13 @@ function useIsIOS() {
       typeof navigator !== "undefined" &&
       (/iPhone|iPad|iPod/.test(navigator.userAgent) ||
         (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1)),
+    [],
+  );
+}
+
+function useIsAndroid() {
+  return React.useMemo(
+    () => typeof navigator !== "undefined" && /Android/.test(navigator.userAgent),
     [],
   );
 }
@@ -179,8 +195,12 @@ export function InstallProvider({ children }: { children: React.ReactNode }) {
   const [error, setError] = React.useState("");
   const [busy, setBusy] = React.useState(false);
   const [open, setOpen] = React.useState(false);
-  const [target, setTarget] = React.useState<Target>(TARGETS[0] ?? "ios");
   const isIOS = useIsIOS();
+  const isAndroid = useIsAndroid();
+  // On an Android phone, its own platform first.
+  const [target, setTarget] = React.useState<Target>(
+    isAndroid && TARGETS.includes("android") ? "android" : (TARGETS[0] ?? "ios"),
+  );
 
   const run = React.useCallback(async (request: () => Promise<Status>) => {
     try {
@@ -289,8 +309,9 @@ export function InstallProvider({ children }: { children: React.ReactNode }) {
       refresh: () => withBusy(() => call("GET")),
       dismissNudge,
       isIOS,
+      isAndroid,
     }),
-    [status, statusKnown, app, error, busy, open, target, withBusy, dismissNudge, isIOS],
+    [status, statusKnown, app, error, busy, open, target, withBusy, dismissNudge, isIOS, isAndroid],
   );
 
   if (!APP_ENABLED) return children;
@@ -670,6 +691,82 @@ function InviteForm() {
   );
 }
 
+// ---- The Android card ----------------------------------------------------------------------
+
+/** Where an Android build is, when it has not reached testers yet. */
+function PlayState({ build }: { build: LiveBuild | null }) {
+  if (build?.play?.state === "draft")
+    return (
+      <span className="text-xs text-muted-foreground">
+        Build {build.buildNumber} waits for {napConfig.admin} to roll it out in Play Console.
+      </span>
+    );
+  if (build?.play?.state === "manual")
+    return (
+      <span className="text-xs text-muted-foreground">
+        Build {build.buildNumber} waits for {napConfig.admin} to upload it to Google Play.
+      </span>
+    );
+  return null;
+}
+
+function AndroidCard() {
+  const install = useInstall()!;
+  const title = appTitle(install);
+  const live = install.app?.platforms.find((p) => p.target === "android")?.live ?? null;
+  const testers = ANDROID_TESTERS_URL!;
+  const store = `https://play.google.com/store/apps/details?id=${napConfig.apps?.android?.packageName}`;
+  const detail = `Join the test once with your Google account, then install ${title} from Google Play, which keeps it up to date. If Google says you can't join, ask ${napConfig.admin} to add your Google account.`;
+  if (install.isAndroid)
+    return (
+      <CardRow art={null}>
+        <CardText title="Get it from Google Play" detail={detail}>
+          <div className="mt-1 flex flex-wrap justify-center gap-2 sm:justify-start">
+            <Button
+              size="lg"
+              className="rounded-full px-4"
+              nativeButton={false}
+              render={<a href={testers} target="_blank" rel="noreferrer" />}
+            >
+              <ExternalLinkIcon data-icon="inline-start" />
+              Join the test
+            </Button>
+            <Button
+              size="lg"
+              variant="outline"
+              className="rounded-full px-4"
+              nativeButton={false}
+              render={<a href={store} target="_blank" rel="noreferrer" />}
+            >
+              <DownloadIcon data-icon="inline-start" />
+              Open in Google Play
+            </Button>
+          </div>
+          <PlayState build={live} />
+        </CardText>
+      </CardRow>
+    );
+  return (
+    <CardRow
+      art={<QrCode value={testers} className="size-44 rounded-xl ring-1 ring-border sm:size-49" />}
+    >
+      <CardText title="Scan with your Android phone" detail={detail}>
+        <span className="flex flex-wrap justify-center gap-x-3 gap-y-1 text-xs text-muted-foreground sm:justify-start">
+          <a
+            href={testers}
+            target="_blank"
+            rel="noreferrer"
+            className="underline-offset-2 hover:text-foreground hover:underline"
+          >
+            Open the opt-in link
+          </a>
+        </span>
+        <PlayState build={live} />
+      </CardText>
+    </CardRow>
+  );
+}
+
 // ---- The reMarkable card -------------------------------------------------------------------
 
 function RemarkableCard() {
@@ -880,7 +977,13 @@ function AppSheetView() {
               )}
             </div>
             <section className="rounded-[22px] border bg-card p-5 text-card-foreground shadow-[0_12px_34px_-20px_rgb(0_0_0/0.25)] sm:px-7 sm:py-[26px]">
-              {target === "ios" ? <IosCard /> : <RemarkableCard />}
+              {target === "ios" ? (
+                <IosCard />
+              ) : target === "android" ? (
+                <AndroidCard />
+              ) : (
+                <RemarkableCard />
+              )}
               {target === "ios" && install.error && (
                 <p role="alert" className="mt-4 text-center text-[13px] text-destructive">
                   {install.error}
@@ -1007,7 +1110,8 @@ export function AppNudge({ className }: { className?: string }) {
   if (install.app.nudgeDismissed || installed(install.status)) return null;
   const title = appTitle(install);
   const what = inside(install.app);
-  const device = TARGETS.includes("ios") ? "phone" : PLATFORM[TARGETS[0]!].device;
+  const device =
+    TARGETS.includes("ios") || TARGETS.includes("android") ? "phone" : PLATFORM[TARGETS[0]!].device;
   return (
     <div
       className={cn(

@@ -10,17 +10,22 @@
 //   node publish.mjs setup <id> [dir]           Let plain git and jj in an existing clone reach it.
 //   node publish.mjs run <id> -- <command...>   Run git or jj with access to the source repo.
 //
-// Native iOS apps (SwiftUI, built on a Mac; Nap signs them):
+// Native apps (iOS in SwiftUI, Android in Kotlin, reMarkable in QML; Nap signs and ships them):
 //   node publish.mjs app list
 //   node publish.mjs app init <app> [dir] [--title "Name"]   Create an app from the template.
 //   node publish.mjs app clone <app> [dir]
 //   node publish.mjs app setup <app> [dir]                   Like setup, for an app's clone.
 //   node publish.mjs app run <app> -- <command...>           git or jj with access to its repo.
 //   node publish.mjs app napkit <ios dir>                    Update NapKit (NapKit/Sources) to this Nap's.
+//   node publish.mjs app napkit-android <android dir>        Update NapKit for Android (napkit/).
+//   node publish.mjs app add-platform <platform> [dir]       Add a platform's folder (such as
+//                          android) from the template to an app's clone that lacks it.
 //   node publish.mjs app publish <app> <build.zip> --target <platform> --source <dir> [--notes "..."]
 //                          Pushes HEAD of <dir> to main, uploads the unsigned build with that
 //                          commit, and Nap signs it and makes it live. The app's
-//                          scripts/publish runs this for you.
+//                          scripts/publish runs this for you. When Nap cannot upload an
+//                          Android build to Google Play itself, this saves the signed bundle
+//                          next to the build, for an upload by hand.
 //
 // Options:
 //   --title "Name"         The name people see. Default: the page's <title>.
@@ -625,7 +630,12 @@ async function appCommand(options) {
     const head = git("rev-parse", "HEAD");
     await pushSource({ dir, head }, created.data.source, { kind: "app", id: slug });
     console.log(`Created the app ${slug} in ${dir}. Its repo on Nap is the remote "nap".`);
-    console.log(`Next: cd ${dir}/ios && scripts/publish "First build"`);
+    const platforms = ["ios", "android", "remarkable"].filter((folder) =>
+      template.data.files.some((file) => file.path.startsWith(`${folder}/scripts/publish`)),
+    );
+    for (const platform of platforms) {
+      console.log(`Next, for ${platform}: cd ${dir}/${platform} && scripts/publish "First build"`);
+    }
     return;
   }
   if (command === "clone") {
@@ -667,10 +677,70 @@ async function appCommand(options) {
     console.log(`Updated NapKit (${files.length} files) in ${join(dir, "NapKit")}.`);
     return;
   }
+  if (command === "add-platform") {
+    const platform = options._[2];
+    const dir = options._[3] || ".";
+    if (!platform)
+      throw new ExitError("Give the platform, for example: app add-platform android .");
+    const manifest = await readFile(join(dir, "nap.json"), "utf8").catch(() => null);
+    if (!manifest) throw new ExitError(`${dir} is not an app's clone: it has no nap.json.`);
+    const slug = JSON.parse(manifest).app;
+    if (await stat(join(dir, platform)).catch(() => null)) {
+      throw new ExitError(`${join(dir, platform)} exists already.`);
+    }
+    const [template, described] = await Promise.all([
+      api("/apps/template", { token, method: "GET" }),
+      api(`/apps/${encodeURIComponent(slug)}`, { token, method: "GET" }),
+    ]);
+    if (!template.ok) throw failed("Could not read the template", template);
+    if (!described.ok) throw failed("Could not read the app", described);
+    const files = template.data.files.filter((file) => file.path.startsWith(`${platform}/`));
+    if (!files.length) throw new ExitError(`This Nap has no platform ${platform}.`);
+    for (const file of files) {
+      const path = join(dir, file.path);
+      await mkdir(join(path, ".."), { recursive: true });
+      const content =
+        file.encoding === "base64"
+          ? Buffer.from(file.content, "base64")
+          : file.content
+              .replaceAll("{{app}}", slug)
+              .replaceAll("{{title}}", described.data.app.title);
+      await writeFile(path, content, { mode: file.executable ? 0o755 : 0o644 });
+    }
+    console.log(
+      `Added ${platform}/ (${files.length} files) to ${dir}. Read ${platform}/AGENTS.md, then commit.`,
+    );
+    return;
+  }
+  if (command === "napkit-android") {
+    // NapKit for Android is part of the template: replace napkit/ with this Nap's.
+    const dir = options._[2];
+    if (!dir)
+      throw new ExitError("Give the android folder of the app, for example: app napkit-android .");
+    const template = await api("/apps/template", { token, method: "GET" });
+    if (!template.ok) throw failed("Could not read the template", template);
+    const prefix = "android/napkit/";
+    const files = template.data.files.filter((file) => file.path.startsWith(prefix));
+    if (!files.length) throw new ExitError("This Nap has no NapKit for Android (no Android apps).");
+    await rm(join(dir, "napkit"), { recursive: true, force: true });
+    for (const file of files) {
+      const path = join(dir, file.path.slice("android/".length));
+      await mkdir(join(path, ".."), { recursive: true });
+      await writeFile(
+        path,
+        file.encoding === "base64" ? Buffer.from(file.content, "base64") : file.content,
+      );
+    }
+    console.log(`Updated NapKit (${files.length} files) in ${join(dir, "napkit")}.`);
+    return;
+  }
   if (command === "publish") {
     const app = appSlug(options);
     const zip = options._[3];
-    if (!zip) throw new ExitError("Give the zipped .app, for example build/launcher.zip.");
+    if (!zip)
+      throw new ExitError(
+        "Give the build, for example build/launcher.zip (iOS) or build/launcher.aab (Android).",
+      );
     // Nap picks the platform when it has only one.
     const target = options.target || "";
     if (!options.source) throw new ExitError("Give --source: the app's Git repo you built from.");
@@ -697,10 +767,21 @@ async function appCommand(options) {
     const data = await response.json().catch(() => ({}));
     if (!response.ok) throw failed("Publishing failed", { status: response.status, data });
     console.log(data.message);
+    if (data.signedBundle) {
+      // Android, when Nap could not upload to Google Play: the signed bundle, to upload by hand.
+      const signed = await fetch(`${NAP_URL}${data.signedBundle}`, {
+        headers: { authorization: `Bearer ${token}` },
+      });
+      if (!signed.ok)
+        throw new ExitError(`Could not download the signed bundle (${signed.status})`);
+      const path = join(zip, "..", `launcher-signed-${data.buildNumber}.aab`);
+      await writeFile(path, Buffer.from(await signed.arrayBuffer()));
+      console.log(`The signed bundle, to upload in Play Console: ${path}`);
+    }
     return;
   }
   throw new ExitError(
-    "Usage: node publish.mjs app list | init | clone | setup | run | napkit | publish. See --help.",
+    "Usage: node publish.mjs app list | init | clone | setup | run | napkit | napkit-android | add-platform | publish. See --help.",
   );
 }
 

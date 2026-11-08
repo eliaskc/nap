@@ -1,0 +1,39 @@
+#!/bin/sh
+# Builds the launcher's release bundle, unsigned: build/launcher.aab. Nap signs it with the Play
+# upload key when you publish it. Never sign it here.
+set -eu
+cd "$(dirname "$0")/.."
+
+if [ -z "${ANDROID_HOME:-}" ] && [ -z "${ANDROID_SDK_ROOT:-}" ] && [ ! -f local.properties ]; then
+  for sdk in "$HOME/Library/Android/sdk" "$HOME/Android/Sdk"; do
+    if [ -d "$sdk" ]; then
+      ANDROID_HOME=$sdk
+      export ANDROID_HOME
+      break
+    fi
+  done
+  if [ -z "${ANDROID_HOME:-}" ]; then
+    echo "No Android SDK. Install Android Studio (or the command-line tools) and set ANDROID_HOME." >&2
+    exit 1
+  fi
+fi
+
+gradle() {
+  if command -v mise >/dev/null 2>&1; then mise exec -- ./gradlew "$@"; else ./gradlew "$@"; fi
+}
+
+mkdir -p .build
+gradle --quiet --console=plain :launcher:bundleRelease >.build/gradle.log 2>&1 || {
+  errors=$(grep -E '^e: |error:' .build/gradle.log | sort -u || true)
+  if [ -n "$errors" ]; then
+    echo "$errors" >&2
+  else
+    sed -n '/What went wrong/,/^\* Try/p' .build/gradle.log | grep -v '^\* Try' >&2 || true
+  fi
+  echo "Build failed. Full log: .build/gradle.log" >&2
+  exit 1
+}
+
+mkdir -p build
+cp launcher/build/outputs/bundle/release/launcher-release.aab build/launcher.aab
+echo build/launcher.aab

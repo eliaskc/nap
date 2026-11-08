@@ -1,5 +1,6 @@
 """
-Nap's app signer. POST /sign signs a build; POST /inspect reads what a build asks for.
+Nap's app signer. POST /sign signs an iOS build; POST /inspect reads what an iOS build asks for;
+POST /sign-android signs an Android App Bundle (android.py).
 
 Body: a zip of an unsigned iOS .app (built with CODE_SIGNING_ALLOWED=NO).
 Headers:
@@ -17,6 +18,10 @@ Environment:
 POST /inspect takes the same body and answers {"capabilities": {slug: [name]}}, from the
 NapCapabilities key the app template writes into Info.plist.
 
+POST /sign-android takes an unsigned .aab, with x-package-name (the Play app's package name) and
+x-build-number (its versionCode, assigned by Nap), and signs it with ANDROID_UPLOAD_PEM, the Play
+upload key and its certificate.
+
 /sign returns the signed .ipa, with x-app-* headers describing the build. Errors are JSON with status
 400 (the build is wrong) or 500. The container has no internet access: it signs without a
 timestamp server, which iOS does not need.
@@ -33,6 +38,8 @@ import tempfile
 import zipfile
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+import android
 
 MAX_BYTES = 200 * 1024 * 1024
 BUNDLE_ID = re.compile(r"^[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$")
@@ -269,7 +276,7 @@ class Handler(BaseHTTPRequestHandler):
         self._json(200, {"ok": True})
 
     def do_POST(self):
-        if self.path not in ("/sign", "/inspect"):
+        if self.path not in ("/sign", "/inspect", "/sign-android"):
             return self._json(404, {"error": "Not found"})
         try:
             length = int(self.headers.get("content-length", "0"))
@@ -278,6 +285,14 @@ class Handler(BaseHTTPRequestHandler):
             body = self.rfile.read(length)
             if self.path == "/inspect":
                 return self._json(200, inspect(body))
+            if self.path == "/sign-android":
+                signed, meta = android.sign_bundle(
+                    body,
+                    self.headers.get("x-package-name", ""),
+                    self.headers.get("x-build-number", ""),
+                    os.environ.get("ANDROID_UPLOAD_PEM", ""),
+                )
+                return self._send_signed(signed, meta)
             profile = base64.b64decode(self.headers.get("x-profile", ""))
             keys = self.headers.get("x-entitlement-keys", "")
             warnings_header = self.headers.get("x-warnings", "")
@@ -293,13 +308,16 @@ class Handler(BaseHTTPRequestHandler):
                 [key for key in keys.split(",") if key],
                 warnings,
             )
-        except BuildError as error:
+        except (BuildError, android.BundleError) as error:
             return self._json(400, {"error": str(error)})
         except zipfile.BadZipFile:
             return self._json(400, {"error": "The upload is not a zip of an .app"})
         except Exception as error:  # noqa: BLE001
             print(f"signing failed: {error}")
             return self._json(500, {"error": "Signing failed"})
+        self._send_signed(signed, meta)
+
+    def _send_signed(self, signed, meta):
         self.send_response(200)
         self.send_header("content-type", "application/octet-stream")
         self.send_header("content-length", str(len(signed)))

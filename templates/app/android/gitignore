@@ -1,0 +1,12 @@
+# Build outputs and local settings. Never commit them.
+build/
+.build/
+.gradle/
+.kotlin/
+.idea/
+*.iml
+local.properties
+captures/
+.externalNativeBuild/
+.cxx/
+.DS_Store

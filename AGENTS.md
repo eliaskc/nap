@@ -13,7 +13,7 @@ Nap is a TanStack Start app on Cloudflare Workers. It provides a private dashboa
 - Runtime: Cloudflare Workers
 - UI: React, Tailwind CSS v4, shadcn/ui with Base UI
 - Infrastructure: `alchemy.run.ts`, with pinned Alchemy and Effect versions
-- Bindings: `DB` = D1, `SITES` = R2, `LIVE` = Durable Object for live collection updates, `CHANNELS` = Durable Object per multiplayer channel, `LOADER` = Worker Loader that runs a site's channel server (its own JavaScript, named in nap.json) as a sandboxed facet of the channel object, only with `channelServers` on, `SOURCES` = Cloudflare Artifacts namespace with one Git repo per site that keeps its source in Nap (sites with a build step; never artifacts) and one per app, `SIGNER` = Cloudflare Container (`containers/signer`) that signs iOS builds for TestFlight, inferred from `NapWorker`
+- Bindings: `DB` = D1, `SITES` = R2, `LIVE` = Durable Object for live collection updates, `CHANNELS` = Durable Object per multiplayer channel, `LOADER` = Worker Loader that runs a site's channel server (its own JavaScript, named in nap.json) as a sandboxed facet of the channel object, only with `channelServers` on, `SOURCES` = Cloudflare Artifacts namespace with one Git repo per site that keeps its source in Nap (sites with a build step; never artifacts) and one per app, `SIGNER` = Cloudflare Container (`containers/signer`) that signs iOS builds for TestFlight and Android bundles for Google Play, inferred from `NapWorker`
 
 ## Rules
 
@@ -27,7 +27,7 @@ sites/<slug>/versions/<version_id>/<path>
 
 - Serve from D1 `sites.current_version`; never overwrite live files in place.
 - Use email as the stable identity key.
-- Nap never builds apps either: agents upload unsigned iOS builds with their commit, and only the `SIGNER` container holds the signing certificate. Never sign on a laptop or in CI. Nap uploads TestFlight builds to App Store Connect itself. Templates for app repos are in `templates/app`.
+- Nap never builds apps either: agents upload unsigned iOS builds and Android bundles with their commit, and only the `SIGNER` container holds the signing certificate and the Play upload key. Never sign on a laptop or in CI. Nap uploads TestFlight builds to App Store Connect and Android bundles to Google Play itself. Templates for app repos are in `templates/app`.
 - Nap never runs Git or builds sites. Agents push source to a site's Artifacts repo and publish the build with its commit; `src/lib/sources.ts` checks that commit. Use the `cf` CLI to inspect or clean up Artifacts repos.
 - Keep production private. `workers_dev` and `preview_urls` are bypass URLs that can avoid Cloudflare Access. They must be `false` in production:
 

@@ -25,7 +25,7 @@ export type NapConfig = {
   /**
    * Native apps. null turns them off. A Nap has one app: one source repo (app-<app>) with a
    * folder per platform, and each platform it has on gets a launcher that holds every app.
-   * The platforms are iOS and reMarkable.
+   * The platforms are iOS, Android, and reMarkable.
    */
   apps: {
     /** The app's slug on Nap. Its repo is app-<app>. */
@@ -55,6 +55,22 @@ export type NapConfig = {
        * inside the launcher.
        */
       capabilities?: Array<AutomaticCapability>;
+    };
+    /**
+     * Android: signed by Nap with the Play upload key and distributed through Google Play's
+     * internal testing track. Leave it out for no Android. The upload key and the Play service
+     * account are secrets (see alchemy.run.ts). The app in Play Console is made by hand; Nap
+     * never creates it.
+     */
+    android?: {
+      /** The app's package name in Play Console, such as com.example.nap. */
+      packageName: string;
+      /**
+       * The internal testing opt-in link (Play Console → Test and release → Internal testing →
+       * Testers → How testers join your test). null until the app exists: agents can work on the
+       * app and publish, and the dashboard shows how to get it once this is set.
+       */
+      testersUrl: string | null;
     };
     /**
      * reMarkable: a launcher for the reMarkable 2 tablet, run by AppLoad. Leave it out for no

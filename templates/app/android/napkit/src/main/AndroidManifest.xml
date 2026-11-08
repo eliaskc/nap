@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+  <uses-permission android:name="android.permission.INTERNET" />
+  <application>
+    <!-- Starts NapKit with the app, before any activity: Nap needs the app's context. -->
+    <provider
+      android:name="nap.kit.NapStarter"
+      android:authorities="${applicationId}.napkit"
+      android:exported="false" />
+  </application>
+</manifest>

@@ -1,0 +1,21 @@
+#!/bin/sh
+# Builds the Android launcher and publishes it to Nap: pushes HEAD to main of the source repo,
+# uploads the unsigned bundle with that commit, and Nap signs it with the Play upload key and
+# sends it to Google Play's internal testing track.
+#   scripts/publish ["notes for testers"]
+# Commit first: Nap only takes builds of the pushed head of main.
+set -eu
+cd "$(dirname "$0")/.."
+notes=${1:-}
+root=$(git rev-parse --show-toplevel)
+app=$(node -e 'console.log(JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).app)' "$root/nap.json")
+nap=${NAP_URL:-https://{{rootDomain}}}
+
+if [ -n "$(git -C "$root" status --porcelain)" ]; then
+  echo "Commit your changes first: Nap publishes the commit you built." >&2
+  exit 1
+fi
+aab=$(./scripts/build)
+script=$(mktemp -t nap-publish).mjs
+curl -fsSL "$nap/_nap/api/publish.mjs" -o "$script"
+node "$script" app publish "$app" "$PWD/$aab" --target android --source "$root" --notes "$notes"

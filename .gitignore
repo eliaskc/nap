@@ -11,3 +11,4 @@ dist
 
 # Each deployment provides its own instance/ (see instance.example/).
 /instance
+__pycache__/

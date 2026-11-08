@@ -56,7 +56,8 @@ the secrets and a deploy workflow that deploys this code with them.
 1. **Cloudflare.** Add your domain as a zone. The dashboard is at the root
    domain you choose and sites at `<slug>.<root domain>`, so the root domain
    is the zone apex or one level below it (Universal SSL covers one wildcard
-   level). Apps need the Workers Paid plan, for the signer Container.
+   level). iOS and Android apps need the Workers Paid plan, for the signer
+   Container.
 2. **Zero Trust.** Create a team; its domain
    (`https://<team>.cloudflareaccess.com`) is your `accessIssuer`. Under
    Authentication, add the login methods people will use: One-time PIN works
@@ -101,6 +102,21 @@ the secrets and a deploy workflow that deploys this code with them.
    `NAP_APPLE_SIGNING_PEM` (the certificate's private key and certificate in
    one PEM) and `NAP_ASC_PRIVATE_KEY` (the `.p8`), and the variables
    `NAP_ASC_KEY_ID` and `NAP_ASC_ISSUER_ID`.
+
+   For Android, with a Google Play developer account: create the app in Play
+   Console (its package name is `apps.android.packageName`) and set up its
+   internal testing track with a testers list; the opt-in link is
+   `apps.android.testersUrl`. Make an upload key: an RSA key and a self-signed
+   certificate valid for 25 years or more, in one PEM, the secret
+   `NAP_ANDROID_UPLOAD_PEM`. Leave Play App Signing on, so Google keeps the
+   key that signs what phones install. For uploads, make a Google Cloud
+   service account, turn on the Google Play Android Developer API in its
+   project, and invite its email in Play Console (Users and permissions) with
+   access to the app and permission to release to testing tracks; its JSON key
+   is the secret `NAP_PLAY_SERVICE_ACCOUNT`. Play takes the first bundle of a
+   new app only by hand: publish once, upload the signed bundle the publish
+   script saves in Play Console (Test and release, Internal testing), and roll
+   out the release. Nap uploads every build after that.
 
 8. **Voice (optional).** For calls on naps (`nap.voice`), create a TURN key:
    `cf realtime turn keys create --name nap`. Its `uid` is the variable
@@ -483,18 +499,23 @@ Native apps. A Nap has one app (`napConfig.apps.app`): an Artifacts repo
 target of the app, with its own builds, build numbers, and live build, and a
 launcher that holds every app made for it. The platforms are iOS, SwiftUI
 apps in one launcher that people install from TestFlight (`napConfig.apps.ios`),
-and reMarkable, QML apps in one AppLoad launcher for the reMarkable 2 tablet
+Android, Compose apps in one launcher that people install from Google Play's
+internal testing (`napConfig.apps.android`), and reMarkable, QML apps in one AppLoad launcher for the reMarkable 2 tablet
 (`napConfig.apps.remarkable`). Nap never builds apps:
 
 ```text
 agent → app repo (Artifacts) → ios/: Tuist project → xcodebuild without signing on a Mac
-agent → upload the platform's zip with sourceCommit → Nap checks the commit
+agent → app repo (Artifacts) → android/: Gradle project → unsigned release bundle (.aab)
+agent → upload the platform's build with sourceCommit → Nap checks the commit
 Nap (iOS) → signer container (rcodesign) → App Store .ipa in R2 → App Store Connect → TestFlight
+Nap (Android) → signer container (version code, upload key) → .aab in R2 → Google Play → internal testing
 Nap (reMarkable) → the zip as it came, with its SHA-256 → tablet (Nap token) → update itself
 ```
 
 - **Repo.** `ios/` holds the iOS launcher (`ios/Launcher/`) and one module per
-  app (`ios/Apps/<slug>/`); `remarkable/` holds the reMarkable launcher
+  app (`ios/Apps/<slug>/`); `android/` holds the Android launcher
+  (`android/launcher/`), NapKit for Kotlin (`android/napkit/`), and one Gradle
+  module per app (`android/apps/<slug>/`); `remarkable/` holds the reMarkable launcher
   (`remarkable/launcher/`, QML and a Go backend) and one folder per app
   (`remarkable/apps/<slug>/`). The template leaves out the platforms a Nap has
   off. Everyone who can sign in can push to the repo and
@@ -511,13 +532,24 @@ Nap (reMarkable) → the zip as it came, with its SHA-256 → tablet (Nap token)
   It checks that the build is an arm64 iOS device build and that the App
   Store profile covers the app record's bundle id. The profile comes from the
   App Store Connect API (team key) and is cached in R2 at `apps/_signing/`.
-  Deploys need Docker to build the image.
+  For Android it gets the Play upload key and certificate the same way: it
+  checks the bundle's package name and that it is a release build, sets its
+  version code to the build number, and signs it as jarsigner does
+  (`containers/signer/android.py`). Deploys need Docker to build the image.
 - **TestFlight.** Each iOS build is uploaded to App Store Connect with the build
   upload API before it goes live. Its build number goes above every build App
   Store Connect has. Apple then processes it for internal testers; Nap asks
   Apple how far it got when someone opens Get the app, at most every few
   seconds per build, and keeps the state on the build. TestFlight builds need
   an app icon and `ITSAppUsesNonExemptEncryption`; the template has both.
+- **Google Play.** Each Android build is uploaded to Google Play with the
+  Developer API (a service account) and made the release on the internal
+  testing track, before it goes live. Its version code goes above every bundle
+  Play has. While the app is still a draft in Play Console, Play only takes
+  draft releases, which someone rolls out by hand; before its first bundle,
+  or without a service account, Nap keeps the signed bundle (`play_state`
+  manual) and the publish script downloads it for an upload by hand. Testers
+  join from the opt-in link on Get the app; Play Console manages who may.
 - **reMarkable.** Nap keeps the zipped AppLoad folder as it was uploaded
   and records its SHA-256 (`app_builds.sha256`). The first install on a
   tablet is over USB from the repo (`remarkable/scripts/install`); the tablet
@@ -555,9 +587,10 @@ Nap (reMarkable) → the zip as it came, with its SHA-256 → tablet (Nap token)
   with the token. These are the site's own data and channel endpoints under
   the token's identity; like frame requests, they do not count as using
   Nap.
-- **Secrets.** `NAP_APPLE_SIGNING_PEM` and `NAP_ASC_PRIVATE_KEY` are
-  config repository secrets; `NAP_ASC_KEY_ID` and `NAP_ASC_ISSUER_ID` are
-  its variables. The Cloudflare API token needs Containers edit access.
+- **Secrets.** `NAP_APPLE_SIGNING_PEM`, `NAP_ASC_PRIVATE_KEY`,
+  `NAP_ANDROID_UPLOAD_PEM`, and `NAP_PLAY_SERVICE_ACCOUNT` are config
+  repository secrets; `NAP_ASC_KEY_ID` and `NAP_ASC_ISSUER_ID` are its
+  variables. The Cloudflare API token needs Containers edit access.
 
 `pnpm test:apps` runs the whole path against an Artifacts test namespace with
 a real Xcode build, the real certificate, and the instance's TestFlight app

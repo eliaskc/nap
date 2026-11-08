@@ -1,0 +1,9 @@
+#!/bin/sh
+# Updates NapKit (napkit/) to the one this Nap serves. Commit the result. Never edit NapKit
+# here: it is replaced.
+set -eu
+cd "$(dirname "$0")/.."
+nap=${NAP_URL:-https://{{rootDomain}}}
+script=$(mktemp -t nap-publish).mjs
+curl -fsSL "$nap/_nap/api/publish.mjs" -o "$script"
+node "$script" app napkit-android "$PWD"

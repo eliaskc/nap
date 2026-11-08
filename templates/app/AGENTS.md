@@ -4,7 +4,11 @@ The native apps of {{title}} on Nap, in one repo with a folder per platform. Eac
 launcher that holds every app made for it, and Nap publishes each platform on its own.
 
 - `ios/`: SwiftUI apps in one launcher, signed by Nap and installed from TestFlight. Read
-  `ios/AGENTS.md` before you change it.
+`ios/AGENTS.md` before you change it.
+<!-- if android -->
+- `android/`: Kotlin and Compose apps in one launcher, signed by Nap and installed from Google
+Play's internal testing. Read `android/AGENTS.md` before you change it.
+<!-- /if -->
 - `nap.json` names the app on Nap.
 
 <!-- if remarkable -->

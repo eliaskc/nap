@@ -17,6 +17,7 @@ import {
   planCapabilities,
   readRequests,
 } from "~/lib/capabilities";
+import { latestPlayVersionCode, PlayError, playConfigured, uploadToPlay } from "~/lib/google-play";
 import { slugify } from "~/lib/nap-server";
 import { apnsConfig } from "~/lib/notifications";
 import {
@@ -51,6 +52,12 @@ import { Storage } from "~/server/storage";
  * iOS: Nap signs the launcher with the App Store profile in the signer container and uploads it
  * to App Store Connect before it goes live. Apple processes it for a few minutes; Nap asks Apple
  * how far it got when someone looks at the apps.
+ *
+ * Android: the upload is an unsigned Android App Bundle. Nap sets its version code and signs it
+ * with the Play upload key in the signer container, then uploads it to Google Play's internal
+ * testing track (src/lib/google-play.ts) before it goes live. Without a Play service account, or
+ * while Play cannot take it through the API, the signed bundle waits for someone to upload it in
+ * Play Console: GET /_nap/api/apps/<app>/targets/android/builds/<id>/bundle.
  *
  * reMarkable: the upload is the zipped AppLoad folder, and Nap keeps it as it is with its
  * SHA-256. The launcher on the tablet asks for the live build with its Nap token and downloads
@@ -96,6 +103,9 @@ type BuildRow = {
   testflightUpload: string | null;
   testflightKey: string | null;
   testflightCheckedAt: string | null;
+  playState: "released" | "draft" | "manual" | null;
+  playError: string | null;
+  playKey: string | null;
   sha256: string | null;
   contents: string | null;
   createdByEmail: string;
@@ -112,7 +122,8 @@ const BUILD_COLUMNS = `id, app_slug AS appSlug, target, build_number AS buildNum
   short_version AS shortVersion, xcode, signed_bytes AS signedBytes,
   testflight_state AS testflightState, testflight_error AS testflightError,
   testflight_upload AS testflightUpload, testflight_key AS testflightKey,
-  testflight_checked_at AS testflightCheckedAt, sha256, contents,
+  testflight_checked_at AS testflightCheckedAt, play_state AS playState,
+  play_error AS playError, play_key AS playKey, sha256, contents,
   created_by_email AS createdByEmail, client, created_at AS createdAt`;
 
 /** Workers take request bodies up to 100 MB. Launchers are far smaller. */
@@ -129,13 +140,18 @@ export const testFlightConfig = () => {
 };
 
 /** The platforms Nap knows. A Nap has the ones its config turns on. */
-export type PlatformName = "ios" | "remarkable";
+export type PlatformName = "ios" | "android" | "remarkable";
 /** Older scripts publish the iOS launcher as the target "launcher". */
 const TARGET_ALIASES: Record<string, PlatformName> = { launcher: "ios" };
-const PLATFORM_LABELS: Record<PlatformName, string> = { ios: "iOS", remarkable: "reMarkable" };
+const PLATFORM_LABELS: Record<PlatformName, string> = {
+  ios: "iOS",
+  android: "Android",
+  remarkable: "reMarkable",
+};
 /** The platforms this Nap has on, in order. */
 export const platformsOn = (): Array<PlatformName> => [
   ...(napConfig.apps?.ios ? (["ios"] as const) : []),
+  ...(napConfig.apps?.android ? (["android"] as const) : []),
   ...(napConfig.apps?.remarkable ? (["remarkable"] as const) : []),
 ];
 export const platformLabel = (name: string) => PLATFORM_LABELS[name as PlatformName] ?? name;
@@ -150,6 +166,9 @@ const uploadKey = (app: string, build: string) => `apps/${app}/builds/${build}/u
 /** The .ipa signed for the App Store (TestFlight), named after its profile. */
 const signedKey = (app: string, build: string, profile: string) =>
   `apps/${app}/builds/${build}/signed-appstore-${profile}.ipa`;
+
+/** The Android bundle signed with the upload key, for Google Play. */
+const signedBundleKey = (app: string, build: string) => `apps/${app}/builds/${build}/signed.aab`;
 
 /** The agent API under /_nap/api/apps. `path` starts after /apps. */
 export const handleAppsApi = Effect.fn("handleAppsApi")(function* (
@@ -242,6 +261,30 @@ export const handleAppsApi = Effect.fn("handleAppsApi")(function* (
         "content-disposition": `attachment; filename="${app.slug}-remarkable-${build.buildNumber}.zip"`,
         "x-nap-build-number": String(build.buildNumber),
         ...(build.sha256 ? { "x-nap-sha256": build.sha256 } : {}),
+      },
+    });
+  }
+  // An Android build signed for Google Play, for the first upload by hand in Play Console.
+  const bundle = rest.match(/^\/targets\/android\/builds\/([0-9a-f-]{36})\/bundle$/);
+  if (bundle && method === "GET") {
+    if (!platformsOn().includes("android")) return yield* failNoStore(404, "Not found");
+    const build = yield* getBuild(bundle[1]);
+    if (!build || build.appSlug !== app.slug || build.target !== "android" || !build.playKey) {
+      return yield* failNoStore(404, "Build not found");
+    }
+    const object = yield* (yield* Storage).get(build.playKey);
+    if (!object) return yield* failNoStore(404, "The build is missing");
+    yield* logAppEvent(agent, app.slug, "download", {
+      target: build.target,
+      buildNumber: build.buildNumber,
+    });
+    return new Response(object.body, {
+      headers: {
+        ...noStore,
+        "content-type": "application/octet-stream",
+        "content-length": String(object.size),
+        "content-disposition": `attachment; filename="${app.slug}-android-${build.buildNumber}.aab"`,
+        "x-nap-build-number": String(build.buildNumber),
       },
     });
   }
@@ -434,7 +477,13 @@ const publishBuild = Effect.fnUntraced(function* (
   });
 
   // The platform's own step, before the build goes live: a build it refuses never does.
-  const processed = yield* platform.process({ app: app.slug, build: id, buildNumber, failBuild });
+  const processed = yield* platform.process({
+    app: app.slug,
+    build: id,
+    buildNumber,
+    notes,
+    failBuild,
+  });
   yield* db.run(
     `UPDATE app_builds SET status = 'ready', app_name = ?, short_version = ?, xcode = ?,
                            signed_bytes = ?
@@ -499,6 +548,8 @@ type ProcessInput = {
   app: string;
   build: string;
   buildNumber: number;
+  /** What changed, for testers. */
+  notes: string;
   /** Marks the build failed and fails the publish with this status and message. */
   failBuild: (status: number, error: string) => Effect.Effect<never, unknown, NapServices>;
 };
@@ -531,6 +582,79 @@ type Platform = {
 };
 
 const PLATFORMS: Record<PlatformName, Platform> = {
+  android: {
+    ready: () =>
+      Effect.gen(function* () {
+        if (!(yield* SignerBinding)) {
+          return yield* failNoStore(503, "The app signer is not set up", {
+            code: "signer_unavailable",
+          });
+        }
+      }),
+    targetId: () => napConfig.apps!.android!.packageName,
+    // Version codes must go above every bundle Google Play has, from any source.
+    lowestBuildNumber: () =>
+      Effect.gen(function* () {
+        if (!(yield* playConfigured)) return 1;
+        return (yield* latestPlayVersionCode()) + 1;
+      }).pipe(
+        Effect.catchTag("PlayError", (error) =>
+          failNoStore(503, error.message, { code: "play_unavailable" }),
+        ),
+      ),
+    process: ({ app, build, buildNumber, notes, failBuild }) =>
+      Effect.gen(function* () {
+        const { packageName, testersUrl } = napConfig.apps!.android!;
+        const signed = yield* signBundle(app, build, packageName, buildNumber).pipe(
+          Effect.catchTag("SignError", (error: SignError) =>
+            failBuild(error.status, error.message),
+          ),
+        );
+        const manual = (reason: string) =>
+          Effect.succeed({ state: "manual" as const, error: reason });
+        const outcome = (yield* playConfigured)
+          ? yield* uploadToPlay(signed.key, buildNumber, notes).pipe(
+              Effect.map((upload) => ({ state: upload.state, error: null as string | null })),
+              Effect.catchTag("PlayError", (error: PlayError) =>
+                error.notFound
+                  ? manual(
+                      `Google Play does not know the app ${packageName} to Nap yet. Upload the first bundle by hand in Play Console, and check that Nap's service account has access to the app.`,
+                    )
+                  : failBuild(502, `Uploading to Google Play failed: ${error.message}`),
+              ),
+            )
+          : yield* manual("This Nap has no Google Play service account, so it cannot upload.");
+        const db = yield* Database;
+        yield* db.run(
+          "UPDATE app_builds SET play_state = ?, play_error = ?, play_key = ? WHERE id = ?",
+          outcome.state,
+          outcome.error,
+          signed.key,
+          build,
+        );
+        const bundlePath = `/_nap/api/apps/${app}/targets/android/builds/${build}/bundle`;
+        const join = testersUrl
+          ? `Testers join once from ${testersUrl}, then install and update it from Google Play.`
+          : "";
+        return {
+          name: "",
+          version: signed.versionName,
+          toolchain: "",
+          bytes: signed.bytes,
+          response: {
+            packageName,
+            play: outcome,
+            ...(outcome.state === "manual" ? { signedBundle: bundlePath } : {}),
+          },
+          message: (number: number, page: string) =>
+            outcome.state === "released"
+              ? `Build ${number} of the Android app is on internal testing in Google Play. It reaches testers in a few minutes. ${join} ${page} shows how to get it.`.trim()
+              : outcome.state === "draft"
+                ? `Build ${number} of the Android app is a draft release on internal testing in Google Play: the app is still a draft in Play Console, so ${napConfig.admin} rolls it out there by hand (Test and release → Internal testing). Tell them.`
+                : `Build ${number} of the Android app is signed, but Nap did not upload it to Google Play: ${outcome.error} The publish script saved the signed bundle; ${napConfig.admin} uploads it in Play Console (Test and release → Internal testing → Create new release). Tell them.`,
+        };
+      }),
+  },
   remarkable: {
     ready: () => Effect.void,
     targetId: (app) => `${app}.remarkable`,
@@ -740,6 +864,60 @@ const signBuild = Effect.fnUntraced(function* (
   };
 });
 
+/** Signs a stored unsigned Android App Bundle with the Play upload key and stores it. */
+const signBundle = Effect.fnUntraced(function* (
+  app: string,
+  build: string,
+  packageName: string,
+  versionCode: number,
+) {
+  const storage = yield* Storage;
+  const unsigned = yield* storage.get(uploadKey(app, build));
+  if (!unsigned) {
+    return yield* new SignError({ message: "The unsigned bundle is missing", status: 500 });
+  }
+  const signer = yield* SignerBinding;
+  if (!signer) {
+    return yield* new SignError({ message: "The app signer is not set up", status: 503 });
+  }
+  const response = yield* Effect.promise(() =>
+    signer.fetch(
+      new Request(`${signer.url}/sign-android`, {
+        method: "POST",
+        body: fixedLength(unsigned.body, unsigned.size),
+        headers: {
+          "content-type": "application/octet-stream",
+          "x-package-name": packageName,
+          "x-build-number": String(versionCode),
+        },
+      }),
+    ),
+  );
+  if (!response.ok) {
+    const body = (yield* Effect.promise(() => response.json().catch(() => ({})))) as {
+      error?: string;
+    };
+    return yield* new SignError({
+      message: String(body.error ?? `Signing failed (${response.status})`),
+      status: response.status === 400 ? 400 : 502,
+    });
+  }
+  const bytes = Number(response.headers.get("content-length"));
+  if (!response.body || !Number.isFinite(bytes) || bytes <= 0) {
+    return yield* new SignError({ message: "The signer returned no bundle", status: 502 });
+  }
+  const key = signedBundleKey(app, build);
+  yield* storage.put(key, fixedLength(response.body, bytes), {
+    httpMetadata: { contentType: "application/octet-stream" },
+  });
+  const versionName = response.headers.get("x-app-short-version");
+  let decoded = "";
+  try {
+    decoded = versionName ? atob(versionName).slice(0, 40) : "";
+  } catch {}
+  return { key, bytes, versionName: decoded };
+});
+
 /** What a build asks for: the NapCapabilities key in its Info.plist, read by the signer. */
 const inspectBuild = Effect.fnUntraced(function* (
   signer: NonNullable<Effect.Success<typeof SignerBinding>>,
@@ -920,6 +1098,15 @@ function describeBuild(build: BuildRow) {
     testFlight: build.testflightState
       ? { state: build.testflightState, error: build.testflightError }
       : null,
+    play: build.playState
+      ? {
+          state: build.playState,
+          error: build.playError,
+          bundle: build.playKey
+            ? `/_nap/api/apps/${build.appSlug}/targets/android/builds/${build.id}/bundle`
+            : null,
+        }
+      : null,
     by: build.createdByEmail,
     client: build.client,
     createdAt: build.createdAt,
@@ -951,7 +1138,12 @@ const describeApp = Effect.fnUntraced(function* (app: AppRow, _origin: string) {
     targets: targets.map((target, index) => ({
       target: target.target,
       platform: platformLabel(target.target),
-      bundleId: target.target === "ios" ? (napConfig.apps?.ios?.bundleId ?? target.bundleId) : null,
+      bundleId:
+        target.target === "ios"
+          ? (napConfig.apps?.ios?.bundleId ?? target.bundleId)
+          : target.target === "android"
+            ? (napConfig.apps?.android?.packageName ?? target.bundleId)
+            : null,
       title: target.title || target.target,
       live: builds[index] ? describeBuild(builds[index]!) : null,
     })),

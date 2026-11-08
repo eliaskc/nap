@@ -2,8 +2,12 @@ import { napConfig } from "~/nap.config";
 
 /** Platform folders, and the markers that keep text about one, by whether the Nap has it on. */
 const platformOn = (platform: string) =>
-  platform === "ios" ? Boolean(napConfig.apps?.ios) : Boolean(napConfig.apps?.remarkable);
-const PLATFORM_FOLDERS = ["ios", "remarkable"];
+  platform === "ios"
+    ? Boolean(napConfig.apps?.ios)
+    : platform === "android"
+      ? Boolean(napConfig.apps?.android)
+      : Boolean(napConfig.apps?.remarkable);
+const PLATFORM_FOLDERS = ["ios", "android", "remarkable"];
 /** Drops <!-- if <platform> -->…<!-- /if --> when the platform is off, and the markers. */
 const showPlatforms = (text: string) =>
   text.includes("<!-- if ")
@@ -17,7 +21,8 @@ const showPlatforms = (text: string) =>
 
 /**
  * The starting point of an app's source repo: a folder per platform (ios/: a Tuist project with a
- * launcher and one app in it; remarkable/: an AppLoad launcher with one app in it).
+ * launcher and one app in it; android/: a Gradle project with a launcher and one app in it;
+ * remarkable/: an AppLoad launcher with one app in it).
  * The files are in templates/app and bundled into the Worker. `node publish.mjs app init` writes
  * them, fills in the placeholders, and pushes the first commit.
  */
@@ -83,6 +88,37 @@ function iconFiles() {
 }
 
 /**
+ * The Android launcher's icon: the instance's web icon (instance/icon/web, made by
+ * scripts/icons.mjs), or Nap's. It replaces the template's at ANDROID_ICON.
+ */
+const ANDROID_ICONS = {
+  instance: import.meta.glob("/instance/icon/web/android-chrome-192x192.png", {
+    query: "?inline",
+    import: "default",
+    eager: true,
+  }),
+  brand: import.meta.glob("/public/android-chrome-192x192.png", {
+    query: "?inline",
+    import: "default",
+    eager: true,
+  }),
+} as const;
+const ANDROID_ICON = "android/launcher/src/main/res/mipmap-xxxhdpi/ic_launcher.png";
+function androidIconFiles() {
+  const url = (Object.values(ANDROID_ICONS.instance)[0] ??
+    Object.values(ANDROID_ICONS.brand)[0]) as string | undefined;
+  if (!url) return [];
+  return [
+    {
+      path: ANDROID_ICON,
+      content: url.slice(url.indexOf(",") + 1),
+      encoding: "base64" as const,
+      executable: false,
+    },
+  ];
+}
+
+/**
  * The Swift clients of the instance's extensions (instance/extensions/<name>/client.swift), for
  * NapKit: what the web gets as nap.<name>, apps get from an extension on NapSite.
  */
@@ -131,11 +167,15 @@ export function appTemplateFiles() {
       }
       return {
         path: rename(relative),
-        content: showPlatforms(content).replaceAll("{{rootDomain}}", napConfig.rootDomain),
+        content: showPlatforms(content)
+          .replaceAll("{{rootDomain}}", napConfig.rootDomain)
+          .replaceAll("{{androidPackage}}", napConfig.apps?.android?.packageName ?? ""),
         encoding: "utf8" as const,
-        executable: /(^|\/)scripts\//.test(relative),
+        executable: /(^|\/)scripts\//.test(relative) || /(^|\/)gradlew$/.test(relative),
       };
     })
+    .filter((file) => !(platformOn("android") && file.path === ANDROID_ICON))
     .concat(platformOn("ios") ? [...iconFiles(), ...swiftExtensionFiles()] : [])
+    .concat(platformOn("android") ? androidIconFiles() : [])
     .sort((a, b) => a.path.localeCompare(b.path));
 }

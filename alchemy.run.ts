@@ -185,6 +185,13 @@ export class NapWorker extends Cloudflare.Website.Vite<NapWorker>()(
     const ascPrivateKey = appsInProduction
       ? yield* secret("NAP_ASC_PRIVATE_KEY")
       : yield* optional("NAP_ASC_PRIVATE_KEY");
+    // Android apps (napConfig.apps.android): the Play upload key and its certificate (one PEM)
+    // that the signer container signs bundles with, and a Google Cloud service account (its JSON
+    // key) with access to the app in Play Console, which uploads them to internal testing.
+    // Optional on every stage: without the key, publishing an Android build fails with a clear
+    // error; without the service account, Nap signs builds and hands them back for a manual upload.
+    const androidUploadPem = yield* optional("NAP_ANDROID_UPLOAD_PEM");
+    const playServiceAccount = yield* optional("NAP_PLAY_SERVICE_ACCOUNT");
     // Notifications to the iOS app: an APNs key. Optional; without it, only browsers get them.
     const apnsPrivateKey = yield* optional("NAP_APNS_PRIVATE_KEY");
     // Voice and video between the people on a nap (/_nap/rtc): a Cloudflare Realtime TURN key.
@@ -224,13 +231,14 @@ export class NapWorker extends Cloudflare.Website.Vite<NapWorker>()(
         ...(napConfig.channelServers || isLocalStage()
           ? { LOADER: Cloudflare.WorkerLoader("LOADER") }
           : {}),
-        // The app signer: a container that signs unsigned iOS builds with rcodesign
-        // (containers/signer). One instance that sleeps when idle; it has no internet access.
+        // The app signer: a container that signs unsigned iOS builds with rcodesign, and Android
+        // App Bundles with the Play upload key (containers/signer). One instance that sleeps when
+        // idle; it has no internet access.
         // standard-1 (half a CPU, 4 GB): lite took two minutes to sign a 19 MB app.
-        // Only with iOS on (napConfig.apps.ios): containers need the Workers Paid plan and Docker.
-        // Turning iOS off on a Nap that had it fails to deploy while the Worker still exports
+        // Only with iOS or Android on: containers need the Workers Paid plan and Docker.
+        // Turning both off on a Nap that had them fails to deploy while the Worker still exports
         // AppSigner (Cloudflare refuses the deleted class).
-        ...(napConfig.apps?.ios
+        ...(napConfig.apps?.ios || napConfig.apps?.android
           ? {
               SIGNER: Cloudflare.Container<AppSigner>("SIGNER", {
                 className: "AppSigner",
@@ -262,6 +270,8 @@ export class NapWorker extends Cloudflare.Website.Vite<NapWorker>()(
         NAP_ASC_PRIVATE_KEY: ascPrivateKey,
         NAP_ASC_KEY_ID: yield* plain("NAP_ASC_KEY_ID"),
         NAP_ASC_ISSUER_ID: yield* plain("NAP_ASC_ISSUER_ID"),
+        NAP_ANDROID_UPLOAD_PEM: androidUploadPem,
+        NAP_PLAY_SERVICE_ACCOUNT: playServiceAccount,
         NAP_APNS_PRIVATE_KEY: apnsPrivateKey,
         NAP_APNS_KEY_ID: yield* plain("NAP_APNS_KEY_ID"),
         NAP_TURN_KEY_ID: yield* plain("NAP_TURN_KEY_ID"),
