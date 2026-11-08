@@ -32,6 +32,8 @@ type Peer = {
   joinedAt: number;
   state: unknown;
   expiresAt?: string;
+  /** A watcher sees the peers and their presence but is not one: no join, no presence, no messages. */
+  watch?: boolean;
 };
 
 type ClientMessage =
@@ -71,16 +73,18 @@ export class SiteChannel extends DurableObject<ChannelEnv> {
       joinedAt: Date.now(),
       state: null,
       expiresAt: request.headers.get("x-nap-expires-at") ?? undefined,
+      watch: request.headers.get("x-nap-watch") === "1" || undefined,
     };
     const { 0: client, 1: server } = new WebSocketPair();
     this.ctx.acceptWebSocket(server);
     server.serializeAttachment(peer);
 
-    const others = sockets.map(peerOf).filter((other): other is Peer => other !== null);
-    server.send(
-      JSON.stringify({ t: "welcome", id: peer.id, peers: [...others, peer].map(publicPeer) }),
-    );
-    this.broadcast({ t: "join", peer: publicPeer(peer) }, server);
+    const others = sockets
+      .map(peerOf)
+      .filter((other): other is Peer => other !== null && !other.watch);
+    const peers = peer.watch ? others : [...others, peer];
+    server.send(JSON.stringify({ t: "welcome", id: peer.id, peers: peers.map(publicPeer) }));
+    if (!peer.watch) this.broadcast({ t: "join", peer: publicPeer(peer) }, server);
     return new Response(null, { status: 101, webSocket: client });
   }
 
@@ -91,6 +95,7 @@ export class SiteChannel extends DurableObject<ChannelEnv> {
     if (message.length > MAX_MESSAGE_CHARS) return sendError(socket, "Message exceeds 16 KB");
     if (!this.allow(socket)) return;
     if (!(await this.checkAccess(socket))) return;
+    if (peer.watch) return sendError(socket, "Watching: this connection cannot send");
 
     let parsed: ClientMessage;
     try {
@@ -121,11 +126,14 @@ export class SiteChannel extends DurableObject<ChannelEnv> {
         data: parsed.data ?? null,
       };
       if (typeof parsed.to === "string") {
-        const target = this.ctx.getWebSockets().find((s) => peerOf(s)?.id === parsed.to);
+        const target = this.ctx
+          .getWebSockets()
+          .find((s) => peerOf(s)?.id === parsed.to && !peerOf(s)?.watch);
         if (target) trySend(target, JSON.stringify(out));
         return;
       }
-      this.broadcast(out, socket);
+      // Messages go to peers only: watchers get who is here, not the traffic.
+      this.broadcast(out, socket, true);
       return;
     }
     sendError(socket, "Unknown message type");
@@ -147,14 +155,15 @@ export class SiteChannel extends DurableObject<ChannelEnv> {
     } catch {
       // Already closed.
     }
-    if (peer) this.broadcast({ t: "leave", id: peer.id }, socket);
+    if (peer && !peer.watch) this.broadcast({ t: "leave", id: peer.id }, socket);
   }
 
-  /** Sends to every socket but `except`. */
-  private broadcast(message: unknown, except?: WebSocket) {
+  /** Sends to every socket but `except`, and with `peersOnly`, not to watchers. */
+  private broadcast(message: unknown, except?: WebSocket, peersOnly = false) {
     const text = JSON.stringify(message);
     for (const socket of this.ctx.getWebSockets()) {
-      if (socket !== except) trySend(socket, text);
+      if (socket === except || (peersOnly && peerOf(socket)?.watch)) continue;
+      trySend(socket, text);
     }
   }
 
@@ -247,6 +256,9 @@ function safeDecode(value: string) {
 /**
  * GET /_nap/channel/<name> with a WebSocket upgrade. For artifact frames, `identity` comes from
  * the frame token: Access does not protect that path, so its headers say nothing.
+ * `?watch=1` watches the channel without joining it: the socket gets the peers, their presence,
+ * joins, and leaves, but others never see it and it cannot send. Launchers use it to show who is
+ * in a lobby.
  */
 export const handleChannelRequest = Effect.fn("handleChannelRequest")(function* (
   slug: string,
@@ -277,6 +289,7 @@ export const handleChannelRequest = Effect.fn("handleChannelRequest")(function* 
     "x-nap-slug": slug,
   });
   if (expiresAt) headers.set("x-nap-expires-at", expiresAt);
+  if (new URL(request.url).searchParams.get("watch") === "1") headers.set("x-nap-watch", "1");
   return yield* Effect.promise(() =>
     channels.getByName(`${slug}/${name}`).fetch("https://channel/", { headers }),
   );

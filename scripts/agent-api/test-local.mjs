@@ -356,6 +356,52 @@ try {
     );
   });
   assert.equal(welcome.t, "welcome", "the channel speaks to a token");
+  // A watcher sees who is on a channel without being one of them.
+  {
+    const open = (path, token) =>
+      new Promise((resolve, reject) => {
+        const socket = new WebSocket(`ws://localhost:${PORT}${path}`, { headers: bearer(token) });
+        const inbox = [];
+        const waiters = [];
+        socket.addEventListener("message", (event) => {
+          const message = JSON.parse(event.data);
+          const waiter = waiters.findIndex((w) => w.test(message));
+          if (waiter >= 0) waiters.splice(waiter, 1)[0].resolve(message);
+          else inbox.push(message);
+        });
+        socket.addEventListener("open", () => resolve({ socket, inbox, next }));
+        socket.addEventListener("error", (event) => reject(new Error(`Channel: ${event.message}`)));
+        function next(test, label) {
+          const known = inbox.findIndex(test);
+          if (known >= 0) return Promise.resolve(inbox.splice(known, 1)[0]);
+          return new Promise((done, fail) => {
+            const timer = setTimeout(() => fail(new Error(`No ${label}`)), 10_000);
+            waiters.push({ test, resolve: (m) => (clearTimeout(timer), done(m)) });
+          });
+        }
+      });
+    const base = `/_nap/api/naps/${direct.id}/channel/watched`;
+    const player = await open(base, otherToken);
+    await player.next((m) => m.t === "welcome", "player welcome");
+    player.socket.send(JSON.stringify({ t: "presence", state: { ready: true } }));
+    const watcher = await open(`${base}?watch=1`, directToken);
+    const seen = await watcher.next((m) => m.t === "welcome", "watcher welcome");
+    assert.equal(seen.peers.length, 1, "the watcher sees the player and not itself");
+    assert.deepEqual(seen.peers[0].state, { ready: true }, "with the player's presence");
+    const second = await open(base, directToken);
+    const joined = await watcher.next((m) => m.t === "join", "join seen by the watcher");
+    assert.ok(joined.peer.id, "the join names the new player");
+    const secondWelcome = await second.next((m) => m.t === "welcome", "second welcome");
+    assert.equal(secondWelcome.peers.length, 2, "players do not see the watcher");
+    second.socket.send(JSON.stringify({ t: "send", data: "hi" }));
+    await player.next((m) => m.t === "message", "message to the player");
+    watcher.socket.send(JSON.stringify({ t: "send", data: "sneaky" }));
+    const refused = await watcher.next((m) => m.t === "error", "watcher refused");
+    assert.match(refused.error, /cannot send/);
+    assert.ok(!watcher.inbox.some((m) => m.t === "message"), "watchers get no messages");
+    assert.ok(!player.inbox.some((m) => m.t === "join" && m.peer.id === seen.id), "no join for the watcher");
+    for (const s of [player, watcher, second]) s.socket.close();
+  }
   // ICE servers for voice: STUN at least, and TURN credentials when the stage has a TURN key.
   const rtc = await call(`/_nap/api/naps/${direct.id}/rtc`, { headers: bearer(otherToken) });
   assert.equal(rtc.status, 200, rtc.text);

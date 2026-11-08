@@ -39,6 +39,11 @@ public final class NapSite {
   /// when done.
   public func channel(_ name: String) -> NapChannel<JSONValue> { NapChannel(site: self, name: name) }
 
+  /// Watches a channel without joining it: `peers` and their presence stay live, but nobody sees
+  /// this device and it cannot send. For showing who is in a lobby, as a launcher does. Call
+  /// `leave()` when done.
+  public func watch(_ name: String) -> NapChannel<JSONValue> { NapChannel(site: self, name: name, watch: true) }
+
   /// A channel whose messages are one Codable type, such as an enum of a game's messages.
   /// Messages that do not decode as it are dropped.
   public func channel<M: Codable & Sendable>(_ name: String, messages: M.Type) -> NapChannel<M> {

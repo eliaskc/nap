@@ -64,9 +64,13 @@ public final class NapChannel<M: Codable & Sendable> {
   @ObservationIgnored private var left = false
   @ObservationIgnored private var pingTask: Task<Void, Never>?
 
-  init(site: NapSite, name: String) {
+  /// Watching: this device sees the peers but is not one of them (see `NapSite.watch`).
+  public let isWatching: Bool
+
+  init(site: NapSite, name: String, watch: Bool = false) {
     self.site = site
     self.name = name
+    self.isWatching = watch
     connect()
   }
 
@@ -75,6 +79,7 @@ public final class NapChannel<M: Codable & Sendable> {
 
   /// Sets this device's presence, which everyone sees in `peers`.
   public func setPresence(_ state: some Encodable & Sendable) {
+    guard !isWatching else { return }
     let state = JSONValue.from(state)
     presence = state
     if let selfId { map[selfId]?.state = state; publish() }
@@ -86,7 +91,7 @@ public final class NapChannel<M: Codable & Sendable> {
   /// Sends a message to everyone else, or to one peer by id. False while the channel is closed.
   @discardableResult
   public func send(_ data: M, to: String? = nil) -> Bool {
-    guard isOpen, let socket, let text = try? JSONEncoder().encode(Outgoing(data: data, to: to)) else {
+    guard isOpen, !isWatching, let socket, let text = try? JSONEncoder().encode(Outgoing(data: data, to: to)) else {
       return false
     }
     socket.send(.string(String(decoding: text, as: UTF8.self))) { _ in }
@@ -123,6 +128,7 @@ public final class NapChannel<M: Codable & Sendable> {
     guard !left, let token = NapAccount.shared.token else { return }
     attempt += 1
     var url = URLComponents(url: site.url("channel/\(name)"), resolvingAgainstBaseURL: false)!
+    if isWatching { url.queryItems = [URLQueryItem(name: "watch", value: "1")] }
     url.scheme = url.scheme == "http" ? "ws" : "wss"
     var request = URLRequest(url: url.url!)
     request.setValue("Bearer \(token)", forHTTPHeaderField: "authorization")

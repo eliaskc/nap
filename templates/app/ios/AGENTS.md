@@ -112,6 +112,8 @@ public struct AppView: View {
 - `site.channel(name, messages: M.self)` (or `site.channel(name)` for any JSON): presence
   (`setPresence`, `peers`) and messages (`send(_:to:)`, `onMessage`), with everyone on the
   page's channel, web or app. Messages that do not decode as `M` are dropped. `leave()` when done.
+- `site.watch(name)`: the channel's `peers` and their presence, live, without joining it: nobody
+  sees this device and it cannot send. For showing who is in a lobby, as the launcher does.
 - `site.rtc()`: ICE servers for WebRTC between people on the page (STUN, and TURN relays when
   the Nap has them).
 - `site.fetch(url)`: APIs the page lists in its nap.json, like nap.fetch.
