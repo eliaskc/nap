@@ -984,6 +984,9 @@ const logAppEvent = (
  * build (with what is inside it), and whether the person dismissed the nudge. Null when apps
  * are off or the app has no record yet.
  */
+/** How many builds per platform What's new lists. */
+const SHEET_HISTORY = 12;
+
 export const appSheet = Effect.fn("appSheet")(function* (email: string, origin: string) {
   const slug = napApp();
   const db = yield* Database;
@@ -995,12 +998,32 @@ export const appSheet = Effect.fn("appSheet")(function* (email: string, origin: 
     "SELECT app_nudge_dismissed_at AS dismissed FROM profiles WHERE email = ?",
     email,
   );
-  const lives = platformsOn().map((target) => ({
-    target,
-    live: app?.targets.find((t) => t.target === target)?.live ?? null,
-  }));
+  // Each platform's recent builds that went through, newest first, for What's new.
+  const lives = yield* Effect.forEach(platformsOn(), (target) =>
+    Effect.gen(function* () {
+      const rows = row
+        ? yield* db.all<BuildRow>(
+            `SELECT ${BUILD_COLUMNS} FROM app_builds
+             WHERE app_slug = ? AND target = ? AND status = 'ready'
+             ORDER BY build_number DESC LIMIT ?`,
+            row.slug,
+            target,
+            SHEET_HISTORY,
+          )
+        : [];
+      return {
+        target,
+        live: app?.targets.find((t) => t.target === target)?.live ?? null,
+        history: rows.map(describeBuild),
+      };
+    }),
+  );
   // Who published each build, by the name they picked on Nap rather than their email.
-  const emails = [...new Set(lives.flatMap((p) => (p.live ? [p.live.by.toLowerCase()] : [])))];
+  const emails = [
+    ...new Set(
+      lives.flatMap((p) => [p.live, ...p.history].flatMap((b) => (b ? [b.by.toLowerCase()] : []))),
+    ),
+  ];
   const names = emails.length
     ? yield* db.all<{ email: string; name: string | null }>(
         `SELECT lower(email) AS email, display_name AS name FROM profiles
@@ -1016,6 +1039,7 @@ export const appSheet = Effect.fn("appSheet")(function* (email: string, origin: 
     platforms: lives.map((p) => ({
       ...p,
       live: p.live && { ...p.live, byName: nameOf(p.live.by) },
+      history: p.history.map((b) => ({ ...b, byName: nameOf(b.by) })),
     })),
     nudgeDismissed: Boolean(profile?.dismissed),
   };

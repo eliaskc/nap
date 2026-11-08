@@ -350,6 +350,24 @@ test("a build keeps the apps inside it, and the sheet shows them with the nudge 
       .run("owner@example.com", "Owen");
     sheet = await runNap(env, appSheet("p@x.com", ORIGIN));
     assert.equal(sheet.platforms[0].live.byName, "Owen");
+
+    // What's new lists the builds that went through, newest first.
+    SOURCES.commit("app-notes", sha(2), [sha(1)]);
+    const second = await api(
+      "POST",
+      `/notes/builds?target=remarkable&sourceCommit=${sha(2)}&notes=Second`,
+      upload(zipBytes("second")),
+    );
+    assert.equal(second.status, 201);
+    sheet = await runNap(env, appSheet("p@x.com", ORIGIN));
+    assert.deepEqual(
+      sheet.platforms[0].history.map((b) => [b.buildNumber, b.notes, b.byName]),
+      [
+        [2, "Second", "Owen"],
+        [1, "", "Owen"],
+      ],
+    );
+    assert.equal(sheet.platforms[0].live.id, sheet.platforms[0].history[0].id);
     await runNap(env, dismissAppNudge("p@x.com"));
     sheet = await runNap(env, appSheet("p@x.com", ORIGIN));
     assert.equal(sheet.nudgeDismissed, true);

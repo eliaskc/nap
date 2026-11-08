@@ -58,6 +58,7 @@ type Status = InstallStatus | { enabled: false };
 
 type BuildApp = { slug: string; title: string; summary: string };
 type LiveBuild = {
+  id: string;
   buildNumber: number;
   status: "signing" | "ready" | "failed";
   notes: string;
@@ -70,7 +71,7 @@ type LiveBuild = {
 };
 type AppSheet = {
   title: string;
-  platforms: Array<{ target: Target; live: LiveBuild | null }>;
+  platforms: Array<{ target: Target; live: LiveBuild | null; history?: Array<LiveBuild> }>;
   nudgeDismissed: boolean;
 };
 
@@ -747,19 +748,62 @@ function when(iso: string) {
   return date.toLocaleDateString(undefined, { day: "numeric", month: "short" });
 }
 
-function WhatsNew({ build }: { build: LiveBuild | null }) {
-  if (!build) return <p className="text-sm text-muted-foreground">No builds yet.</p>;
+/**
+ * Every recent build is one line; the open one shows its notes. The live one starts open, so the
+ * section reads as before, and the history costs a line per build.
+ */
+function WhatsNew({ live, history }: { live: LiveBuild | null; history: Array<LiveBuild> }) {
+  const builds = history.length ? history : live ? [live] : [];
+  const [open, setOpen] = React.useState<string | null>(live?.id ?? builds[0]?.id ?? null);
+  if (builds.length === 0) return <p className="text-sm text-muted-foreground">No builds yet.</p>;
   return (
-    <div className="flex flex-col gap-1.5">
-      <div className="flex items-baseline justify-between gap-3">
-        <b className="text-[14.5px] font-semibold">Build {build.buildNumber}</b>
-        <span className="text-[12.5px] text-muted-foreground">
-          {when(build.createdAt)} · {build.byName}
-        </span>
-      </div>
-      <p className="text-[14.5px] leading-normal text-foreground/80">
-        {build.notes || "No notes for this build."}
-      </p>
+    <div className="flex flex-col border-t">
+      {builds.map((build) => {
+        const on = open === build.id;
+        return (
+          <button
+            key={build.id}
+            type="button"
+            aria-expanded={on}
+            onClick={() => setOpen(on ? null : build.id)}
+            className={cn(
+              "flex w-full flex-col gap-1 border-b px-0.5 py-2.5 text-left transition-colors",
+              !on && "hover:bg-foreground/[0.03]",
+            )}
+          >
+            <span className="flex items-baseline gap-3">
+              <b
+                className={cn(
+                  "font-semibold",
+                  on ? "text-[14.5px]" : "text-[13.5px] font-medium text-foreground/70",
+                )}
+              >
+                Build {build.buildNumber}
+                {build.id === live?.id && history.length > 1 && (
+                  <span className="ml-2 rounded-full bg-kind-app-soft px-1.5 py-px align-[1px] text-[11px] font-semibold text-kind-app">
+                    Latest
+                  </span>
+                )}
+              </b>
+              <span className="ml-auto text-[12.5px] whitespace-nowrap text-muted-foreground">
+                {when(build.createdAt)} · {build.byName}
+              </span>
+              <span aria-hidden className="w-3.5 text-center text-[15px] text-muted-foreground/70">
+                {on ? "−" : "+"}
+              </span>
+            </span>
+            {on ? (
+              <span className="text-sm leading-normal text-foreground/80">
+                {build.notes || "No notes for this build."}
+              </span>
+            ) : (
+              <span className="truncate text-[12.5px] text-muted-foreground/70">
+                {build.notes || "No notes"}
+              </span>
+            )}
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -780,13 +824,13 @@ function AppSheetView() {
       <DrawerContent
         initialFocus={(type) => (type === "keyboard" ? true : scroller.current)}
         className={cn(
-          "overflow-hidden border-0 bg-background shadow-[0_-10px_60px_rgb(0_0_0/0.25)]",
+          "overflow-hidden border-0 bg-background [--sheet-bg:color-mix(in_oklab,var(--muted)_40%,var(--background))] shadow-[0_-10px_60px_rgb(0_0_0/0.25)]",
           "h-[calc(100dvh-3.5rem)] max-h-none rounded-t-[22px] data-[swipe-direction=down]:rounded-t-[22px]",
           "sm:mx-auto sm:h-[calc(100dvh-2.25rem)] sm:w-[min(900px,calc(100vw-2rem))] sm:data-[swipe-direction=down]:rounded-t-[28px]",
         )}
       >
         {/* One row, over the scrolling page: the handle (phones) and ×, on the same line. */}
-        <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex h-14 items-center justify-center">
+        <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex h-14 items-center justify-center bg-linear-to-b from-(--sheet-bg) from-60% to-transparent">
           <span aria-hidden className="h-[5px] w-10 rounded-full bg-foreground/15 sm:hidden" />
           <DrawerClose
             render={
@@ -855,7 +899,15 @@ function AppSheetView() {
               </section>
               <section className="min-w-0">
                 <h2 className="mb-3 text-lg font-semibold tracking-[-0.02em]">What's new</h2>
-                {app ? <WhatsNew build={live} /> : <Skeleton className="h-20 rounded-xl" />}
+                {app ? (
+                  <WhatsNew
+                    key={target}
+                    live={live}
+                    history={app.platforms.find((p) => p.target === target)?.history ?? []}
+                  />
+                ) : (
+                  <Skeleton className="h-20 rounded-xl" />
+                )}
               </section>
             </div>
           </div>
