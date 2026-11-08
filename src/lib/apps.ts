@@ -995,12 +995,27 @@ export const appSheet = Effect.fn("appSheet")(function* (email: string, origin: 
     "SELECT app_nudge_dismissed_at AS dismissed FROM profiles WHERE email = ?",
     email,
   );
+  const lives = platformsOn().map((target) => ({
+    target,
+    live: app?.targets.find((t) => t.target === target)?.live ?? null,
+  }));
+  // Who published each build, by the name they picked on Nap rather than their email.
+  const emails = [...new Set(lives.flatMap((p) => (p.live ? [p.live.by.toLowerCase()] : [])))];
+  const names = emails.length
+    ? yield* db.all<{ email: string; name: string | null }>(
+        `SELECT lower(email) AS email, display_name AS name FROM profiles
+         WHERE lower(email) IN (${emails.map(() => "?").join(", ")})`,
+        ...emails,
+      )
+    : [];
+  const nameOf = (by: string) =>
+    names.find((n) => n.email === by.toLowerCase())?.name || by.split("@")[0] || by;
   return {
     slug,
     title: app?.title ?? slug ?? "",
-    platforms: platformsOn().map((target) => ({
-      target,
-      live: app?.targets.find((t) => t.target === target)?.live ?? null,
+    platforms: lives.map((p) => ({
+      ...p,
+      live: p.live && { ...p.live, byName: nameOf(p.live.by) },
     })),
     nudgeDismissed: Boolean(profile?.dismissed),
   };

@@ -343,6 +343,13 @@ test("a build keeps the apps inside it, and the sheet shows them with the nudge 
       { slug: "draw", title: "draw", summary: "" },
     ]);
     assert.equal(sheet.nudgeDismissed, false);
+    // The publisher shows by the name on their profile, else the start of their email.
+    assert.equal(sheet.platforms[0].live.byName, "owner");
+    sqlite
+      .prepare("INSERT INTO profiles (email, display_name) VALUES (?, ?)")
+      .run("owner@example.com", "Owen");
+    sheet = await runNap(env, appSheet("p@x.com", ORIGIN));
+    assert.equal(sheet.platforms[0].live.byName, "Owen");
     await runNap(env, dismissAppNudge("p@x.com"));
     sheet = await runNap(env, appSheet("p@x.com", ORIGIN));
     assert.equal(sheet.nudgeDismissed, true);

@@ -62,6 +62,8 @@ type LiveBuild = {
   status: "signing" | "ready" | "failed";
   notes: string;
   by: string;
+  /** The publisher's name on Nap. */
+  byName: string;
   createdAt: string;
   apps: Array<BuildApp> | null;
   testFlight: { state: "processing" | "ready" | "failed"; error: string | null } | null;
@@ -752,7 +754,7 @@ function WhatsNew({ build }: { build: LiveBuild | null }) {
       <div className="flex items-baseline justify-between gap-3">
         <b className="text-[14.5px] font-semibold">Build {build.buildNumber}</b>
         <span className="text-[12.5px] text-muted-foreground">
-          {when(build.createdAt)} · {build.by.split("@")[0]}
+          {when(build.createdAt)} · {build.byName}
         </span>
       </div>
       <p className="text-[14.5px] leading-normal text-foreground/80">
