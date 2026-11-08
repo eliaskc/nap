@@ -81,8 +81,10 @@ together.
 import NapKit
 import SwiftUI
 
+struct Game: Codable, Sendable { var name: String }
+
 public struct AppView: View {
-  let games = Nap.site("weave").db.collection("games")   // the page with id "weave"
+  let games = Nap.site("weave").db.collection("games", of: Game.self)   // the page "weave"
   var account = Nap.account
 
   public init() {}
@@ -92,7 +94,7 @@ public struct AppView: View {
       NapSignInButton()                                    // the launcher's one sign-in
     } else {
       List(games.documents) { doc in                       // live: updates as anyone writes
-        Text(doc.decode(Game.self)?.name ?? doc.id)
+        Text(doc.data.name)
       }
       .onAppear { games.watch() }
     }
@@ -100,12 +102,18 @@ public struct AppView: View {
 }
 ```
 
-- `Nap.site(id)`: a page by its id. `db.collection(name)`: `documents` (newest first), `loaded`,
-  `watch()`, `document(id)`, `get`, `create`, `put(id, data, ifVersion:, ifNew:)`, `patch`,
-  `delete`, `ensure` (create once), and `mutate(id, as: T.self) { old in new }`, which retries
-  when someone else saved first. Data is any `Codable`; `doc.decode(T.self)` reads it.
-- `site.channel(name)`: presence (`setPresence`, `peers`) and messages (`send(_:to:)`,
-  `onMessage`), with everyone on the page's channel, web or app. `leave()` when done.
+- `Nap.site(id)`: a page by its id. `db.collection(name, of: T.self)` (or `db.collection(name)`
+  for any JSON, `JSONValue`): `documents` (newest first, `doc.data` is a `T`), `loaded`,
+  `error`, `watch()` and `unwatch()`, `onChange { }`, `document(id)`, `get`, `create`,
+  `put(id, data, ifVersion:, ifNew:)`, `patch`, `delete`, `ensure` (create once), and
+  `mutate(id) { old in new }`, which retries when someone else saved first. Documents that do not
+  decode as `T` are skipped. `keepCopy: true` keeps them on the phone, so the app opens on what
+  it saw last; signing out deletes them. `site.live` says whether changes arrive at once.
+- `site.channel(name, messages: M.self)` (or `site.channel(name)` for any JSON): presence
+  (`setPresence`, `peers`) and messages (`send(_:to:)`, `onMessage`), with everyone on the
+  page's channel, web or app. Messages that do not decode as `M` are dropped. `leave()` when done.
+- `site.rtc()`: ICE servers for WebRTC between people on the page (STUN, and TURN relays when
+  the Nap has them).
 - `site.fetch(url)`: APIs the page lists in its nap.json, like nap.fetch.
 - `site.notify(title:body:open:)`: a notification to everyone else who can see the page, on their
   phones and in their browsers, never to the sender. Only on Naps with notifications; a few a

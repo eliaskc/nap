@@ -71,6 +71,12 @@ public enum Nap {
     return sent.sent
   }
 
+  /// Signing out: forget every page's data, and the copies on the device.
+  static func forget() {
+    for site in sites.values { site.forget() }
+    try? FileManager.default.removeItem(at: NapSite.copies)
+  }
+
   // MARK: HTTP
 
   /// /_nap/api/<path> on this Nap.
@@ -115,7 +121,7 @@ public enum Nap {
       var error: String?
       var error_description: String?
       var code: String?
-      var document: NapDocument?
+      var document: NapDocument<JSONValue>?
     }
     let failure = try? JSONDecoder().decode(Failure.self, from: data)
     let error = NapError(
@@ -139,14 +145,18 @@ public struct NapError: Error, LocalizedError, Sendable {
   public var message: String
   public var code: String?
   public var status: Int
-  public var document: NapDocument?
-  public init(message: String, code: String? = nil, status: Int, document: NapDocument? = nil) {
+  public var document: NapDocument<JSONValue>?
+  public init(message: String, code: String? = nil, status: Int, document: NapDocument<JSONValue>? = nil) {
     self.message = message
     self.code = code
     self.status = status
     self.document = document
   }
   public var errorDescription: String? { message }
+  /// The sign-in is gone: NapKit has signed out.
+  public var signedOut: Bool { status == 401 && code == "invalid_token" }
+  /// The person must open Nap in a browser once before the app may use it.
+  public var inactive: Bool { status == 401 && code == "inactive" }
 }
 
 /// Someone on Nap, with the look the web draws them with.
@@ -156,6 +166,12 @@ public struct NapPerson: Codable, Hashable, Sendable {
   public var shape: String?
   public var color: String?
   public var firstName: String { name.split(separator: " ").first.map(String.init) ?? name }
+  public init(email: String, name: String, shape: String? = nil, color: String? = nil) {
+    self.email = email
+    self.name = name
+    self.shape = shape
+    self.color = color
+  }
 }
 
 // MARK: - JSON

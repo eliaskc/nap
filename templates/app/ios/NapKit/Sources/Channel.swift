@@ -34,11 +34,12 @@ public struct NapPeer: Decodable, Identifiable, Sendable {
 
 /// A channel of a page, like nap.channel(name) on the web: presence and messages between
 /// everyone on it, web pages and apps alike. It reconnects by itself until `leave()`.
+/// `M` is the messages' type (`site.channel(name, messages: GameMessage.self)`), or JSONValue.
 /// SwiftUI views that read `peers` or `isOpen` update with them; the callbacks are for game
 /// loops that want each event.
 @MainActor
 @Observable
-public final class NapChannel {
+public final class NapChannel<M: Codable & Sendable> {
   public let name: String
   /// Everyone on the channel, oldest first, this device included.
   public private(set) var peers: [NapPeer] = []
@@ -49,7 +50,7 @@ public final class NapChannel {
   @ObservationIgnored public var onPresence: (([NapPeer]) -> Void)?
   @ObservationIgnored public var onJoin: ((NapPeer) -> Void)?
   @ObservationIgnored public var onLeave: ((NapPeer) -> Void)?
-  @ObservationIgnored public var onMessage: ((NapPeer, JSONValue) -> Void)?
+  @ObservationIgnored public var onMessage: ((NapPeer, M) -> Void)?
   @ObservationIgnored public var onStatus: ((Bool) -> Void)?
   @ObservationIgnored public var onError: ((String) -> Void)?
 
@@ -80,13 +81,16 @@ public final class NapChannel {
     if isOpen { raw(["t": .string("presence"), "state": state]) }
   }
 
+  private struct Outgoing: Encodable { var t = "send"; var data: M; var to: String? }
+
   /// Sends a message to everyone else, or to one peer by id. False while the channel is closed.
   @discardableResult
-  public func send(_ data: some Encodable & Sendable, to: String? = nil) -> Bool {
-    guard isOpen else { return false }
-    var message: [String: JSONValue] = ["t": .string("send"), "data": .from(data)]
-    if let to { message["to"] = .string(to) }
-    return raw(message)
+  public func send(_ data: M, to: String? = nil) -> Bool {
+    guard isOpen, let socket, let text = try? JSONEncoder().encode(Outgoing(data: data, to: to)) else {
+      return false
+    }
+    socket.send(.string(String(decoding: text, as: UTF8.self))) { _ in }
+    return true
   }
 
   /// Drops the connection and connects again now, e.g. after the app was in the background.
@@ -150,9 +154,23 @@ public final class NapChannel {
     var peer: NapPeer?
     var state: JSONValue?
     var from: From?
-    var data: JSONValue?
+    var data: M?
     var error: String?
     struct From: Decodable { var id: String; var email: String?; var name: String?; var shape: String?; var color: String? }
+
+    private enum Keys: String, CodingKey { case t, id, peers, peer, state, from, data, error }
+    init(from decoder: Decoder) throws {
+      let c = try decoder.container(keyedBy: Keys.self)
+      t = try c.decode(String.self, forKey: .t)
+      id = try c.decodeIfPresent(String.self, forKey: .id)
+      peers = try c.decodeIfPresent([NapPeer].self, forKey: .peers)
+      peer = try c.decodeIfPresent(NapPeer.self, forKey: .peer)
+      state = try c.decodeIfPresent(JSONValue.self, forKey: .state)
+      from = try? c.decodeIfPresent(From.self, forKey: .from)
+      // A message of another shape (another version of the page) is dropped, not fatal.
+      data = t == "message" ? try? c.decodeIfPresent(M.self, forKey: .data) : nil
+      error = try? c.decodeIfPresent(String.self, forKey: .error)
+    }
   }
 
   private func handle(_ text: String) {
@@ -195,11 +213,11 @@ public final class NapChannel {
       publish()
       onPresence?(peers)
     case "message":
-      guard let from = message.from else { return }
+      guard let from = message.from, let data = message.data else { return }
       let peer = map[from.id] ?? NapPeer(
         id: from.id, email: from.email ?? "", name: from.name ?? "", shape: from.shape, color: from.color,
         joinedAt: 0)
-      onMessage?(peer, message.data ?? .null)
+      onMessage?(peer, data)
     case "error":
       if let error = message.error { onError?(error) }
     default:

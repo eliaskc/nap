@@ -43,6 +43,7 @@ public final class NapAccount {
     email = nil
     name = nil
     for key in ["token", "email", "name"] { Keychain.write(key, nil) }
+    Nap.forget()
   }
 
   /// A request was refused: a lost token signs out; a paused one asks to open Nap in Safari.

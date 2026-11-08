@@ -4,13 +4,20 @@ import UIKit
 /// A page on Nap, as its web pages see it: `Nap.site("weave")`. Its collections and channels
 /// are the ones its web pages use.
 @MainActor
+@Observable
 public final class NapSite {
   public let id: String
-  private var collections: [String: NapCollection] = [:]
-  private var socket: URLSessionWebSocketTask?
-  private var liveOpen = false
-  private var pollTask: Task<Void, Never>?
-  private var retries = 0
+  /// Whether the live socket is open: changes arrive at once. Otherwise NapKit polls.
+  public private(set) var live = false
+  @ObservationIgnored private var collections: [String: any NapCollectionBase] = [:]
+  @ObservationIgnored private var socket: URLSessionWebSocketTask?
+  @ObservationIgnored private var pollTask: Task<Void, Never>?
+  @ObservationIgnored private var retries = 0
+  @ObservationIgnored private var rtcCache: NapRtc?
+
+  /// Where collections keep their copies on the device.
+  static let copies = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+    .appending(path: "NapKit/\(Nap.origin.host() ?? "nap")")
 
   init(_ id: String) {
     self.id = id
@@ -28,8 +35,24 @@ public final class NapSite {
   /// The page's collections, like nap.db on the web.
   public var db: NapDB { NapDB(site: self) }
 
-  /// A channel of the page, like nap.channel(name). Call `leave()` when done.
-  public func channel(_ name: String) -> NapChannel { NapChannel(site: self, name: name) }
+  /// A channel of the page, like nap.channel(name), with any JSON as messages. Call `leave()`
+  /// when done.
+  public func channel(_ name: String) -> NapChannel<JSONValue> { NapChannel(site: self, name: name) }
+
+  /// A channel whose messages are one Codable type, such as an enum of a game's messages.
+  /// Messages that do not decode as it are dropped.
+  public func channel<M: Codable & Sendable>(_ name: String, messages: M.Type) -> NapChannel<M> {
+    NapChannel(site: self, name: name)
+  }
+
+  /// ICE servers for WebRTC between people on this page: STUN, and TURN relays with short-lived
+  /// credentials when the Nap has a TURN key. Kept until shortly before they expire.
+  public func rtc() async throws -> NapRtc {
+    if let cache = rtcCache, cache.expiresAt.map({ $0.timeIntervalSinceNow > 600 }) ?? false { return cache }
+    let rtc: NapRtc = try await Nap.request("GET", url("rtc"))
+    rtcCache = rtc
+    return rtc
+  }
 
   /// Fetches a URL through Nap, for APIs the page lists in its nap.json ("fetch"). Like nap.fetch.
   public func fetch(
@@ -68,12 +91,15 @@ public final class NapSite {
 
   // MARK: Live updates
 
-  func collection(_ name: String) -> NapCollection {
-    if let collection = collections[name] { return collection }
-    let collection = NapCollection(site: self, name: name)
-    collections[name] = collection
+  func collection<T>(_ name: String, of _: T.Type, keepCopy: Bool) -> NapCollection<T> {
+    let key = "\(name)|\(String(reflecting: T.self))"
+    let collection = collections[key] as? NapCollection<T> ?? NapCollection<T>(site: self, name: name)
+    collections[key] = collection
+    if keepCopy { collection.keepCopy() }
     return collection
   }
+
+  private var watched: [any NapCollectionBase] { collections.values.filter(\.watched) }
 
   /// A collection started watching: connect, and poll as a safety net (often while the socket
   /// is down, rarely while it is up), like the web client.
@@ -82,25 +108,42 @@ public final class NapSite {
     guard pollTask == nil else { return }
     pollTask = Task { [weak self] in
       while !Task.isCancelled {
-        try? await Task.sleep(for: .seconds(self?.liveOpen == true ? 30 : 3))
+        try? await Task.sleep(for: .seconds(self?.live == true ? 30 : 3))
         guard let self else { return }
-        for collection in self.collections.values where collection.watched { await collection.poll() }
+        for collection in self.watched { await collection.poll() }
       }
     }
   }
 
-  /// Reconnects now and catches up, e.g. after the app was in the background.
-  public func refresh() {
-    guard collections.values.contains(where: \.watched) else { return }
+  /// A collection stopped watching: with none left, close the socket.
+  func unwatched() {
+    guard watched.isEmpty else { return }
+    pollTask?.cancel()
+    pollTask = nil
     socket?.cancel(with: .goingAway, reason: nil)
     socket = nil
-    liveOpen = false
-    retries = 0
-    connect()
-    Task { for collection in collections.values where collection.watched { await collection.poll() } }
+    live = false
   }
 
-  private struct LiveMessage: Decodable { var type: String; var collection: String?; var change: NapDocument? }
+  /// Reconnects now and catches up, e.g. after the app was in the background.
+  public func refresh() {
+    guard !watched.isEmpty else { return }
+    socket?.cancel(with: .goingAway, reason: nil)
+    socket = nil
+    live = false
+    retries = 0
+    connect()
+    Task { for collection in watched { await collection.poll() } }
+  }
+
+  /// Signed out: forget every collection and its copy on the device.
+  func forget() {
+    for collection in collections.values { collection.forget() }
+    unwatched()
+    rtcCache = nil
+  }
+
+  private struct LiveHead: Decodable { var type: String; var collection: String? }
 
   private func connect() {
     guard socket == nil, let token = NapAccount.shared.token else { return }
@@ -117,7 +160,7 @@ public final class NapSite {
       let failed = error != nil
       Task { @MainActor in
         guard let self, self.socket === task, !failed else { return }
-        self.liveOpen = true
+        self.live = true
         self.retries = 0
       }
     }
@@ -136,21 +179,25 @@ public final class NapSite {
         guard let self, self.socket === task else { return }
         switch result {
         case .success(let message):
-          if case .string(let text) = message, text != "pong",
-            let live = try? JSONDecoder().decode(LiveMessage.self, from: Data(text.utf8)),
-            live.type == "change", let name = live.collection, let change = live.change
-          {
-            self.collections[name]?.apply(change)
+          if case .string(let text) = message, text != "pong" {
+            let data = Data(text.utf8)
+            if let head = try? JSONDecoder().decode(LiveHead.self, from: data), head.type == "change" {
+              for collection in self.collections.values where collection.name == head.collection {
+                collection.receive(data)
+              }
+            }
           }
           self.receive(task)
         case .failure:
           self.socket = nil
-          self.liveOpen = false
+          self.live = false
+          guard !self.watched.isEmpty else { return }
           let delay = min(30, pow(2, Double(self.retries))) * Double.random(in: 0.5...1)
           self.retries += 1
           Task { [weak self] in
             try? await Task.sleep(for: .seconds(delay))
-            self?.connect()
+            guard let self, !self.watched.isEmpty else { return }
+            self.connect()
           }
         }
       }
@@ -158,12 +205,58 @@ public final class NapSite {
   }
 }
 
-/// A page's collections: `site.db.collection("games")`.
+/// A page's collections: `site.db.collection("games", of: Game.self)`.
 @MainActor
 public struct NapDB {
   let site: NapSite
-  /// One object per collection and page, so every view sees the same documents.
-  public func collection(_ name: String) -> NapCollection { site.collection(name) }
+
+  /// One object per collection, type and page, so every view sees the same documents.
+  /// `keepCopy` keeps them on the device too: the next launch shows them at once.
+  public func collection<T: Codable & Sendable>(_ name: String, of type: T.Type, keepCopy: Bool = false)
+    -> NapCollection<T>
+  {
+    site.collection(name, of: type, keepCopy: keepCopy)
+  }
+
+  /// A collection of any JSON.
+  public func collection(_ name: String, keepCopy: Bool = false) -> NapCollection<JSONValue> {
+    site.collection(name, of: JSONValue.self, keepCopy: keepCopy)
+  }
+}
+
+/// ICE servers for WebRTC, from `site.rtc()`.
+public struct NapRtc: Decodable, Sendable {
+  public struct Server: Decodable, Sendable {
+    public var urls: [String]
+    public var username: String?
+    public var credential: String?
+
+    private enum Keys: String, CodingKey { case urls, username, credential }
+    public init(from decoder: Decoder) throws {
+      let c = try decoder.container(keyedBy: Keys.self)
+      if let one = try? c.decode(String.self, forKey: .urls) { urls = [one] } else {
+        urls = try c.decode([String].self, forKey: .urls)
+      }
+      username = try c.decodeIfPresent(String.self, forKey: .username)
+      credential = try c.decodeIfPresent(String.self, forKey: .credential)
+    }
+  }
+  public var iceServers: [Server]
+  /// Whether there are TURN relays, for networks where a direct path fails.
+  public var turn: Bool
+  public var expiresAt: Date?
+
+  private enum Keys: String, CodingKey { case iceServers, turn, expiresAt }
+  public init(from decoder: Decoder) throws {
+    let c = try decoder.container(keyedBy: Keys.self)
+    iceServers = try c.decode([Server].self, forKey: .iceServers)
+    turn = try c.decodeIfPresent(Bool.self, forKey: .turn) ?? false
+    expiresAt = (try c.decodeIfPresent(String.self, forKey: .expiresAt)).flatMap {
+      let format = ISO8601DateFormatter()
+      format.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+      return format.date(from: $0) ?? ISO8601DateFormatter().date(from: $0)
+    }
+  }
 }
 
 /// What an extension's Swift client gets: requests to /_nap/ext/<name>/ of the page.
