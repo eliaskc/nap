@@ -1044,11 +1044,14 @@ export function AppNudge({ className }: { className?: string }) {
   );
 }
 
-/** Steps: a card at the foot of the dark sidebar. */
+/**
+ * Steps: a card at the foot of the dark sidebar. One ask at a time: it waits until the person
+ * dismissed the nudge, and until that is known, so neither flashes.
+ */
 export function SidebarInstallCard() {
   const install = useInstall();
   const show = useShowInstallSpots();
-  if (!install || !show) return null;
+  if (!install || !show || !install.statusKnown || !install.app?.nudgeDismissed) return null;
   return (
     <button
       type="button"
