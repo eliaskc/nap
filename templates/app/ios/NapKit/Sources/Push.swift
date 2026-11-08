@@ -16,9 +16,10 @@ public final class NapPush {
 
   @ObservationIgnored private var lastToken: String? = UserDefaults.standard.string(forKey: "nap-push-token")
 
-  /// Asks to allow notifications (once: iOS remembers the answer) and registers for them.
+  /// Asks to allow notifications (once: iOS remembers the answer) and registers for them, on
+  /// Naps that send them.
   public func start() async {
-    guard NapAccount.shared.signedIn else { return }
+    guard NapAccount.shared.signedIn, await Nap.canNotify() else { return }
     let center = UNUserNotificationCenter.current()
     let granted = (try? await center.requestAuthorization(options: [.alert, .sound, .badge])) ?? false
     allowed = granted
