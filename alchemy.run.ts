@@ -1,3 +1,4 @@
+import * as path from "node:path";
 import * as Alchemy from "alchemy";
 import * as Cloudflare from "@alchemy.run/cloudflare";
 import * as RemovalPolicy from "alchemy/RemovalPolicy";
@@ -204,6 +205,14 @@ export class NapWorker extends Cloudflare.Website.Vite<NapWorker>()(
     return {
       name: production ? "nap" : `nap-${stage}`,
       main: "./src/worker.ts",
+      // Alchemy rebuilds when a hashed file changes, and by default it skips gitignored ones such
+      // as instance/. Include patterns starting with ../ are hashed without the gitignore rules,
+      // so name instance/ that way: a deploy that only changes the instance's config (from its
+      // config repository) must still deploy it.
+      memo: {
+        include: ["**/*", `../${path.basename(process.cwd())}/instance/**`],
+        lockfile: true,
+      },
       workersDev: { enabled: false, previewsEnabled: false },
       // `alchemy dev` serves on 1337 or the next free port. The HTTP tests pick their own port.
       dev: devPort ? { port: devPort, strictPort: true } : undefined,
