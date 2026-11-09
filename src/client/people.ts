@@ -25,16 +25,18 @@ export const looks: NapLooks = Object.freeze({
   colorValues: { ...COLOR_VALUES },
 }) as NapLooks;
 
-/** A person's avatar as an <svg> element: their shape, their colour, their initials. */
+/**
+ * A person's avatar as an <svg> element: their shape, their colour, their initials. Without a
+ * look (a Nap without avatars), their initials in a grey circle.
+ */
 export function avatar(
   person: Pick<NapPerson, "name" | "shape" | "color">,
   options: NapAvatarOptions = {},
 ) {
-  const shape = isShape(person.shape) ? person.shape : "circle";
-  const color = isColor(person.color) ? person.color : "blue";
+  const { shape, color } = person;
   const template = document.createElement("template");
   template.innerHTML = avatarSvg(
-    { shape, color },
+    isShape(shape) && isColor(color) ? { shape, color } : null,
     person.name || "",
     options.size ?? 32,
     options.initials !== false,

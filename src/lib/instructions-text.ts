@@ -10,7 +10,7 @@ export const OPTIONAL_TOPICS: Record<string, (config: NapConfig) => boolean> = {
 /**
  * Fills in one instructions page for a deployment. Text between <!-- if <flag> --> and
  * <!-- /if --> shows only when the flag is on (with <!-- if !<flag> -->, only when it
- * is off): "apps" when apps are on, "channelServers", "ios" and "remarkable" for
+ * is off): "apps" when apps are on, "avatars", "channelServers", "ios" and "remarkable" for
  * the platforms it has, and "private" or "everyone" for the default access.
  * {{extensionTopics}} on a line of its own becomes the deployment's extension topics.
  */
@@ -24,6 +24,7 @@ export function renderInstructions(
     apps: Boolean(config.apps),
     notifications: config.notifications === true,
     channelServers: config.channelServers === true,
+    avatars: config.avatars === true,
     ios: Boolean(config.apps?.ios),
     remarkable: Boolean(config.apps?.remarkable),
     private: config.defaultAccess === "private",

@@ -123,9 +123,9 @@ export function TopBar({
               icon
               nativeButton={false}
               render={<a href="/welcome?next=/" />}
-              title={`${profile.displayName ?? profile.email} · change your name and look`}
+              title={`${profile.displayName ?? profile.email} · change your name${napConfig.avatars ? " and look" : ""}`}
             >
-              {profile.shape && profile.color ? (
+              {napConfig.avatars && profile.shape && profile.color ? (
                 <Avatar
                   look={{ shape: profile.shape, color: profile.color }}
                   name={profile.displayName ?? profile.email}

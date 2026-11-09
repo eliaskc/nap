@@ -31,8 +31,9 @@ export type ServerPeer = {
   id: string;
   email: string;
   name: string;
-  shape: string;
-  color: string;
+  /** Null on a Nap without avatars. */
+  shape: string | null;
+  color: string | null;
   joinedAt: number;
   state: unknown;
 };

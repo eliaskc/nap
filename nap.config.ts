@@ -77,6 +77,13 @@ export type NapConfig = {
    */
   channelServers?: boolean;
   /**
+   * Avatars: everyone has a look (a shape and a colour, src/lib/looks.ts) that they pick on the
+   * welcome page, the dashboard shows, and sites and apps draw them with (nap.me(), nap.people(),
+   * channel presence). Off, nobody has one: people only pick a name, shape and color are null,
+   * and the agent instructions leave looks out. Off when left out.
+   */
+  avatars?: boolean;
+  /**
    * Example requests the dashboard rotates through under "Ask your agent", such as
    * `{ kind: "site", text: "where we vote on the offsite venue" }`. Each reads after
    * "Make me a site", "Make me an artifact", or "Make me an app". Optional: Nap has generic ones.

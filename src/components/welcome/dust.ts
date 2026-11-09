@@ -2,10 +2,10 @@
  * The welcome transition. The page crumbles into particles of itself, starting where the person
  * tapped. On a dark screen the dust burns white-hot; on a light one it chars to ink. Both cool
  * into the person's colour and drift off, and some of it comes back as the card: their shape and
- * "Hi, <name>". When it resolves, the screen shows exactly the card, so the page can swap it for
- * the DOM card and navigate.
+ * "Hi, <name>" (only the name on a Nap without avatars). When it resolves, the screen shows
+ * exactly the card, so the page can swap it for the DOM card and navigate.
  */
-import { COLOR_VALUES, firstName, initials, type Look } from "~/lib/looks";
+import { COLOR_VALUES, PLAIN_FILL, firstName, initials, type Look } from "~/lib/looks";
 import { drawShape } from "./capture";
 
 export const CARD = {
@@ -16,6 +16,14 @@ export const CARD = {
   subGap: 142,
   subSize: 13,
 };
+
+/** A person on the card: their name, and their look when the Nap has avatars. */
+export type CardPerson = { name: string; look: Look | null };
+
+/** Where the name sits: below the shape, or a little above the middle without one. */
+export const cardNameY = (person: CardPerson) =>
+  person.look ? { fraction: CARD.shapeY, offset: CARD.nameGap } : { fraction: 0.47, offset: 0 };
+
 export const DUST_SECONDS = 2.5;
 
 export type CardTheme = { bg: string; fg: string; sub: string };
@@ -28,33 +36,36 @@ export function drawCard(
   ctx: CanvasRenderingContext2D,
   width: number,
   height: number,
-  person: { name: string } & Look,
+  person: CardPerson,
   theme: CardTheme,
   subtitle: string,
   font: string,
 ) {
-  const cy = height * CARD.shapeY;
-  drawShape(
-    ctx,
-    person.shape,
-    COLOR_VALUES[person.color],
-    initials(person.name),
-    width / 2,
-    cy,
-    CARD.shape,
-    "#fff",
-    font,
-  );
+  if (person.look) {
+    drawShape(
+      ctx,
+      person.look.shape,
+      COLOR_VALUES[person.look.color],
+      initials(person.name),
+      width / 2,
+      height * CARD.shapeY,
+      CARD.shape,
+      "#fff",
+      font,
+    );
+  }
+  const place = cardNameY(person);
+  const nameY = height * place.fraction + place.offset;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   ctx.fillStyle = theme.fg;
   ctx.font = `800 ${CARD.nameSize}px ${font}`;
   if ("letterSpacing" in ctx) (ctx as { letterSpacing: string }).letterSpacing = "-0.8px";
-  ctx.fillText(`Hi, ${firstName(person.name)}`, width / 2, cy + CARD.nameGap);
+  ctx.fillText(`Hi, ${firstName(person.name)}`, width / 2, nameY);
   if ("letterSpacing" in ctx) (ctx as { letterSpacing: string }).letterSpacing = "0px";
   ctx.fillStyle = theme.sub;
   ctx.font = `500 ${CARD.subSize}px ${font}`;
-  ctx.fillText(subtitle, width / 2, cy + CARD.subGap);
+  ctx.fillText(subtitle, width / 2, nameY + CARD.subGap - CARD.nameGap);
 }
 
 const VS = (dark: boolean) => `#version 300 es
@@ -152,7 +163,7 @@ export function runDust(options: {
   dpr: number;
   page: HTMLCanvasElement;
   origin: { x: number; y: number };
-  person: { name: string } & Look;
+  person: CardPerson;
   dark: boolean;
   subtitle: string;
   font: string;
@@ -237,7 +248,10 @@ export function runDust(options: {
   gl.uniform2f(uniform("uGrid"), gx, gy);
   gl.uniform2f(uniform("uSize"), width, height);
   gl.uniform2f(uniform("uOrigin"), options.origin.x, options.origin.y);
-  gl.uniform3f(uniform("uTint"), ...hexToRgb(COLOR_VALUES[options.person.color]));
+  gl.uniform3f(
+    uniform("uTint"),
+    ...hexToRgb(options.person.look ? COLOR_VALUES[options.person.look.color] : PLAIN_FILL),
+  );
   gl.uniform1f(uniform("uDpr"), dpr);
   gl.uniform1f(uniform("uSpacing"), spacing);
   gl.uniform1f(uniform("uMaxD"), Math.hypot(width, height));

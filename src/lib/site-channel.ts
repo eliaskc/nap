@@ -167,8 +167,8 @@ export class SiteChannel extends DurableObject<ChannelEnv> {
           id: peer.id,
           email: peer.email,
           name: peer.name,
-          shape: peer.shape,
-          color: peer.color,
+          shape: peer.shape || null,
+          color: peer.color || null,
         },
         data: parsed.data ?? null,
       };
@@ -331,7 +331,7 @@ function serverCode(peer: Peer): ServerCode | null {
 
 function serverPeer(peer: Peer) {
   const { id, email, name, shape, color, joinedAt, state } = peer;
-  return { id, email, name, shape, color, joinedAt, state };
+  return { id, email, name, shape: shape || null, color: color || null, joinedAt, state };
 }
 
 function peerOf(socket: WebSocket) {
@@ -343,8 +343,8 @@ function publicPeer(peer: Peer) {
     id: peer.id,
     email: peer.email,
     name: peer.name,
-    shape: peer.shape,
-    color: peer.color,
+    shape: peer.shape || null,
+    color: peer.color || null,
     joinedAt: peer.joinedAt,
     state: peer.state,
   };
@@ -402,11 +402,13 @@ export const handleChannelRequest = Effect.fn("handleChannelRequest")(function* 
     upgrade: "websocket",
     "x-nap-email": identity.email,
     "x-nap-name": encodeURIComponent(person.name || identity.email),
-    "x-nap-shape": person.shape,
-    "x-nap-color": person.color,
     "x-nap-slug": slug,
     "x-nap-channel": name,
   });
+  if (person.shape && person.color) {
+    headers.set("x-nap-shape", person.shape);
+    headers.set("x-nap-color", person.color);
+  }
   if (expiresAt) headers.set("x-nap-expires-at", expiresAt);
   if (new URL(request.url).searchParams.get("watch") === "1") headers.set("x-nap-watch", "1");
   if (server) {

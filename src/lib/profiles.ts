@@ -13,14 +13,21 @@ import {
 import type { Identity } from "~/lib/nap-server";
 import { Database } from "~/server/database";
 import { fail } from "~/server/http";
+import { napConfig } from "~/nap.config";
 
 /**
- * Names and looks. Everyone has a name and a look (a shape and a colour) that sites read through
- * nap.me(), nap.people(), and channel presence. A profile without a name has not been through
+ * Whether this Nap has looks (napConfig.avatars). Off, nobody has one: people are a name, and
+ * shape and color are null everywhere sites and apps read people.
+ */
+export const avatarsOn = () => napConfig.avatars === true;
+
+/**
+ * Names and looks. Everyone has a name, and on a Nap with avatars a look (a shape and a colour),
+ * that sites read through nap.me(), nap.people(), and channel presence. A profile without a name has not been through
  * the welcome page yet: Nap sends them there on their next page visit.
  */
 
-export type Person = { email: string; name: string; shape: Shape; color: Color };
+export type Person = { email: string; name: string; shape: Shape | null; color: Color | null };
 
 type Row = {
   email: string;
@@ -36,10 +43,12 @@ const lookOf = (row: Row): Look =>
     ? { shape: row.shape, color: row.color }
     : preferredLook(row.email);
 
+const hasLook = (row: Row) => isShape(row.shape) && isColor(row.color);
+
 const toPerson = (row: Row, fallbackName?: string): Person => ({
   email: row.email,
   name: row.name || fallbackName || nameFromEmail(row.email),
-  ...lookOf(row),
+  ...(avatarsOn() ? lookOf(row) : { shape: null, color: null }),
 });
 
 export function nameFromEmail(email: string) {
@@ -95,7 +104,7 @@ export const findPerson = Effect.fn("findPerson")(function* (email: string, fall
   const read = () =>
     db.first<Row>(`SELECT ${PERSON_COLUMNS} FROM profiles WHERE lower(email) = ?`, key);
   let row = yield* read();
-  if (row && !(isShape(row.shape) && isColor(row.color))) {
+  if (avatarsOn() && row && !hasLook(row)) {
     yield* assignMissingLooks();
     row = yield* read();
   }
@@ -108,7 +117,7 @@ export const listPeople = Effect.fn("listPeopleWithLooks")(function* (
 ) {
   const db = yield* Database;
   let rows = yield* db.all<Row>(`SELECT ${PERSON_COLUMNS} FROM profiles ORDER BY created_at`);
-  if (rows.some((row) => !(isShape(row.shape) && isColor(row.color)))) {
+  if (avatarsOn() && rows.some((row) => !hasLook(row))) {
     yield* assignMissingLooks();
     rows = yield* db.all<Row>(`SELECT ${PERSON_COLUMNS} FROM profiles ORDER BY created_at`);
   }
@@ -132,7 +141,7 @@ export type WelcomeState = {
   /** False until the person has picked a name on the welcome page. */
   named: boolean;
   guess: Pick<Guess, "guess" | "score" | "confident">;
-  /** Looks other people have. Everything else is free. */
+  /** Looks other people have. Everything else is free. Empty without avatars. */
   taken: Array<{ shape: Shape; color: Color; name: string }>;
 };
 
@@ -154,13 +163,13 @@ export const welcomeState = Effect.fn("welcomeState")(function* (
     me: { ...me, name: row?.name || guess.guess || me.name },
     named: Boolean(row?.name),
     guess: { guess: guess.guess || me.name, score: guess.score, confident: guess.confident },
-    taken: people
-      .filter((person) => person.email !== email)
-      .map((person) => ({ shape: person.shape, color: person.color, name: person.name })),
+    taken: people.flatMap(({ email: other, shape, color, name }) =>
+      other !== email && shape && color ? [{ shape, color, name }] : [],
+    ),
   } satisfies WelcomeState;
 });
 
-/** Saves a name and a look. 409 when someone else has that look. */
+/** Saves a name and a look. 409 when someone else has that look. Without avatars only the name. */
 export const saveProfile = Effect.fn("saveProfile")(function* (
   identity: Identity,
   input: { name: unknown; shape: unknown; color: unknown },
@@ -168,10 +177,20 @@ export const saveProfile = Effect.fn("saveProfile")(function* (
   const name = typeof input.name === "string" ? input.name.replace(/\s+/g, " ").trim() : "";
   if (!name) return yield* fail(400, "Tell us what to call you");
   if (name.length > 60) return yield* fail(400, "That name is longer than 60 characters");
+  const db = yield* Database;
+  if (!avatarsOn()) {
+    yield* db.run(
+      `UPDATE profiles
+       SET display_name = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+       WHERE lower(email) = ?`,
+      name,
+      identity.email.toLowerCase(),
+    );
+    return yield* findPerson(identity.email);
+  }
   if (!isShape(input.shape) || !isColor(input.color)) {
     return yield* fail(400, "Pick a shape and a colour");
   }
-  const db = yield* Database;
   yield* db
     .run(
       `UPDATE profiles

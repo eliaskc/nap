@@ -8,7 +8,8 @@ import { route } from "~/server/route";
 /**
  * GET /api/profile — the caller's name and look, a guess at their name, and the looks other
  * people have (for the picker on /welcome).
- * POST /api/profile — `{ name, shape, color }`. 409 when someone else has that look.
+ * POST /api/profile — `{ name, shape, color }`. 409 when someone else has that look. Without
+ * avatars (napConfig.avatars) only the name is saved.
  */
 export const Route = createFileRoute("/api/profile")({
   server: {

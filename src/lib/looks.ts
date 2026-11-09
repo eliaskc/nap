@@ -95,9 +95,16 @@ export function initials(name = "") {
 
 export const firstName = (name = "") => name.trim().split(/\s+/)[0] || name;
 
-/** The avatar as SVG markup: the shape in its colour with the initials inside. */
-export function avatarSvg(look: Look, name: string, size: number, label = true) {
-  const { d, text } = SHAPE_PATHS[look.shape];
+/** Someone without a look (a Nap without avatars): initials in a grey circle. */
+export const PLAIN_FILL = "#868e96";
+
+/**
+ * The avatar as SVG markup: the shape in its colour with the initials inside, or the initials in
+ * a grey circle for someone without a look.
+ */
+export function avatarSvg(look: Look | null, name: string, size: number, label = true) {
+  const { d, text } = SHAPE_PATHS[look?.shape ?? "circle"];
+  const fill = look ? COLOR_VALUES[look.color] : PLAIN_FILL;
   const [y, fontSize] = text;
   const letters = initials(name);
   const escaped = letters.replace(/&/g, "&amp;").replace(/</g, "&lt;");
@@ -105,7 +112,7 @@ export function avatarSvg(look: Look, name: string, size: number, label = true) 
   return (
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="${size}" height="${size}"` +
     ` role="img" aria-label="${title}" style="display:block;overflow:visible;flex:none">` +
-    `<path d="${d}" fill="${COLOR_VALUES[look.color]}"/>` +
+    `<path d="${d}" fill="${fill}"/>` +
     (label
       ? `<text x="50" y="${y}" text-anchor="middle" dominant-baseline="central" fill="#fff"` +
         ` font-weight="700" font-size="${letters.length > 1 ? fontSize : fontSize * 1.2}"` +

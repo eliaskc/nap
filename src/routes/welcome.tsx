@@ -4,7 +4,14 @@ import * as React from "react";
 import { Avatar } from "~/components/avatar";
 import { captureScreen } from "~/components/welcome/capture";
 import { NapMark } from "~/dashboard/chrome";
-import { CARD, canRunDust, cardTheme, runDust } from "~/components/welcome/dust";
+import {
+  CARD,
+  canRunDust,
+  cardNameY,
+  cardTheme,
+  runDust,
+  type CardPerson,
+} from "~/components/welcome/dust";
 import {
   COLOR_VALUES,
   COLORS,
@@ -21,7 +28,8 @@ import { napConfig } from "~/nap.config";
 /**
  * /welcome?next=<url> — where Nap sends people who have not picked a name yet (and where they
  * change their name and look later). They confirm or fix our guess at their name, pick a look,
- * and a transition takes them on to the page they wanted.
+ * and a transition takes them on to the page they wanted. On a Nap without avatars
+ * (napConfig.avatars) they only pick a name.
  */
 export const Route = createFileRoute("/welcome")({
   validateSearch: (search: Record<string, unknown>): { next?: string } =>
@@ -30,8 +38,11 @@ export const Route = createFileRoute("/welcome")({
   component: Welcome,
 });
 
+const AVATARS = napConfig.avatars === true;
+
 type State = {
-  me: { email: string; name: string } & Look;
+  /** shape and color are null on a Nap without avatars. */
+  me: { email: string; name: string; shape: Shape | null; color: Color | null };
   named: boolean;
   guess: { guess: string; score: number; confident: boolean };
   taken: Array<{ name: string } & Look>;
@@ -96,7 +107,8 @@ function Welcome() {
       .then((data) => {
         setState(data);
         setName(data.me.name);
-        setLook({ shape: data.me.shape, color: data.me.color });
+        const { shape, color } = data.me;
+        setLook(shape && color ? { shape, color } : null);
       })
       .catch((e: Error) => setLoadError(e.message));
   }, [load, rawNext]);
@@ -120,7 +132,7 @@ function Welcome() {
   const taken = React.useMemo(() => new Set(takenBy.keys()), [takenBy]);
   const editing = Boolean(state?.named);
 
-  const save = async (value: string, chosen: Look) => {
+  const save = async (value: string, chosen: Look | null) => {
     setSaving(true);
     setError("");
     try {
@@ -147,13 +159,13 @@ function Welcome() {
   };
 
   const leave = async () => {
-    if (!look || !state) return;
+    if (!state || (AVATARS && !look)) return;
     setPicking(false);
     (document.activeElement as HTMLElement | null)?.blur();
     // Let a closing keyboard give the page its height back before we capture it.
     await new Promise((resolve) => setTimeout(resolve, 120));
     setStage("leaving");
-    const person = { name: saved || name, ...look };
+    const person: CardPerson = { name: saved || name, look };
     const dark = document.documentElement.classList.contains("dark");
     const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     const go = () => {
@@ -188,7 +200,7 @@ function Welcome() {
   };
 
   const submit = async () => {
-    if (!look || !state) return;
+    if (!state || (AVATARS && !look)) return;
     const value = name.replace(/\s+/g, " ").trim();
     if (!value) return;
     if (!(await save(value, look))) return;
@@ -240,7 +252,7 @@ function Welcome() {
           <div className="mt-auto pt-10 sm:mt-0 sm:pt-0">
             {loadError ? (
               <p className="text-sm text-destructive">{loadError}</p>
-            ) : !state || !look ? null : stage === "ask" ? (
+            ) : !state || (AVATARS && !look) ? null : stage === "ask" ? (
               <AskForm
                 state={state}
                 name={name}
@@ -277,8 +289,8 @@ function Welcome() {
         </div>
       </div>
       <div ref={overlayRef} className="pointer-events-none absolute inset-0" />
-      {stage === "card" && look && (
-        <Card name={saved || name} look={look} subtitle={subtitleFor(next)} />
+      {stage === "card" && (
+        <Card person={{ name: saved || name, look }} subtitle={subtitleFor(next)} />
       )}
     </div>
   );
@@ -312,7 +324,8 @@ function AskForm({
   state: State;
   name: string;
   setName: (value: string) => void;
-  look: Look;
+  /** Null on a Nap without avatars. */
+  look: Look | null;
   setLook: (look: Look) => void;
   takenBy: Map<string, string>;
   picking: boolean;
@@ -343,21 +356,23 @@ function AskForm({
         What should we call you?
       </h1>
       <div className="mt-6 flex items-center gap-3 border-b-2 border-border pb-2 transition-colors focus-within:border-foreground">
-        <button
-          type="button"
-          onClick={() => setPicking(!picking)}
-          className="relative shrink-0 rounded-full transition-transform outline-none active:scale-90 focus-visible:ring-2 focus-visible:ring-ring"
-          aria-label="Change your shape and colour"
-          aria-expanded={picking}
-        >
-          <Avatar
-            key={lookKey(look)}
-            look={look}
-            name={name || state.guess.guess}
-            size={44}
-            className="animate-in zoom-in-50 spin-in-12 duration-300"
-          />
-        </button>
+        {look && (
+          <button
+            type="button"
+            onClick={() => setPicking(!picking)}
+            className="relative shrink-0 rounded-full transition-transform outline-none active:scale-90 focus-visible:ring-2 focus-visible:ring-ring"
+            aria-label="Change your shape and colour"
+            aria-expanded={picking}
+          >
+            <Avatar
+              key={lookKey(look)}
+              look={look}
+              name={name || state.guess.guess}
+              size={44}
+              className="animate-in zoom-in-50 spin-in-12 duration-300"
+            />
+          </button>
+        )}
         <input
           ref={inputRef}
           value={name}
@@ -381,7 +396,7 @@ function AskForm({
             : "This is our best guess. It's probably a bit awful though innit?"}
         </p>
       )}
-      {picking && (
+      {look && picking && (
         <LookPicker
           look={look}
           name={name || state.guess.guess}
@@ -416,7 +431,7 @@ function AskForm({
           </span>
         )}
       </button>
-      {!picking && (
+      {look && !picking && (
         <button
           type="button"
           onClick={() => setPicking(true)}
@@ -567,7 +582,7 @@ function Reaction({
 }: {
   outcome: Outcome;
   name: string;
-  look: Look;
+  look: Look | null;
   guess: string;
   busy: boolean;
   error: string;
@@ -588,7 +603,7 @@ function Reaction({
         <p className="mt-2 text-[15px] text-muted-foreground sm:text-base">{copy.body}</p>
       )}
       <div className="mt-6 flex items-center gap-2.5">
-        <Avatar look={look} name={name} size={36} />
+        {look && <Avatar look={look} name={name} size={36} />}
         <span className="text-[17px] font-semibold tracking-tight">{name}</span>
       </div>
       {error && <p className="mt-3 text-[13px] text-destructive">{error}</p>}
@@ -636,22 +651,26 @@ function Reaction({
 }
 
 /** The card the transition resolves into, as DOM: the same layout as drawCard in dust.ts. */
-function Card({ name, look, subtitle }: { name: string; look: Look; subtitle: string }) {
+function Card({ person, subtitle }: { person: CardPerson; subtitle: string }) {
   const [theme] = React.useState(() =>
     cardTheme(document.documentElement.classList.contains("dark")),
   );
+  const { name, look } = person;
+  const place = cardNameY(person);
   return (
     <div className="fixed inset-0 z-50" style={{ background: theme.bg, color: theme.fg }}>
-      <div
-        className="absolute left-1/2"
-        style={{ top: `${CARD.shapeY * 100}%`, transform: "translate(-50%, -50%)" }}
-      >
-        <Avatar look={look} name={name} size={CARD.shape} />
-      </div>
+      {look && (
+        <div
+          className="absolute left-1/2"
+          style={{ top: `${CARD.shapeY * 100}%`, transform: "translate(-50%, -50%)" }}
+        >
+          <Avatar look={look} name={name} size={CARD.shape} />
+        </div>
+      )}
       <div
         className="absolute inset-x-0 text-center font-extrabold"
         style={{
-          top: `calc(${CARD.shapeY * 100}% + ${CARD.nameGap}px)`,
+          top: `calc(${place.fraction * 100}% + ${place.offset}px)`,
           transform: "translateY(-50%)",
           fontSize: CARD.nameSize,
           letterSpacing: -0.8,
@@ -663,7 +682,7 @@ function Card({ name, look, subtitle }: { name: string; look: Look; subtitle: st
       <div
         className="absolute inset-x-0 text-center font-medium"
         style={{
-          top: `calc(${CARD.shapeY * 100}% + ${CARD.subGap}px)`,
+          top: `calc(${place.fraction * 100}% + ${place.offset + CARD.subGap - CARD.nameGap}px)`,
           transform: "translateY(-50%)",
           fontSize: CARD.subSize,
           color: theme.sub,

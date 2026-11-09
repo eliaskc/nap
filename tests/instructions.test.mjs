@@ -99,3 +99,14 @@ test("reMarkable shows in the apps topic only when the Nap has it", () => {
   assert.doesNotMatch(on, /ios\/scripts\/publish/);
   assert.doesNotMatch(on, /<!--|\{\{/);
 });
+
+test("looks show in the instructions only when the Nap has avatars", () => {
+  const off = renderInstructions(read("sites"), config());
+  assert.doesNotMatch(off, /nap-avatar|nap\.looks|shape, color/);
+  assert.match(off, /no avatars/);
+  assert.doesNotMatch(renderInstructions(read("channels"), config()), /their look/);
+  assert.match(renderInstructions(read("channels"), config({ avatars: true })), /their look/);
+  const on = renderInstructions(read("sites"), config({ avatars: true }));
+  assert.match(on, /nap-avatar/);
+  assert.match(on, /nap\.looks/);
+});

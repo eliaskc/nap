@@ -21,13 +21,14 @@ export type NapColor = "red" | "orange" | "green" | "violet" | "pink" | "brown" 
 
 /**
  * A person on Nap: the name they chose and their look. Each shape and colour pair belongs to one
- * person on this Nap, so it tells people apart at a glance.
+ * person on this Nap, so it tells people apart at a glance. On a Nap without avatars, nobody has
+ * a look: shape and color are null.
  */
 export interface NapPerson {
   email: string;
   name: string;
-  shape: NapShape;
-  color: NapColor;
+  shape: NapShape | null;
+  color: NapColor | null;
 }
 
 /** The person viewing the page. */
@@ -121,8 +122,9 @@ export interface NapPeer<S = unknown> {
   id: string;
   email: string;
   name: string;
-  shape: NapShape;
-  color: NapColor;
+  /** Null on a Nap without avatars. */
+  shape: NapShape | null;
+  color: NapColor | null;
   joinedAt: number;
   state: S | null;
   /** This page. */
@@ -276,7 +278,10 @@ export interface Nap {
   me(): Promise<NapIdentity>;
   /** Everyone on this Nap, or only these emails, with their names and looks. */
   people(emails?: Array<string>): Promise<Array<NapPerson>>;
-  /** A person's avatar as an <svg> element. Plain HTML can use <nap-avatar> instead. */
+  /**
+   * A person's avatar as an <svg> element. Plain HTML can use <nap-avatar> instead. Someone
+   * without a look gets their initials in a grey circle.
+   */
   avatar(
     person: Pick<NapPerson, "name" | "shape" | "color">,
     options?: NapAvatarOptions,
