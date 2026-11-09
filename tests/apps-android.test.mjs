@@ -337,7 +337,23 @@ test("Android without a Play service account: Nap signs, and keeps the bundle fo
     const target = sqlite
       .prepare("SELECT bundle_id AS id FROM app_targets WHERE target = 'android'")
       .get();
-    assert.equal(target.id, PACKAGE);
+    assert.equal(target.id, `android:${PACKAGE}`);
+    const app = (await (await api("GET", "/notes")).json()).app;
+    assert.equal(app.targets.find((t) => t.target === "android").bundleId, PACKAGE);
+  });
+});
+
+test("Android may use the iOS bundle id as its package name", async () => {
+  await withApps(ANDROID, async () => {
+    const { api, SOURCES, sqlite } = setup();
+    await created(api, SOURCES);
+    sqlite
+      .prepare("INSERT INTO app_targets (app_slug, target, bundle_id) VALUES ('notes', 'ios', ?)")
+      .run(PACKAGE);
+    const response = await api("POST", `/notes/builds?target=android&sourceCommit=${sha(1)}`, {
+      body: bytes("bundle"),
+    });
+    assert.equal(response.status, 201);
   });
 });
 

@@ -591,7 +591,9 @@ const PLATFORMS: Record<PlatformName, Platform> = {
           });
         }
       }),
-    targetId: () => napConfig.apps!.android!.packageName,
+    // app_targets.bundle_id is unique across platforms, and the package name is often the iOS
+    // bundle id too. describeApp shows the package name itself.
+    targetId: () => `android:${napConfig.apps!.android!.packageName}`,
     // Version codes must go above every bundle Google Play has, from any source.
     lowestBuildNumber: () =>
       Effect.gen(function* () {
