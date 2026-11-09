@@ -64,7 +64,7 @@ crypto.DigestStream ??= class extends WritableStream {
 };
 
 const { napConfig } = await import("../nap.config.ts");
-const { sendNotification, saveWebTarget, saveApnsTarget, handleNotifyRequest } =
+const { sendNotification, saveWebTarget, saveApnsTarget, saveFcmTarget, handleNotifyRequest } =
   await import("../src/lib/notifications.ts");
 const { runNap, respond } = await import("../src/server/runtime.ts");
 const { generateKeyPairSync, createECDH, createDecipheriv, hkdfSync } = await import("node:crypto");
@@ -251,6 +251,92 @@ test("a page's notification reaches everyone else who can see it, encrypted, and
     const payload = JSON.parse(apns.body);
     assert.equal(payload.aps.alert.title, "Elias wants to play");
     assert.equal(payload.url, "https://weave.nap.example.com/room/1");
+  });
+});
+
+test("Android phones get them through Firebase, as the service account, and uninstalled ones go away", async () => {
+  const firebase = {
+    projectId: "gg-play",
+    senderId: "123",
+    appId: "1:123:android:ab",
+    apiKey: "k",
+  };
+  const android = { app: "g", android: { packageName: "com.x.app", testersUrl: null, firebase } };
+  await withConfig({ notifications: true, apps: android }, async () => {
+    const { env, site, sqlite } = setup();
+    site("weave", "everyone");
+    const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
+    env.NAP_PLAY_SERVICE_ACCOUNT = JSON.stringify({
+      client_email: "nap@gg-play.iam.gserviceaccount.com",
+      private_key: privateKey.export({ type: "pkcs8", format: "pem" }),
+    });
+    await runNap(env, saveFcmTarget("ann@x.com", "fcm-token-ann-0123456789", "Pixel"));
+    await runNap(env, saveFcmTarget("bob@x.com", "fcm-token-bob-0123456789", "Pixel"));
+    const sent = [];
+    const original = globalThis.fetch;
+    globalThis.fetch = async (url, init) => {
+      if (String(url).startsWith("https://oauth2.googleapis.com/")) {
+        const form = new URLSearchParams(String(init.body));
+        const claims = JSON.parse(
+          Buffer.from(form.get("assertion").split(".")[1], "base64url").toString(),
+        );
+        assert.equal(claims.scope, "https://www.googleapis.com/auth/firebase.messaging");
+        return Response.json({ access_token: "ya29.fcm", expires_in: 3600 });
+      }
+      const body = JSON.parse(String(init.body));
+      sent.push({ url: String(url), headers: init.headers, body });
+      return body.message.token.includes("bob")
+        ? Response.json(
+            { error: { status: "NOT_FOUND", details: [{ errorCode: "UNREGISTERED" }] } },
+            { status: 404 },
+          )
+        : Response.json({ name: "projects/gg-play/messages/1" });
+    };
+    try {
+      const result = await runNap(
+        env,
+        sendNotification(SITE("weave"), ME, { title: "Elias wants to play", body: "Join!" }),
+      );
+      assert.deepEqual(result, { sent: 2 });
+    } finally {
+      globalThis.fetch = original;
+    }
+    assert.equal(sent.length, 2);
+    const ann = sent.find((p) => p.body.message.token.includes("ann"));
+    assert.equal(ann.url, "https://fcm.googleapis.com/v1/projects/gg-play/messages:send");
+    assert.equal(ann.headers.authorization, "Bearer ya29.fcm");
+    assert.deepEqual(ann.body.message.notification, {
+      title: "Elias wants to play · Weave",
+      body: "Join!",
+    });
+    assert.deepEqual(ann.body.message.data, {
+      url: "https://weave.nap.example.com/",
+      source: "site:weave",
+      title: "Elias wants to play",
+      subtitle: "Weave",
+      body: "Join!",
+    });
+    assert.equal(ann.body.message.android.notification.channel_id, "nap");
+    const left = sqlite
+      .prepare("SELECT email FROM push_targets")
+      .all()
+      .map((r) => r.email);
+    assert.deepEqual(left, ["ann@x.com"]);
+  });
+  // Without Firebase in the config, Android phones are skipped.
+  await withConfig({ notifications: true, apps: null }, async () => {
+    const { env, site } = setup();
+    site("weave", "everyone");
+    await runNap(env, saveFcmTarget("ann@x.com", "fcm-token-ann-0123456789", "Pixel"));
+    const pushes = capture();
+    try {
+      assert.deepEqual(await runNap(env, sendNotification(SITE("weave"), ME, { title: "Hi" })), {
+        sent: 0,
+      });
+    } finally {
+      pushes.restore();
+    }
+    assert.equal(pushes.sent.length, 0);
   });
 });
 

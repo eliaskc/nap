@@ -1,5 +1,5 @@
 import { Effect, Schema } from "effect";
-import { importPKCS8, SignJWT } from "jose";
+import { googleToken } from "~/lib/google-auth";
 import { napConfig } from "~/nap.config";
 import { Settings } from "~/server/platform";
 import { Storage } from "~/server/storage";
@@ -46,41 +46,11 @@ export const playConfigured = Effect.gen(function* () {
   return play !== null;
 });
 
-/** An hour-long OAuth token for the service account, from a signed JWT. */
-const accessToken = Effect.fnUntraced(function* () {
-  const { play } = yield* Settings;
-  if (!play) return yield* playError("The Google Play service account is not set up");
-  const assertion = yield* Effect.promise(async () => {
-    const key = await importPKCS8(play.privateKey.replace(/\\n/g, "\n"), "RS256");
-    return new SignJWT({ scope: SCOPE })
-      .setProtectedHeader({ alg: "RS256", typ: "JWT" })
-      .setIssuer(play.clientEmail)
-      .setAudience("https://oauth2.googleapis.com/token")
-      .setIssuedAt()
-      .setExpirationTime("10m")
-      .sign(key);
-  });
-  const response = yield* Effect.promise(() =>
-    fetch("https://oauth2.googleapis.com/token", {
-      method: "POST",
-      headers: { "content-type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({
-        grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
-        assertion,
-      }),
-    }),
+/** A token for the Play Developer API (src/lib/google-auth.ts). */
+const accessToken = () =>
+  googleToken(SCOPE).pipe(
+    Effect.catchTag("GoogleAuthError", (error) => Effect.fail(playError(error.message))),
   );
-  const data = (yield* Effect.promise(() => response.json().catch(() => ({})))) as {
-    access_token?: string;
-    error_description?: string;
-  };
-  if (!response.ok || !data.access_token) {
-    return yield* playError(
-      `Google would not sign in the Play service account: ${data.error_description ?? response.status}`,
-    );
-  }
-  return data.access_token;
-});
 
 /** A call to the Play Developer API. Errors carry Google's message. */
 const play = Effect.fnUntraced(function* <T>(

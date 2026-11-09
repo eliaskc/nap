@@ -25,5 +25,8 @@ dependencies {
   implementation(libs.compose.material3)
   implementation(libs.okhttp)
   implementation(libs.browser)
+  implementation(libs.activity.compose)
+  implementation(platform(libs.firebase.bom))
+  implementation(libs.firebase.messaging)
   testImplementation(libs.junit)
 }

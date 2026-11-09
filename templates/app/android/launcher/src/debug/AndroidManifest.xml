@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Debug builds only: plain HTTP, so `-e nap-url http://10.0.2.2:1337` reaches a local Nap.
+     Release builds (what Nap publishes) stay HTTPS only. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+  <application android:usesCleartextTraffic="true" />
+</manifest>

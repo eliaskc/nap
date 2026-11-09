@@ -24,6 +24,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -37,6 +38,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.dynamicDarkColorScheme
@@ -46,6 +48,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -53,7 +56,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.launch
 import nap.kit.Nap
+import nap.kit.NapError
+import nap.kit.NapPush
+import nap.kit.NapPushStarter
 import nap.kit.NapSignInButton
 
 /** An app in apps/: the registry (generated from their app.json) lists them all. */
@@ -69,7 +76,7 @@ class AppEntry(
 /**
  * The launcher: every app in apps/, in the order of the registry. Apps open full screen; back,
  * or the close button in the top corner, comes back. It also signs in to Nap once for every app
- * (NapKit).
+ * (NapKit), and gets Nap's notifications.
  */
 class MainActivity : ComponentActivity() {
   /** An app the intent asked to open, until the launcher has opened it. */
@@ -81,6 +88,8 @@ class MainActivity : ComponentActivity() {
     if (savedInstanceState == null) handle(intent)
     setContent {
       LauncherTheme {
+        // Once someone is signed in, ask to allow notifications and register this phone.
+        NapPushStarter()
         Launcher(requested) { requested = null }
       }
     }
@@ -93,11 +102,13 @@ class MainActivity : ComponentActivity() {
   }
 
   /**
-   * `-e open <slug>` opens that app, and `-e site <id>` the app whose app.json names that page
-   * (what a notification will ask for). `-e nap-url` and `-e nap-token` are for testing.
+   * `-e open <slug>` opens that app, and `-e site <id>` the app whose app.json names that page.
+   * `-e nap-url` and `-e nap-token` are for testing. A tapped notification carries `url` and
+   * `source`: NapPush.opened, which the launcher opens.
    */
   private fun handle(intent: Intent) {
     Nap.handleTestingExtras(intent.extras)
+    NapPush.handle(intent)
     val slug = intent.getStringExtra("open")
     val site = intent.getStringExtra("site")
     registry.firstOrNull { it.slug == slug || (!site.isNullOrEmpty() && it.site == site) }?.let { requested = it.slug }
@@ -123,6 +134,18 @@ fun Launcher(requested: String?, onRequestHandled: () -> Unit) {
     if (requested != null) {
       open = requested
       onRequestHandled()
+    }
+  }
+  // A tapped notification: the app it belongs to, or else its page in the browser.
+  val opened = NapPush.opened
+  LaunchedEffect(opened) {
+    if (opened == null) return@LaunchedEffect
+    NapPush.opened = null
+    val target = registry.firstOrNull { it.slug == opened.app || (it.site.isNotEmpty() && it.site == opened.site) }
+    if (target != null) {
+      open = target.slug
+    } else {
+      opened.url?.let { Nap.browse(it) }
     }
   }
   val app = registry.firstOrNull { it.slug == open }
@@ -200,7 +223,10 @@ fun AppList(onOpen: (AppEntry) -> Unit) {
 @Composable
 private fun AccountMenu() {
   val account = Nap.account
+  val context = LocalContext.current
+  val scope = rememberCoroutineScope()
   var expanded by remember { mutableStateOf(false) }
+  var testResult by remember { mutableStateOf<String?>(null) }
   Box {
     IconButton(onClick = { expanded = true }) {
       Icon(Icons.Filled.AccountCircle, contentDescription = "Account")
@@ -208,6 +234,33 @@ private fun AccountMenu() {
     DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
       if (account.displayName.isNotEmpty()) {
         DropdownMenuItem(text = { Text(account.displayName) }, onClick = {}, enabled = false)
+      }
+      if (NapPush.enabled == true) {
+        DropdownMenuItem(
+          text = { Text("Send a test notification") },
+          onClick = {
+            expanded = false
+            scope.launch {
+              testResult = try {
+                val devices = NapPush.test()
+                if (devices == 0) {
+                  "Nothing to send to yet. Allow notifications for this app, or turn them on with the bell on ${Nap.host}."
+                } else {
+                  "Sent to $devices ${if (devices == 1) "device" else "devices"}."
+                }
+              } catch (error: NapError) {
+                error.message
+              }
+            }
+          },
+        )
+        DropdownMenuItem(
+          text = { Text(if (NapPush.allowed == false) "Allow notifications" else "Notification settings") },
+          onClick = {
+            expanded = false
+            NapPush.openSettings(context)
+          },
+        )
       }
       DropdownMenuItem(
         text = { Text("Sign out") },
@@ -217,5 +270,12 @@ private fun AccountMenu() {
         },
       )
     }
+  }
+  testResult?.let { result ->
+    AlertDialog(
+      onDismissRequest = { testResult = null },
+      confirmButton = { TextButton(onClick = { testResult = null }) { Text("OK") } },
+      text = { Text(result) },
+    )
   }
 }

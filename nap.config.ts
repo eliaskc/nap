@@ -71,6 +71,23 @@ export type NapConfig = {
        * app and publish, and the dashboard shows how to get it once this is set.
        */
       testersUrl: string | null;
+      /**
+       * Notifications to Android phones (with `notifications` on): the Firebase app for this
+       * package, from its google-services.json. These identify the app and are not secret; the
+       * launcher gets them from Nap. Nap sends through Firebase Cloud Messaging as the Play
+       * service account, which needs the role Firebase Cloud Messaging API Admin in this project.
+       * Leave it out for no notifications on Android.
+       */
+      firebase?: {
+        /** project_info.project_id */
+        projectId: string;
+        /** project_info.project_number */
+        senderId: string;
+        /** client[].client_info.mobilesdk_app_id */
+        appId: string;
+        /** client[].api_key[].current_key */
+        apiKey: string;
+      };
     };
     /**
      * reMarkable: a launcher for the reMarkable 2 tablet, run by AppLoad. Leave it out for no

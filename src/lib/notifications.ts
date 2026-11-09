@@ -9,6 +9,7 @@ import {
   vapidPublicKey,
   type VapidKeys,
 } from "~/lib/push-crypto";
+import { googleToken } from "~/lib/google-auth";
 import { viewersAmong } from "~/lib/site-data";
 import { napConfig } from "~/nap.config";
 import { Database } from "~/server/database";
@@ -18,7 +19,7 @@ import { inBackground, Settings } from "~/server/platform";
 /**
  * Notifications (napConfig.notifications). A page sends one with nap.notify({ title, body, open })
  * and an app with NapKit's Nap.notify; Nap sends it to everyone else who can see the page, on
- * every phone with the app (APNs) and every browser that turned them on (web push). The sender
+ * every phone with the app (APNs on iPhones, Firebase Cloud Messaging on Android) and every browser that turned them on (web push). The sender
  * never gets their own. Each send is logged in `notifications`, which the rate limits count.
  */
 
@@ -48,7 +49,7 @@ const ago = (ms: number) => new Date(Date.now() - ms).toISOString();
 type Target = {
   id: string;
   email: string;
-  kind: "apns" | "web";
+  kind: "apns" | "fcm" | "web";
   endpoint: string;
   p256dh: string | null;
   auth: string | null;
@@ -88,6 +89,17 @@ export const apnsConfig = Effect.fn("apnsConfig")(function* () {
   const ios = napConfig.apps?.ios;
   if (!notificationsOn() || !apns || !ios) return null;
   return { ...apns, teamId: ios.teamId, topic: ios.bundleId };
+});
+
+/**
+ * Android: on when the instance has notifications and Firebase for the Android app, and a Google
+ * service account to send as. The Firebase values are what the launcher initializes with.
+ */
+export const fcmConfig = Effect.fn("fcmConfig")(function* () {
+  const { play } = yield* Settings;
+  const firebase = napConfig.apps?.android?.firebase;
+  if (!notificationsOn() || !play || !firebase) return null;
+  return firebase;
 });
 
 // ---- Where they go -------------------------------------------------------------------------
@@ -131,6 +143,26 @@ export const saveApnsTarget = Effect.fn("saveApnsTarget")(function* (
     email,
     device.token,
     device.environment,
+    label.slice(0, 120),
+    now(),
+  );
+});
+
+/** An Android phone with the app: its Firebase Cloud Messaging token, for this person. */
+export const saveFcmTarget = Effect.fn("saveFcmTarget")(function* (
+  email: string,
+  token: string,
+  label: string,
+) {
+  const db = yield* Database;
+  yield* db.run(
+    `INSERT INTO push_targets (id, email, kind, endpoint, label)
+     VALUES (?, ?, 'fcm', ?, ?)
+     ON CONFLICT (endpoint) DO UPDATE SET email = excluded.email, label = excluded.label,
+       last_seen_at = ?`,
+    crypto.randomUUID(),
+    email,
+    token,
     label.slice(0, 120),
     now(),
   );
@@ -247,6 +279,101 @@ const sendApns = Effect.fnUntraced(function* (
   );
 });
 
+const sendFcm = Effect.fnUntraced(function* (
+  target: Target,
+  message: Message,
+  firebase: { projectId: string },
+) {
+  const token = yield* googleToken("https://www.googleapis.com/auth/firebase.messaging");
+  const response = yield* Effect.promise(() =>
+    fetch(
+      `https://fcm.googleapis.com/v1/projects/${encodeURIComponent(firebase.projectId)}/messages:send`,
+      {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({
+          message: {
+            token: target.endpoint,
+            notification: {
+              title: message.subtitle ? `${message.title} · ${message.subtitle}` : message.title,
+              ...(message.body ? { body: message.body } : {}),
+            },
+            // The launcher opens what a tap asks for from these, and shows the notification
+            // itself while it is open.
+            data: {
+              url: message.url,
+              source: message.source,
+              title: message.title,
+              subtitle: message.subtitle,
+              body: message.body,
+            },
+            android: {
+              priority: "high",
+              notification: { channel_id: "nap", tag: message.source },
+            },
+          },
+        }),
+      },
+    ),
+  );
+  if (response.ok) return;
+  const error = yield* Effect.promise(() =>
+    response
+      .json()
+      .then(
+        (body) =>
+          (
+            body as {
+              error?: {
+                status?: string;
+                message?: string;
+                details?: Array<{ errorCode?: string }>;
+              };
+            }
+          ).error ?? {},
+      )
+      .catch(
+        () =>
+          ({}) as { status?: string; message?: string; details?: Array<{ errorCode?: string }> },
+      ),
+  );
+  const code = error.details?.find((detail) => detail.errorCode)?.errorCode ?? error.status ?? "";
+  // The app was uninstalled, or the token is not one of this project's.
+  if (response.status === 404 || code === "UNREGISTERED" || code === "SENDER_ID_MISMATCH") {
+    return yield* dropTarget(target.id);
+  }
+  yield* Effect.logWarning("FCM failed").pipe(
+    Effect.annotateLogs({
+      status: response.status,
+      code,
+      error: (error.message ?? "").slice(0, 300),
+    }),
+  );
+});
+
+type Senders = {
+  apns: Effect.Success<ReturnType<typeof apnsConfig>>;
+  fcm: Effect.Success<ReturnType<typeof fcmConfig>>;
+  keys: VapidKeys | null;
+};
+
+/** The targets this Nap can reach now: phones only with their platform's keys set up. */
+const reachable = (targets: Array<Target>, senders: Omit<Senders, "keys">) =>
+  targets.filter(
+    (target) =>
+      target.kind === "web" ||
+      (target.kind === "apns" && senders.apns) ||
+      (target.kind === "fcm" && senders.fcm),
+  );
+
+const sendTo = (target: Target, message: Message, senders: Senders) =>
+  (target.kind === "web"
+    ? sendWeb(target, message, senders.keys!)
+    : target.kind === "apns"
+      ? sendApns(target, message, senders.apns!)
+      : sendFcm(target, message, senders.fcm!)
+  ).pipe(Effect.catchCause((cause) => Effect.logWarning("Push failed", cause)));
+
 /** Where a tap goes: a page on this Nap, by default the source's own. */
 function resolveOpen(source: NotificationSource, open: string) {
   const { rootDomain } = source.place;
@@ -323,12 +450,15 @@ export const sendNotification = Effect.fn("sendNotification")(function* (
 
   // Everyone else's phones and browsers. From a page, only people who can see that page.
   const apns = yield* apnsConfig();
-  let targets = yield* db.all<Target>(
-    `SELECT id, email, kind, endpoint, p256dh, auth, environment FROM push_targets
-     WHERE lower(email) <> lower(?)`,
-    sender.email,
+  const fcm = yield* fcmConfig();
+  let targets = reachable(
+    yield* db.all<Target>(
+      `SELECT id, email, kind, endpoint, p256dh, auth, environment FROM push_targets
+       WHERE lower(email) <> lower(?)`,
+      sender.email,
+    ),
+    { apns, fcm },
   );
-  if (!apns) targets = targets.filter((target) => target.kind === "web");
   if (source.kind === "site") {
     const viewers = yield* viewersAmong(source.slug, [...new Set(targets.map((t) => t.email))]);
     targets = targets.filter((target) => viewers.has(target.email.toLowerCase()));
@@ -360,15 +490,10 @@ export const sendNotification = Effect.fn("sendNotification")(function* (
   if (targets.length) {
     const keys = targets.some((target) => target.kind === "web") ? yield* vapidKeys() : null;
     yield* inBackground(
-      Effect.forEach(
-        targets,
-        (target) =>
-          (target.kind === "web"
-            ? sendWeb(target, message, keys!)
-            : sendApns(target, message, apns!)
-          ).pipe(Effect.catchCause((cause) => Effect.logWarning("Push failed", cause))),
-        { concurrency: 8, discard: true },
-      ),
+      Effect.forEach(targets, (target) => sendTo(target, message, { apns, fcm, keys }), {
+        concurrency: 8,
+        discard: true,
+      }),
       "Sending a notification failed",
     );
   }
@@ -398,12 +523,15 @@ export const sendTest = Effect.fn("sendTest")(function* (person: Identity, place
     });
   }
   const apns = yield* apnsConfig();
-  let targets = yield* db.all<Target>(
-    `SELECT id, email, kind, endpoint, p256dh, auth, environment FROM push_targets
-     WHERE lower(email) = lower(?)`,
-    person.email,
+  const fcm = yield* fcmConfig();
+  const targets = reachable(
+    yield* db.all<Target>(
+      `SELECT id, email, kind, endpoint, p256dh, auth, environment FROM push_targets
+       WHERE lower(email) = lower(?)`,
+      person.email,
+    ),
+    { apns, fcm },
   );
-  if (!apns) targets = targets.filter((target) => target.kind === "web");
   const url = (place.localOrigin ?? `https://${place.rootDomain}`) + "/";
   yield* db.run(
     `INSERT INTO notifications (id, source, sender_email, title, url, recipients)
@@ -421,15 +549,10 @@ export const sendTest = Effect.fn("sendTest")(function* (person: Identity, place
   };
   const keys = targets.some((target) => target.kind === "web") ? yield* vapidKeys() : null;
   // Waits for delivery, so the answer can say what happened.
-  yield* Effect.forEach(
-    targets,
-    (target) =>
-      (target.kind === "web"
-        ? sendWeb(target, message, keys!)
-        : sendApns(target, message, apns!)
-      ).pipe(Effect.catchCause((cause) => Effect.logWarning("Push failed", cause))),
-    { concurrency: 8, discard: true },
-  );
+  yield* Effect.forEach(targets, (target) => sendTo(target, message, { apns, fcm, keys }), {
+    concurrency: 8,
+    discard: true,
+  });
   return { devices: targets.length };
 });
 

@@ -75,6 +75,7 @@ class NapAccount internal constructor() {
 
   /** Signs out: forgets the token, and every page's data and copies on the device. */
   fun signOut() {
+    token?.let { NapPush.signedOut(it) }
     token = null
     email = null
     name = null

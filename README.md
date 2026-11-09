@@ -131,7 +131,11 @@ the secrets and a deploy workflow that deploys this code with them.
     the web push keys itself. For the iOS app, create an APNs key in the Apple
     developer account (Keys, Apple Push Notifications service, Sandbox &
     Production, team scoped): the `.p8` is the secret `NAP_APNS_PRIVATE_KEY`
-    and its key ID the variable `NAP_APNS_KEY_ID`.
+    and its key ID the variable `NAP_APNS_KEY_ID`. For the Android app, add
+    Firebase to the Google Cloud project of the Play service account, add an
+    Android app with the package name, and copy its values from
+    `google-services.json` into `apps.android.firebase`; then give the service
+    account the role Firebase Cloud Messaging API Admin.
 11. **Icon (optional).** Nap's icon (`brand/AppIcon.icon`, made in Icon
     Composer) is the icon of the dashboard and of new app launchers. For your
     own, put an Icon Composer icon at `instance/icon/AppIcon.icon` and run
@@ -314,7 +318,8 @@ With `notifications: true`, a page calls `nap.notify({ title, body, open })` (`/
 `src/lib/notifications.ts`), and an app the same through the agent API with its token. Nap sends
 it to everyone else who can view the page, never the sender: to browsers that turned it on
 (web push, with a VAPID key pair Nap makes and keeps in `nap_keys`, and payloads encrypted to
-each browser) and to phones with the app (APNs, with the instance's key). Where they go is
+each browser) and to phones with the app (APNs on iPhones, with the instance's key; Firebase
+Cloud Messaging on Android, as the Google service account). Where they go is
 `push_targets`, by email; dead subscriptions and uninstalled apps are dropped when a push
 service says so. A tap opens a page on the Nap's own domains only. Each send is logged in
 `notifications`, which the per-sender and per-page rate limits count.

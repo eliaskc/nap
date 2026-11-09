@@ -49,7 +49,7 @@ iOS:
 Android:
 
 - The project is android/, a Gradle project: the launcher in android/launcher/, NapKit for Kotlin in android/napkit/, and one module per app in android/apps/<slug>/ (app.json, and Kotlin sources with a @Composable fun AppView() in the package nap.apps.<slug, with - as \_>). android/AGENTS.md has the details.
-- Nap data from Kotlin: NapKit (android/napkit, linked by every app), the same calls as NapKit for Swift: Nap.site("<id>") with db.collection, channel, watch, rtc, fetch, and notify; Nap.me(), Nap.people(), and Nap.account, the launcher's one sign-in (show NapSignInButton() where an app needs someone signed in). Never edit android/napkit: android/scripts/napkit updates it from Nap. Notifications do not reach Android phones yet.
+- Nap data from Kotlin: NapKit (android/napkit, linked by every app), the same calls as NapKit for Swift: Nap.site("<id>") with db.collection, channel, watch, rtc, fetch, and notify; Nap.me(), Nap.people(), and Nap.account, the launcher's one sign-in (show NapSignInButton() where an app needs someone signed in). Never edit android/napkit: android/scripts/napkit updates it from Nap. Put "site": "<id>" in app.json when the app plays with a page, so that page's notifications open the app.
 - Test on the emulator or a phone while you work: ./gradlew :launcher:installDebug in android/.
 - Permissions go in the app's own src/main/AndroidManifest.xml; never change the launcher's applicationId or add signing: Nap signs release bundles with the Play upload key.
 - Publish: commit, then android/scripts/publish 'What changed, for testers'. It builds an unsigned release bundle, pushes HEAD to main, and uploads it with that commit. Nap signs it, gives it the next build number (its version code), and uploads it to Google Play's internal testing; testers get it from Google Play in a few minutes. People join from Get the app on the dashboard.
@@ -75,7 +75,7 @@ Nap data from an app, on every platform (NapKit and the launchers already do thi
 
 <!-- if notifications -->
 
-Notifications from an app: POST /\_nap/api/naps/<id>/notify with { "title", "body", "open" } is nap.notify for that page (in Swift, Nap.site(id).notify(title:body:open:)). An app with no page of its own posts to /\_nap/api/notify with "app": its folder, which a tap opens (Nap.notify(title:body:open:app:)). The `notifications` topic says what to send. The iOS launcher registers for them itself once someone is signed in.
+Notifications from an app: POST /\_nap/api/naps/<id>/notify with { "title", "body", "open" } is nap.notify for that page (in Swift, Nap.site(id).notify(title:body:open:)). An app with no page of its own posts to /\_nap/api/notify with "app": its folder, which a tap opens (Nap.notify(title:body:open:app:)). The `notifications` topic says what to send. The iOS and Android launchers register for them themselves once someone is signed in.
 
 <!-- /if -->
 

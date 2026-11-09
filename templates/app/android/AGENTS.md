@@ -68,6 +68,10 @@ Dangerous permissions (microphone, camera, location, …) are also asked for at 
 work, or say why not, when someone says no. Permissions are shared: the launcher has what any
 app asked for. Networking needs nothing declared (NapKit declares `INTERNET`).
 
+Nap's own notifications need nothing declared either: on a Nap that sends notifications to
+Android, the launcher asks to allow them once someone is signed in, and NapKit registers for them
+(Firebase Cloud Messaging, with the Nap's Firebase project: there is no `google-services.json`).
+
 An app that needs a library from Maven Central or Google's Maven lists it in `app.json`:
 
 ```json
@@ -82,7 +86,7 @@ An app that needs a library from Maven Central or Google's Maven lists it in `ap
 Compose (Material 3 and its core icons), kotlinx.serialization, coroutines, and NapKit are there
 already. Add libraries only when you need them: builds should stay quick.
 
-## NapKit: Nap data and channels
+## NapKit: Nap data, channels, and notifications
 
 `import nap.kit.*` gives Kotlin what a web page gets as `window.nap`. Apps cannot pass Cloudflare
 Access, so the launcher signs in to Nap once (the device flow) and NapKit sends that token. A
@@ -143,19 +147,19 @@ Writes are suspending calls: `val scope = rememberCoroutineScope()`, then
   Nap has them).
 - `site.fetch(url)`: APIs the page lists in its nap.json, like nap.fetch.
 - `site.notify(title, body, open)`: a notification to everyone else who can see the page, on
-  their phones (not Android ones yet) and in their browsers, never to the sender. Only on Naps
-  with notifications; a few a minute. An app with no page uses
-  `Nap.notify(title, body, open, app = "<its folder>")`.
+  their phones and in their browsers, never to the sender. Only on Naps with notifications; a
+  few a minute. Put `"site": "<id>"` in the app's app.json so a tap on that page's notifications
+  opens the app (otherwise the page opens in the browser). An app with no page uses
+  `Nap.notify(title, body, open, app = "<its folder>")`, and a tap opens that app.
 - `Nap.me()`, `Nap.people()`: names and looks. `Nap.account`: `signedIn`, `email`, `name`.
 - Errors are `NapError` (`message`, `status`, `code`; status 0 when Nap could not be reached). A
   lost sign-in signs out by itself.
-- Test against a local Nap: start the launcher with `-e nap-url http://10.0.2.2:1337` (the host's
+- Test against a local Nap: start a debug build (only debug builds allow plain HTTP) with `-e nap-url http://10.0.2.2:1337` (the host's
   localhost, as the emulator sees it) and a token with `-e nap-token <token>`. The URL is kept
   until `-e nap-url ''`.
 
 ## Limits
 
-- Notifications do not reach Android yet: this launcher gets none, though it can send them.
 - The package name (`applicationId`) is the one this Nap publishes to Play: never change it.
   Keep `targetSdk` at what Play requires (in `gradle/libs.versions.toml`).
 - The release bundle stays unsigned, with no `signingConfig`: Nap signs it. Never sign it here

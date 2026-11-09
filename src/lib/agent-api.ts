@@ -40,7 +40,9 @@ import {
   handleNotifyRequest,
   notificationsOn,
   removeTarget,
+  fcmConfig,
   saveApnsTarget,
+  saveFcmTarget,
   readAppSlug,
   sendNotification,
   sendTest,
@@ -195,9 +197,38 @@ export const handleAgentApi = Effect.fn("handleAgentApi")(function* (request: Re
   if (path === "/push/test" && method === "POST") {
     return json(yield* sendTest(agent, place), { headers: noStore });
   }
-  // A phone with the app: its APNs device token, so notifications reach it. DELETE turns it off.
+  // Android: whether this Nap sends notifications to the app, and the Firebase app to receive
+  // them with. The launcher initializes Firebase from it.
+  if (path === "/push/android" && method === "GET") {
+    const firebase = yield* fcmConfig();
+    return json(firebase ? { enabled: true, firebase } : { enabled: false }, {
+      headers: noStore,
+    });
+  }
+  // A phone with the app: its APNs device token (iPhone), or its Firebase Cloud Messaging token
+  // with platform "android", so notifications reach it. DELETE turns it off.
   if (path === "/push/devices" && (method === "POST" || method === "DELETE")) {
     const body = yield* readJsonObject(request);
+    if (body.platform === "android") {
+      const token = typeof body.token === "string" ? body.token.trim() : "";
+      if (!/^[A-Za-z0-9_:\-]{20,4096}$/.test(token))
+        return yield* failNoStore(400, "Give the Firebase Cloud Messaging token");
+      if (method === "DELETE") {
+        yield* removeTarget(agent.email, token);
+        return json({ ok: true }, { headers: noStore });
+      }
+      if (!(yield* fcmConfig())) {
+        return yield* failNoStore(404, "Notifications are off on this Nap", {
+          code: "notifications_off",
+        });
+      }
+      yield* saveFcmTarget(
+        agent.email,
+        token,
+        typeof body.label === "string" ? body.label : agent.client,
+      );
+      return json({ ok: true }, { headers: noStore });
+    }
     const token = typeof body.token === "string" ? body.token.trim().toLowerCase() : "";
     if (!/^[0-9a-f]{64,200}$/.test(token))
       return yield* failNoStore(400, "Give the APNs device token, in hex");

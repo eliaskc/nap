@@ -36,6 +36,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
 //   weave.notify("Elias wants to play")               // nap.notify
 //   Nap.me(), Nap.people()                            // nap.me(), nap.people()
 //   Nap.account                                       // the sign-in, shared by every app
+//   NapPush                                           // notifications (Firebase Cloud Messaging)
 //
 // Apps cannot pass Cloudflare Access, so NapKit signs in once per launcher (the device flow) and
 // sends that Nap token to /_nap/api. A page's data, channels, and live updates there are the same
@@ -43,7 +44,6 @@ import okhttp3.RequestBody.Companion.toRequestBody
 //
 // State that Compose reads (documents, peers, the account) is snapshot state, changed on the
 // main thread: composables that read it update with it. Suspending calls are main-safe.
-// Notifications (FCM) are not in NapKit for Android yet; Nap.start is where they will begin.
 
 /** The JSON NapKit reads and writes: unknown keys are ignored, missing nullable ones are null. */
 val NapJson: Json = Json {
@@ -68,7 +68,7 @@ object Nap {
   }
   /** WebSockets stay open without messages for a while: no read timeout. */
   internal val sockets: OkHttpClient by lazy { http.newBuilder().readTimeout(0, TimeUnit.MILLISECONDS).build() }
-  private val prefs: SharedPreferences by lazy { context.getSharedPreferences("nap.kit", Context.MODE_PRIVATE) }
+  internal val prefs: SharedPreferences by lazy { context.getSharedPreferences("nap.kit", Context.MODE_PRIVATE) }
 
   /**
    * This Nap, such as https://{{rootDomain}}. For a local Nap, start the launcher with
@@ -93,6 +93,22 @@ object Nap {
   internal fun start(context: Context) {
     this.context = context.applicationContext
     account.load()
+    NapPush.setUp(this.context)
+  }
+
+  /** Opens a URL in a Custom Tab, which shares the browser's sign-in to Access. */
+  fun browse(url: String) {
+    val tab = androidx.browser.customtabs.CustomTabsIntent.Builder().setShowTitle(true).build()
+    val activity = Activities.front
+    try {
+      if (activity != null) {
+        tab.launchUrl(activity, android.net.Uri.parse(url))
+      } else {
+        tab.intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+        tab.launchUrl(context, android.net.Uri.parse(url))
+      }
+    } catch (_: android.content.ActivityNotFoundException) {
+    }
   }
 
   /**
@@ -147,6 +163,7 @@ object Nap {
   /** Back in the foreground: sockets may be gone, so reconnect and catch up. */
   internal fun foreground() {
     sites.values.forEach { it.refresh() }
+    NapPush.foreground()
   }
 
   /** Signing out: forget every page's data, and the copies on the device. */
