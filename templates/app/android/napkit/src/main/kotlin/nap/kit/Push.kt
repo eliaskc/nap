@@ -46,8 +46,10 @@ import kotlinx.serialization.json.put
  * notification can arrive.
  */
 object NapPush {
-  /** The notification channel every Nap notification uses. */
+  /** The notification channel Nap notifications use. */
   const val CHANNEL = "nap"
+  /** Quiet ones (nap.notify's `quiet`): in the list, without a sound. */
+  const val QUIET_CHANNEL = "nap-quiet"
 
   /** Whether this Nap sends notifications to Android: null until known. Show notification settings only when it does. */
   var enabled: Boolean? by mutableStateOf(null)
@@ -69,6 +71,7 @@ object NapPush {
   internal fun setUp(context: Context) {
     val manager = context.getSystemService(NotificationManager::class.java)
     manager.createNotificationChannel(NotificationChannel(CHANNEL, "Notifications", NotificationManager.IMPORTANCE_DEFAULT))
+    manager.createNotificationChannel(NotificationChannel(QUIET_CHANNEL, "Quiet updates", NotificationManager.IMPORTANCE_LOW))
     stored()?.let { firebase(context, it) }
   }
 
@@ -268,7 +271,7 @@ object NapPush {
     val tap = PendingIntent.getActivity(
       context, source.hashCode(), launch, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
     )
-    val notification = Notification.Builder(context, CHANNEL)
+    val notification = Notification.Builder(context, if (data["quiet"] == "1") QUIET_CHANNEL else CHANNEL)
       .setSmallIcon(R.drawable.nap_notification)
       .setContentTitle(title)
       .setContentText(body)
@@ -277,8 +280,10 @@ object NapPush {
       .setContentIntent(tap)
       .apply { data["subtitle"]?.takeIf { it.isNotEmpty() }?.let { setSubText(it) } }
       .build()
-    // The same tag and id as the ones Android shows, so a newer one from the same place replaces it.
-    runCatching { context.getSystemService(NotificationManager::class.java).notify(source.ifEmpty { null }, 0, notification) }
+    // The same tag and id as the ones Android shows, so a newer one with the same tag (or from the
+    // same place, without one) replaces it.
+    val tag = data["tag"]?.ifEmpty { null } ?: source.ifEmpty { null }
+    runCatching { context.getSystemService(NotificationManager::class.java).notify(tag, 0, notification) }
   }
 }
 

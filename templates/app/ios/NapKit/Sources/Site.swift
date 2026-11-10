@@ -81,14 +81,20 @@ public final class NapSite {
   /// A notification to everyone else who can see this page, on their phones and in browsers with
   /// notifications on. Never to the sender. `open` is where a tap goes: a path on the page's
   /// site (default its home) or a URL on this Nap. On phones with this launcher, a tap opens the
-  /// app whose app.json names this site. `skip`: emails of people to leave out too. Resolves
-  /// with how many people it went to.
+  /// app whose app.json names this site. `skip`: emails of people to leave out too; `only`: the
+  /// only people it may go to. `tag`: a newer one with the same tag replaces it on every device.
+  /// `quiet`: no sound or banner, only in the list. Resolves with how many people it went to.
   @discardableResult
-  public func notify(title: String, body: String? = nil, open: String? = nil, skip: [String] = []) async throws -> Int {
+  public func notify(
+    title: String, body: String? = nil, open: String? = nil, skip: [String] = [], only: [String]? = nil,
+    tag: String? = nil, quiet: Bool = false
+  ) async throws -> Int {
     struct Sent: Decodable { var sent: Int }
     let sent: Sent = try await Nap.request(
       "POST", url("notify"),
-      body: NapNotification(title: title, body: body, open: open, skip: skip.isEmpty ? nil : skip))
+      body: NapNotification(
+        title: title, body: body, open: open, skip: skip.isEmpty ? nil : skip, only: only, tag: tag,
+        quiet: quiet ? true : nil))
     return sent.sent
   }
 

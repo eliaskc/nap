@@ -138,6 +138,9 @@ struct NapNotification: Encodable {
   var open: String?
   var app: String?
   var skip: [String]?
+  var only: [String]?
+  var tag: String?
+  var quiet: Bool?
 }
 
 /// What Nap answered when a request failed. `status` is the HTTP status; `document` is the

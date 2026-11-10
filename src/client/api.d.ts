@@ -255,6 +255,16 @@ export interface NapNotification {
   open?: string;
   /** Emails of people to leave out, such as those who were there for what it is about. */
   skip?: string[];
+  /** The only people it may go to (emails), such as those it is about. An empty list sends to nobody. */
+  only?: string[];
+  /**
+   * Up to 64 letters, digits, and `.`, `_`, `:`, `-`. A newer notification from this page with the
+   * same tag replaces the older one on every device, such as one per game a day that says who has
+   * played so far.
+   */
+  tag?: string;
+  /** No sound or banner: it only goes in the list (or quietly replaces one with its tag). */
+  quiet?: boolean;
 }
 
 export interface Nap {

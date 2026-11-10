@@ -282,6 +282,85 @@ test("skip leaves people out, whatever the case of their email", async () => {
   });
 });
 
+test("only sends to the people named, and tag and quiet replace without a sound everywhere", async () => {
+  const firebase = {
+    projectId: "gg-play",
+    senderId: "123",
+    appId: "1:123:android:ab",
+    apiKey: "k",
+  };
+  await withConfig(
+    {
+      notifications: true,
+      apps: { ...IOS, android: { packageName: "com.x.app", testersUrl: null, firebase } },
+    },
+    async () => {
+      const { env, site } = setup();
+      site("dle", "everyone");
+      const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
+      env.NAP_PLAY_SERVICE_ACCOUNT = JSON.stringify({
+        client_email: "nap@gg-play.iam.gserviceaccount.com",
+        private_key: privateKey.export({ type: "pkcs8", format: "pem" }),
+      });
+      const ann = browser("https://push.example/ann");
+      const bob = browser("https://push.example/bob");
+      await runNap(env, saveWebTarget("ann@x.com", ann.subscription, "Chrome"));
+      await runNap(env, saveWebTarget("bob@x.com", bob.subscription, "Chrome"));
+      await runNap(
+        env,
+        saveApnsTarget(
+          "ann@x.com",
+          { token: "ab".repeat(32), environment: "production" },
+          "iPhone",
+        ),
+      );
+      await runNap(env, saveFcmTarget("ann@x.com", "fcm-token-ann-0123456789", "Pixel"));
+      const pushes = capture((url) => (url.startsWith("https://oauth2") ? 200 : 201));
+      const original = globalThis.fetch;
+      const wrapped = globalThis.fetch;
+      globalThis.fetch = async (url, init) =>
+        String(url).startsWith("https://oauth2.googleapis.com/")
+          ? Response.json({ access_token: "ya29.fcm", expires_in: 3600 })
+          : wrapped(url, init);
+      try {
+        const result = await runNap(
+          env,
+          sendNotification(SITE("dle", "Dle"), ME, {
+            title: "Wordle today",
+            only: ["ANN@x.com"],
+            tag: "wordle:2026-11-10",
+            quiet: true,
+          }),
+        );
+        assert.deepEqual(result, { sent: 1 });
+        assert.deepEqual(
+          await runNap(env, sendNotification(SITE("dle", "Dle"), ME, { title: "Hi", only: [] })),
+          { sent: 0 },
+        );
+      } finally {
+        globalThis.fetch = original;
+        pushes.restore();
+      }
+      const urls = pushes.sent.map((p) => p.url);
+      assert.ok(!urls.includes("https://push.example/bob"));
+      const web = pushes.sent.find((p) => p.url === "https://push.example/ann");
+      const message = ann.decrypt(web.body);
+      assert.equal(message.tag, "site:dle:wordle:2026-11-10");
+      assert.equal(message.quiet, true);
+      const apns = pushes.sent.find((p) => p.url.includes("apple.com"));
+      assert.equal(apns.headers["apns-collapse-id"], "site:dle:wordle:2026-11-10");
+      const aps = JSON.parse(apns.body).aps;
+      assert.equal(aps["interruption-level"], "passive");
+      assert.equal(aps.sound, undefined);
+      const fcm = JSON.parse(pushes.sent.find((p) => p.url.includes("fcm.googleapis")).body);
+      assert.equal(fcm.message.android.notification.channel_id, "nap-quiet");
+      assert.equal(fcm.message.android.notification.tag, "site:dle:wordle:2026-11-10");
+      assert.equal(fcm.message.android.collapse_key, "site:dle:wordle:2026-11-10");
+      assert.equal(fcm.message.data.quiet, "1");
+    },
+  );
+});
+
 test("Android phones get them through Firebase, as the service account, and uninstalled ones go away", async () => {
   const firebase = {
     projectId: "gg-play",
@@ -409,7 +488,7 @@ test("a few a minute per sender", async () => {
   await withConfig({ notifications: true, apps: null }, async () => {
     const { env, site } = setup();
     site("weave", "everyone");
-    for (let i = 0; i < 3; i++)
+    for (let i = 0; i < 5; i++)
       await runNap(env, sendNotification(SITE("weave"), ME, { title: `n${i}` }));
     await failsWith(
       runNap(env, sendNotification(SITE("weave"), ME, { title: "again" })),

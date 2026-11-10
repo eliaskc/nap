@@ -34,17 +34,23 @@ export type NotificationSource =
 export const readAppSlug = (value: unknown) =>
   typeof value === "string" && /^[a-z0-9-]{1,64}$/.test(value) ? value : null;
 
-/** Per sender and per source. Generous for "wants to play", tight enough to stop a loop. */
+/**
+ * Per sender and per source. Generous for "wants to play" and for a finished game that tells
+ * different people different things (a few sends at once), tight enough to stop a loop.
+ */
 const LIMITS = {
-  senderPerMinute: 3,
-  senderPerDay: 50,
-  sourcePerMinute: 6,
+  senderPerMinute: 5,
+  senderPerDay: 80,
+  sourcePerMinute: 12,
 };
 const TITLE_MAX = 80;
 const SKIP_MAX = 100;
 
-/** `skip`: emails to leave out, compared without case. Anything else in the list is ignored. */
-const readSkip = (value: unknown) =>
+/**
+ * `skip`: emails to leave out; `only`: the only emails it may go to. Compared without case;
+ * anything else in the list is ignored.
+ */
+const readEmails = (value: unknown) =>
   new Set(
     (Array.isArray(value) ? value : [])
       .filter((email): email is string => typeof email === "string")
@@ -53,6 +59,13 @@ const readSkip = (value: unknown) =>
       .filter(Boolean),
   );
 const BODY_MAX = 240;
+
+/**
+ * `tag`: a newer notification with the same tag from the same place replaces the older one on
+ * every device, such as one per game per day that says who has played so far.
+ */
+const readTag = (value: unknown) =>
+  typeof value === "string" && /^[A-Za-z0-9._:-]{1,64}$/.test(value) ? value : "";
 
 const now = () => new Date().toISOString();
 const ago = (ms: number) => new Date(Date.now() - ms).toISOString();
@@ -202,7 +215,24 @@ export const hasTarget = Effect.fn("hasTarget")(function* (email: string, endpoi
 
 // ---- Sending -------------------------------------------------------------------------------
 
-type Message = { title: string; subtitle: string; body: string; url: string; source: string };
+type Message = {
+  title: string;
+  subtitle: string;
+  body: string;
+  url: string;
+  source: string;
+  /** What it replaces: `<source>:<tag>`, or none. */
+  tag?: string;
+  /** Shown without a sound or a banner: only in the list. */
+  quiet?: boolean;
+};
+
+/** APNs collapse ids are at most 64 bytes; longer tags go by their hash. */
+const collapseId = async (tag: string) => {
+  if (new TextEncoder().encode(tag).length <= 64) return tag;
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(tag));
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+};
 
 const dropTarget = (id: string) =>
   Effect.gen(function* () {
@@ -257,7 +287,8 @@ const sendApns = Effect.fnUntraced(function* (
         authorization: `bearer ${await apnsToken(apns.keyId, apns.teamId, apns.privateKey)}`,
         "apns-topic": apns.topic,
         "apns-push-type": "alert",
-        "apns-priority": "10",
+        "apns-priority": message.quiet ? "5" : "10",
+        ...(message.tag ? { "apns-collapse-id": await collapseId(message.tag) } : {}),
       },
       body: JSON.stringify({
         aps: {
@@ -266,11 +297,12 @@ const sendApns = Effect.fnUntraced(function* (
             ...(message.subtitle ? { subtitle: message.subtitle } : {}),
             ...(message.body ? { body: message.body } : {}),
           },
-          sound: "default",
+          ...(message.quiet ? { "interruption-level": "passive" } : { sound: "default" }),
           "thread-id": message.source,
         },
         url: message.url,
         source: message.source,
+        ...(message.tag ? { tag: message.tag } : {}),
       }),
     }),
   );
@@ -317,10 +349,17 @@ const sendFcm = Effect.fnUntraced(function* (
               title: message.title,
               subtitle: message.subtitle,
               body: message.body,
+              ...(message.tag ? { tag: message.tag } : {}),
+              ...(message.quiet ? { quiet: "1" } : {}),
             },
             android: {
               priority: "high",
-              notification: { channel_id: "nap", tag: message.source },
+              ...(message.tag ? { collapse_key: message.tag.slice(0, 64) } : {}),
+              // The launcher makes both channels; "nap-quiet" makes no sound.
+              notification: {
+                channel_id: message.quiet ? "nap-quiet" : "nap",
+                tag: message.tag ?? message.source,
+              },
             },
           },
         }),
@@ -418,7 +457,15 @@ const sourceKey = (source: NotificationSource) =>
 export const sendNotification = Effect.fn("sendNotification")(function* (
   source: NotificationSource,
   sender: Identity,
-  input: { title?: unknown; body?: unknown; open?: unknown; skip?: unknown },
+  input: {
+    title?: unknown;
+    body?: unknown;
+    open?: unknown;
+    skip?: unknown;
+    only?: unknown;
+    tag?: unknown;
+    quiet?: unknown;
+  },
 ) {
   if (!notificationsOn()) {
     return yield* failNoStore(404, "Notifications are off on this Nap", {
@@ -471,8 +518,13 @@ export const sendNotification = Effect.fn("sendNotification")(function* (
     { apns, fcm },
   );
   // People the sender leaves out, such as those who were there for what it is about.
-  const skip = readSkip(input.skip);
+  const skip = readEmails(input.skip);
   if (skip.size) targets = targets.filter((target) => !skip.has(target.email.toLowerCase()));
+  // Or only the people it is for, such as those someone just beat.
+  if (Array.isArray(input.only)) {
+    const only = readEmails(input.only);
+    targets = targets.filter((target) => only.has(target.email.toLowerCase()));
+  }
   if (source.kind === "site") {
     const viewers = yield* viewersAmong(source.slug, [...new Set(targets.map((t) => t.email))]);
     targets = targets.filter((target) => viewers.has(target.email.toLowerCase()));
@@ -501,6 +553,9 @@ export const sendNotification = Effect.fn("sendNotification")(function* (
     url,
     source: key,
   };
+  const tag = readTag(input.tag);
+  if (tag) message.tag = `${key}:${tag}`;
+  if (input.quiet === true) message.quiet = true;
   if (targets.length) {
     const keys = targets.some((target) => target.kind === "web") ? yield* vapidKeys() : null;
     yield* inBackground(

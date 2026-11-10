@@ -128,7 +128,9 @@ public final class NapAppDelegate: NSObject, UIApplicationDelegate, @preconcurre
     _ center: UNUserNotificationCenter, willPresent notification: UNNotification,
     withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
   ) {
-    completionHandler([.banner, .list, .sound])
+    // Quiet ones (nap.notify's `quiet`) only go in the list, as they do when the app is closed.
+    let passive = notification.request.content.interruptionLevel == .passive
+    completionHandler(passive ? [.list] : [.banner, .list, .sound])
   }
 
   public func userNotificationCenter(

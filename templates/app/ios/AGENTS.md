@@ -117,8 +117,8 @@ public struct AppView: View {
 - `site.rtc()`: ICE servers for WebRTC between people on the page (STUN, and TURN relays when
   the Nap has them).
 - `site.fetch(url)`: APIs the page lists in its nap.json, like nap.fetch.
-- `site.notify(title:body:open:skip:)`: a notification to everyone else who can see the page (but `skip`, a list of emails), on their
-  phones and in their browsers, never to the sender. Only on Naps with notifications; a few a
+- `site.notify(title:body:open:skip:only:tag:quiet:)`: a notification to everyone else who can see the page (but `skip`, a list of emails; or `only` those), on their
+  phones and in their browsers, never to the sender. A newer one with the same `tag` replaces the older one; `quiet` has no sound or banner. Only on Naps with notifications; a few a
   minute. Put `"site": "<id>"` in the app's app.json so a tap on that page's notifications opens
   the app. An app with no page uses `Nap.notify(title:body:open:app: "<its folder>")`.
 - `Nap.me()`, `Nap.people()`: names and looks. `Nap.account`: `signedIn`, `email`, `name`.
