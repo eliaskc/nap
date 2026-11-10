@@ -315,7 +315,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(400, {"error": "The upload is not a zip of an .app"})
         except Exception as error:  # noqa: BLE001
             print(f"signing failed: {error}")
-            return self._json(500, {"error": "Signing failed"})
+            # Never the keys themselves: the messages are Nap's own, or a tool's error output.
+            return self._json(500, {"error": f"Signing failed: {error}"[:500]})
         self._send_signed(signed, meta)
 
     def _send_signed(self, signed, meta):
