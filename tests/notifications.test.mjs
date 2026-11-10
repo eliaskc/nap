@@ -254,6 +254,34 @@ test("a page's notification reaches everyone else who can see it, encrypted, and
   });
 });
 
+test("skip leaves people out, whatever the case of their email", async () => {
+  await withConfig({ notifications: true }, async () => {
+    const { env, site, sqlite } = setup();
+    site("weave", "selected");
+    for (const email of ["ann@x.com", "bob@x.com"]) {
+      sqlite.prepare("INSERT INTO site_viewers (site_slug, email) VALUES ('weave', ?)").run(email);
+    }
+    const ann = browser("https://push.example/ann");
+    const bob = browser("https://push.example/bob");
+    await runNap(env, saveWebTarget("ann@x.com", ann.subscription, "Chrome"));
+    await runNap(env, saveWebTarget("bob@x.com", bob.subscription, "Chrome"));
+    const pushes = capture();
+    try {
+      const result = await runNap(
+        env,
+        sendNotification(SITE("weave"), ME, { title: "We solved it", skip: ["Ann@X.com", 7] }),
+      );
+      assert.deepEqual(result, { sent: 1 });
+    } finally {
+      pushes.restore();
+    }
+    assert.deepEqual(
+      pushes.sent.map((p) => p.url),
+      ["https://push.example/bob"],
+    );
+  });
+});
+
 test("Android phones get them through Firebase, as the service account, and uninstalled ones go away", async () => {
   const firebase = {
     projectId: "gg-play",

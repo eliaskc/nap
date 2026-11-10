@@ -100,12 +100,16 @@ class NapSite internal constructor(val id: String) {
   /**
    * A notification to everyone else who can see this page, on their phones and in browsers with
    * notifications on. Never to the sender. `open` is where a tap goes: a path on the page's site
-   * (default its home) or a URL on this Nap. Returns how many people it went to.
+   * (default its home) or a URL on this Nap. `skip`: emails of people to leave out too. Returns how
+   * many people it went to.
    */
-  suspend fun notify(title: String, body: String? = null, open: String? = null): Int {
+  suspend fun notify(title: String, body: String? = null, open: String? = null, skip: List<String> = emptyList()): Int {
     val sent = Nap.request(
       "POST", url("notify"), JsonObject.serializer(),
-      NapJson.encodeToJsonElement(NapNotification.serializer(), NapNotification(title, body, open)),
+      NapJson.encodeToJsonElement(
+        NapNotification.serializer(),
+        NapNotification(title, body, open, skip = skip.ifEmpty { null }),
+      ),
     )
     return (sent["sent"] as? JsonPrimitive)?.intOrNull ?: 0
   }

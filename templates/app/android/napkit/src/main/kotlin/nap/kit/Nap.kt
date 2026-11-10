@@ -266,6 +266,7 @@ internal data class NapNotification(
   val body: String? = null,
   val open: String? = null,
   val app: String? = null,
+  val skip: List<String>? = null,
 )
 
 /**

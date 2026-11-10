@@ -41,6 +41,17 @@ const LIMITS = {
   sourcePerMinute: 6,
 };
 const TITLE_MAX = 80;
+const SKIP_MAX = 100;
+
+/** `skip`: emails to leave out, compared without case. Anything else in the list is ignored. */
+const readSkip = (value: unknown) =>
+  new Set(
+    (Array.isArray(value) ? value : [])
+      .filter((email): email is string => typeof email === "string")
+      .slice(0, SKIP_MAX)
+      .map((email) => email.trim().toLowerCase())
+      .filter(Boolean),
+  );
 const BODY_MAX = 240;
 
 const now = () => new Date().toISOString();
@@ -407,7 +418,7 @@ const sourceKey = (source: NotificationSource) =>
 export const sendNotification = Effect.fn("sendNotification")(function* (
   source: NotificationSource,
   sender: Identity,
-  input: { title?: unknown; body?: unknown; open?: unknown },
+  input: { title?: unknown; body?: unknown; open?: unknown; skip?: unknown },
 ) {
   if (!notificationsOn()) {
     return yield* failNoStore(404, "Notifications are off on this Nap", {
@@ -459,6 +470,9 @@ export const sendNotification = Effect.fn("sendNotification")(function* (
     ),
     { apns, fcm },
   );
+  // People the sender leaves out, such as those who were there for what it is about.
+  const skip = readSkip(input.skip);
+  if (skip.size) targets = targets.filter((target) => !skip.has(target.email.toLowerCase()));
   if (source.kind === "site") {
     const viewers = yield* viewersAmong(source.slug, [...new Set(targets.map((t) => t.email))]);
     targets = targets.filter((target) => viewers.has(target.email.toLowerCase()));

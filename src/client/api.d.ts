@@ -253,6 +253,8 @@ export interface NapNotification {
   body?: string;
   /** Where a tap goes: a path on this page's site (default its home page), or a URL on this Nap. */
   open?: string;
+  /** Emails of people to leave out, such as those who were there for what it is about. */
+  skip?: string[];
 }
 
 export interface Nap {
