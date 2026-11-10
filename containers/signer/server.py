@@ -33,6 +33,7 @@ import os
 import plistlib
 import re
 import shutil
+import signal
 import subprocess
 import tempfile
 import zipfile
@@ -339,4 +340,8 @@ class Handler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
+    # The server is the container's PID 1, which ignores SIGTERM unless it handles it. Without
+    # this, the container never sleeps: the Worker signals it to stop when idle and nothing
+    # happens, so it runs on, with the environment (the signing keys) it started with.
+    signal.signal(signal.SIGTERM, lambda *_: os._exit(0))
     ThreadingHTTPServer(("0.0.0.0", 8080), Handler).serve_forever()
