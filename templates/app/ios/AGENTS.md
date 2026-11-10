@@ -134,8 +134,9 @@ public struct AppView: View {
   phone locks needs `"infoPlist": {"UIBackgroundModes": ["audio"]}`, and MultipeerConnectivity or
   Bonjour need `NSLocalNetworkUsageDescription` in `permissions` and `NSBonjourServices` in
   `infoPlist`. The whole launcher gets them, like capabilities.
-- iPhone only, and `ITSAppUsesNonExemptEncryption` stays false (HTTPS is exempt): TestFlight
-  needs both.
+- iPhone and iPad, in every orientation on iPad (Icon Composer's `AppIcon.icon` makes the iPad
+  icons), and `ITSAppUsesNonExemptEncryption` stays false (HTTPS is exempt): TestFlight needs
+  both. Apps should lay out for an iPad's width: use size classes, not fixed phone widths.
 - No Swift packages from the internet unless you need them: builds should stay seconds long. An
   app that needs one lists it in `app.json`:
   `"packages": [{"url": "https://github.com/…", "version": "1.2.3", "products": ["Name"]}]`.

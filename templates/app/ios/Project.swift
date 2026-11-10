@@ -125,9 +125,9 @@ func declared(_ apps: [NapApp]) -> [String: Plist.Value] {
 func moduleName(_ slug: String) -> String { "App_" + slug.replacingOccurrences(of: "-", with: "_") }
 
 let ios: DeploymentTargets = .iOS("18.0")
-// iPhone only, and no encryption beyond HTTPS: TestFlight needs both answered (iPad apps need
-// iPad icons and every orientation; the encryption key saves a question in App Store Connect).
-let iPhone: Destinations = [.iPhone]
+// iPhone and iPad, and no encryption beyond HTTPS (the encryption key saves a question in App Store
+// Connect). iPad apps need iPad icons (Icon Composer's AppIcon.icon makes them) and every orientation.
+let devices: Destinations = [.iPhone, .iPad]
 let orientations: Plist.Value = [
   "UIInterfaceOrientationPortrait",
   "UIInterfaceOrientationLandscapeLeft",
@@ -169,7 +169,7 @@ let packages: [Package] = apps.flatMap(\.packages).compactMap { ref in
 
 let launcher: Target = .target(
   name: "Launcher",
-  destinations: iPhone,
+  destinations: devices,
   product: .app,
   productName: "Nap",
   bundleId: "nap.launcher",
@@ -181,6 +181,10 @@ let launcher: Target = .target(
     "CFBundleVersion": "1",
     "ITSAppUsesNonExemptEncryption": false,
     "UISupportedInterfaceOrientations": orientations,
+    "UISupportedInterfaceOrientations~ipad": [
+      "UIInterfaceOrientationPortrait", "UIInterfaceOrientationPortraitUpsideDown",
+      "UIInterfaceOrientationLandscapeLeft", "UIInterfaceOrientationLandscapeRight",
+    ],
   ]) { _, fixed in fixed }),
   sources: ["Launcher/Sources/**", "Generated/Launcher/**"],
   // The app icon, Resources/AppIcon.icon (Icon Composer): TestFlight refuses builds without one.
