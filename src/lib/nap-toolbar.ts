@@ -61,11 +61,13 @@ export function toolbarPage(options: {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${text(title)}</title>${
-    // Artifacts are on the dashboard's host, so they get its icon. Sites keep their own.
+    // Artifacts get Nap's icon. Sites get their /favicon.ico (Nap's when they have none), and
+    // the toolbar script copies the icon links of the framed page.
+    // The viewer swaps the icon links for the artifact's own, if it names one.
     artifact
       ? `
-<link rel="icon" type="image/svg+xml" href="${attr(iconUrl("favicon.svg"))}">
-<link rel="icon" type="image/png" sizes="32x32" href="${attr(iconUrl("favicon-32x32.png"))}">
+<link rel="icon" type="image/svg+xml" href="${attr(iconUrl("favicon.svg"))}" data-nap-icon>
+<link rel="icon" type="image/png" sizes="32x32" href="${attr(iconUrl("favicon-32x32.png"))}" data-nap-icon>
 <link rel="apple-touch-icon" href="${attr(iconUrl("apple-touch-icon.png"))}">`
       : ""
   }
@@ -100,7 +102,7 @@ export function toolbarPage(options: {
         "content-security-policy": [
           "default-src 'none'",
           "style-src 'unsafe-inline'",
-          "img-src 'self'",
+          artifact ? "img-src 'self' data:" : "img-src 'self' data: https:",
           "script-src 'self'",
           "connect-src 'self'",
           "frame-src 'self'",
@@ -130,9 +132,31 @@ const TOOLBAR_SOURCE = String.raw`(() => {
       }
       const title = frame.contentDocument && frame.contentDocument.title;
       document.title = title || baseTitle;
+      syncIcons();
     } catch (error) {
       // The frame left this origin. Keep the last address.
     }
+  }
+
+  // The tab shows the framed page's icon links. Without any it falls back to /favicon.ico.
+  let lastIcons = "";
+  function syncIcons() {
+    const doc = frame.contentDocument;
+    if (!doc) return;
+    const icons = Array.from(doc.querySelectorAll('link[rel~="icon"]'));
+    const key = icons.map((link) => link.href + " " + link.type + " " + link.sizes).join("|");
+    if (key === lastIcons) return;
+    lastIcons = key;
+    document.querySelectorAll("link[data-nap-icon]").forEach((link) => link.remove());
+    icons.forEach((icon) => {
+      const link = document.createElement("link");
+      link.rel = "icon";
+      link.href = icon.href;
+      if (icon.type) link.type = icon.type;
+      if (icon.getAttribute("sizes")) link.setAttribute("sizes", icon.getAttribute("sizes"));
+      link.setAttribute("data-nap-icon", "");
+      document.head.appendChild(link);
+    });
   }
 
   function watch() {
@@ -237,7 +261,35 @@ const VIEWER_SOURCE = String.raw`(() => {
     }
     const title = typeof data.title === "string" ? data.title.trim() : "";
     document.title = title || baseTitle;
+    if (Array.isArray(data.icons)) setIcons(data.icons);
   });
+
+  // The artifact's own icon links, else Nap's. Only its files (and data: URLs) are allowed.
+  const napIcons = Array.from(document.querySelectorAll("link[data-nap-icon]"));
+  const filePrefix = location.origin + "/_nap/frame/";
+  let lastIcons = "";
+  function setIcons(list) {
+    const icons = list.filter((icon) =>
+      icon && typeof icon.href === "string" &&
+      (icon.href.indexOf(filePrefix) === 0 || /^data:image\//.test(icon.href)));
+    const key = JSON.stringify(icons);
+    if (key === lastIcons) return;
+    lastIcons = key;
+    document.querySelectorAll("link[data-nap-icon]").forEach((link) => link.remove());
+    if (!icons.length) {
+      napIcons.forEach((link) => document.head.appendChild(link));
+      return;
+    }
+    icons.forEach((icon) => {
+      const link = document.createElement("link");
+      link.rel = "icon";
+      link.href = icon.href;
+      if (typeof icon.type === "string" && icon.type) link.type = icon.type;
+      if (typeof icon.sizes === "string" && icon.sizes) link.setAttribute("sizes", icon.sizes);
+      link.setAttribute("data-nap-icon", "");
+      document.head.appendChild(link);
+    });
+  }
 })();`;
 
 export const VIEWER_SCRIPT_VERSION = (() => {

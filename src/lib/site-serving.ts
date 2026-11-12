@@ -56,7 +56,13 @@ export const serveUploadedSite = Effect.fn("serveUploadedSite")(function* (
   slug: string,
   path: string,
   request: Request,
-  options: { accessPath?: string; dashboardUrl?: string; artifactUrl: (slug: string) => string },
+  options: {
+    accessPath?: string;
+    dashboardUrl?: string;
+    artifactUrl: (slug: string) => string;
+    /** Nap's own /favicon.ico, for sites without one. */
+    napFavicon?: Effect.Effect<Response>;
+  },
 ) {
   const url = new URL(request.url);
   const identity = getIdentity(request);
@@ -110,6 +116,10 @@ export const serveUploadedSite = Effect.fn("serveUploadedSite")(function* (
     if ((yield* siteManifest(nap.slug, nap.currentVersion)).spa) {
       object = yield* getNapFile(nap, "index.html");
     }
+  }
+  // Browsers ask for /favicon.ico when a page names no icon. Sites without one get Nap's.
+  if (!object && normalizedPath === "favicon.ico" && options.napFavicon) {
+    return yield* options.napFavicon;
   }
   if (!object) return yield* failText(404, "File not found");
 

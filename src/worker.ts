@@ -215,6 +215,9 @@ const routeRequest = Effect.fn("routeRequest")(function* (
     if (toWelcome) return toWelcome;
     return yield* serveUploadedSite(slug, url.pathname, request, {
       dashboardUrl: `https://${rootDomain}/`,
+      napFavicon: Effect.promise(() =>
+        env.ASSETS.fetch(new Request(new URL("/favicon.ico", dashboardOrigin), request)),
+      ),
       artifactUrl: (key) => `https://${rootDomain}${ARTIFACT_PATH}/${key}`,
     });
   }

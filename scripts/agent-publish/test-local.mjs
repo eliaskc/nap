@@ -181,6 +181,7 @@ try {
   assert.match(page.text, /sandbox="allow-scripts[^"]*"/, "the frame is sandboxed");
   assert.doesNotMatch(page.text, /allow-same-origin/, "the frame has an opaque origin");
   assert.match(page.text, /_nap\/viewer\.js/);
+  assert.match(page.text, /rel="icon"[^>]*favicon\.svg\?v=/, "the viewer has Nap's icon");
   assert.match(
     page.text,
     new RegExp(`comments\\.js" data-nap-comments="${artifactPath}/_nap/comments"`),
@@ -368,6 +369,10 @@ try {
   const siteContent = await sitePage(OWNER, "iframe");
   assert.match(siteContent.text, /v4/);
   assert.equal(siteContent.headers["content-security-policy"], "frame-ancestors 'self'");
+  // Sites without their own /favicon.ico get Nap's.
+  const favicon = await call("/favicon.ico", { host: contentHost, headers: signedIn(OWNER) });
+  assert.equal(favicon.status, 200, "sites get Nap's favicon");
+  assert.match(favicon.headers["content-type"], /icon/);
 
   // Toolbar off: top-level visits get the files directly.
   assert.equal((await settings({ toolbar: false })).json.toolbar, false);

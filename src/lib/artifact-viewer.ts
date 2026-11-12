@@ -420,14 +420,14 @@ function rewriteArtifactHtml(response: Response, prefix: string, viewerOrigin: s
  * - The opaque origin has no localStorage or sessionStorage, and touching them throws. Give the
  *   page in-memory stand-ins, so it works. Data does not last after a reload; artifacts that need
  *   that use window.nap.db.
- * - Tell the viewer the page's path and title, so the address bar and the tab title follow.
+ * - Tell the viewer the page's path, title, and icon links, so the address bar and the tab follow.
  */
 function frameScript(prefix: string, viewerOrigin: string) {
   return `(function(){var P=${JSON.stringify(prefix)},O=${JSON.stringify(viewerOrigin)};
 function mem(){var m=new Map();return{get length(){return m.size},key:function(i){var k=Array.from(m.keys())[i];return k===undefined?null:k},getItem:function(k){k=String(k);return m.has(k)?m.get(k):null},setItem:function(k,v){m.set(String(k),String(v))},removeItem:function(k){m.delete(String(k))},clear:function(){m.clear()}}}
 ["localStorage","sessionStorage"].forEach(function(n){try{window[n].length}catch(e){try{Object.defineProperty(window,n,{value:mem(),configurable:true})}catch(e2){}}});
 if(window.parent===window)return;
-function post(){try{var p=location.pathname;if(p.indexOf(P)===0)p=p.slice(P.length)||"/";parent.postMessage({type:"nap:location",path:p+location.search+location.hash,title:document.title},O)}catch(e){}}
+function post(){try{var p=location.pathname;if(p.indexOf(P)===0)p=p.slice(P.length)||"/";var icons=Array.prototype.map.call(document.querySelectorAll('link[rel~="icon"]'),function(l){return{href:l.href,type:l.type,sizes:l.getAttribute("sizes")||""}});parent.postMessage({type:"nap:location",path:p+location.search+location.hash,title:document.title,icons:icons},O)}catch(e){}}
 ["pushState","replaceState"].forEach(function(n){var o=history[n];history[n]=function(){var r=o.apply(this,arguments);post();return r}});
 addEventListener("popstate",post);addEventListener("hashchange",post);
 addEventListener("DOMContentLoaded",function(){post();var t=document.querySelector("title");if(t)new MutationObserver(post).observe(t,{childList:true,characterData:true,subtree:true})});
