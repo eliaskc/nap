@@ -270,6 +270,7 @@ internal data class NapNotification(
   val only: List<String>? = null,
   val tag: String? = null,
   val quiet: Boolean? = null,
+  val image: String? = null,
 )
 
 /**

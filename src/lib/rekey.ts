@@ -117,9 +117,16 @@ const MAX_COPIED_FILES = 4_000;
 
 const copySiteObjects = Effect.fnUntraced(function* (fromSlug: string, toSlug: string) {
   const storage = yield* Storage;
-  const fromPrefix = `sites/${fromSlug}/`;
-  const toPrefix = `sites/${toSlug}/`;
-  const items = yield* storage.list(fromPrefix);
+  // Its versions, and its files (nap.files).
+  const prefixes = [`sites/`, `files/`].map((root) => ({
+    from: `${root}${fromSlug}/`,
+    to: `${root}${toSlug}/`,
+  }));
+  const items = (yield* Effect.forEach(prefixes, (prefix) =>
+    storage
+      .list(prefix.from)
+      .pipe(Effect.map((listed) => listed.map((item) => ({ ...item, prefix })))),
+  )).flat();
   if (items.length > MAX_COPIED_FILES) {
     return yield* fail(
       409,
@@ -129,7 +136,7 @@ const copySiteObjects = Effect.fnUntraced(function* (fromSlug: string, toSlug: s
   for (const item of items) {
     const source = yield* storage.get(item.key);
     if (!source) continue;
-    yield* storage.put(item.key.replace(fromPrefix, toPrefix), source.body, {
+    yield* storage.put(item.key.replace(item.prefix.from, item.prefix.to), source.body, {
       httpMetadata: Object.fromEntries(objectHeaders(source)),
       customMetadata: source.customMetadata,
     });

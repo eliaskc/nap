@@ -70,7 +70,7 @@ Read one with `curl -fsSL https://{{rootDomain}}/_nap/api/instructions/<topic>`.
 
 - `sites`: sites in detail, how artifacts run in their frame, and the Share button.
 - `source`: source repos for sites with a build step, and changing a site that has one.
-- `data`: collections that save JSON documents, with live updates (`nap.db`).
+- `data`: collections that save JSON documents, with live updates (`nap.db`), and files such as photos (`nap.files`).
 - `channels`: multiplayer, presence, and messages between the people on a page (`nap.channel`).
 - `voice`: a live audio call between the people on a page (`nap.voice`).
 - `fetch`: reading public APIs from other origins (`nap.fetch`).

@@ -3,9 +3,11 @@ import { Effect } from "effect";
 import { signedIn, slugify } from "~/lib/nap-server";
 import { rekeyNap } from "~/lib/rekey";
 import { isSameEmail } from "~/lib/site-access";
+import { deleteSiteFiles } from "~/lib/site-files";
 import { isReservedSlug } from "~/lib/uploads";
 import { Database, sql } from "~/server/database";
 import { fail, json } from "~/server/http";
+import { inBackground } from "~/server/platform";
 import { route } from "~/server/route";
 
 export const Route = createFileRoute("/api/sites/$slug")({
@@ -89,6 +91,8 @@ export const Route = createFileRoute("/api/sites/$slug")({
               sql("DELETE FROM nap_redirects WHERE site_slug = ?", slug),
             ]);
             if (results[3].changes === 0) return yield* fail(404, "Site not found");
+            // Its files (nap.files) go with it; the version files stay, as they always have.
+            yield* inBackground(deleteSiteFiles(slug), "Deleting a site's files failed");
 
             return json({ ok: true });
           }),

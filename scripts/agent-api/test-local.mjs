@@ -340,6 +340,34 @@ try {
     401,
     "data needs a token",
   );
+  // And its files (nap.files): /blobs with a token, /_nap/files on the site.
+  const blob = await call(`/_nap/api/naps/${direct.id}/blobs`, {
+    method: "POST",
+    headers: {
+      "content-type": "text/plain",
+      "x-nap-file-name": "n%C3%A4p.txt",
+      ...bearer(otherToken),
+    },
+    body: "hello file",
+  });
+  assert.equal(blob.status, 201, blob.text);
+  assert.equal(blob.json.file.name, "näp.txt");
+  assert.equal(blob.json.file.createdBy, OTHER);
+  const blobPath = `/_nap/api/naps/${direct.id}/blobs/${blob.json.file.id}`;
+  const read = await call(blobPath, { headers: bearer(directToken) });
+  assert.equal(read.status, 200, read.text);
+  assert.equal(read.text, "hello file");
+  assert.equal(read.headers["content-type"], "text/plain");
+  const onSite = await call(`/s/${direct.id}/_nap/files/${blob.json.file.id}`, {
+    headers: as(OWNER),
+  });
+  assert.equal(onSite.text, "hello file", "the same file on the site");
+  assert.equal((await call(blobPath)).status, 401, "files need a token");
+  assert.equal(
+    (await call(blobPath, { method: "DELETE", headers: bearer(directToken) })).status,
+    204,
+  );
+  assert.equal((await call(blobPath, { headers: bearer(directToken) })).status, 404);
   const welcome = await new Promise((resolve, reject) => {
     const socket = new WebSocket(
       `ws://localhost:${PORT}/_nap/api/naps/${direct.id}/channel/lobby`,

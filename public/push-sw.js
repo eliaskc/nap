@@ -15,6 +15,8 @@ self.addEventListener("push", (event) => {
       icon: "/android-chrome-192x192.png",
       badge: "/favicon-32x32.png",
       data: { url: message.url || "/" },
+      // A picture from the page (nap.notify's image), where the browser shows one.
+      ...(message.image ? { image: message.image } : {}),
       // A newer one with the same tag replaces it; a quiet one replaces it without a sound.
       ...(message.tag ? { tag: message.tag, renotify: !message.quiet } : {}),
       silent: Boolean(message.quiet),

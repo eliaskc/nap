@@ -11,6 +11,7 @@ import {
 } from "~/lib/push-crypto";
 import { googleToken } from "~/lib/google-auth";
 import { viewersAmong } from "~/lib/site-data";
+import { notificationImageUrl } from "~/lib/site-files";
 import { napConfig } from "~/nap.config";
 import { Database } from "~/server/database";
 import { failNoStore, isCrossSite, json, noStore, readJsonObject } from "~/server/http";
@@ -225,6 +226,8 @@ type Message = {
   tag?: string;
   /** Shown without a sound or a banner: only in the list. */
   quiet?: boolean;
+  /** A picture to show with it: a URL any device can fetch without signing in, for 7 days. */
+  image?: string;
 };
 
 /** APNs collapse ids are at most 64 bytes; longer tags go by their hash. */
@@ -299,10 +302,13 @@ const sendApns = Effect.fnUntraced(function* (
           },
           ...(message.quiet ? { "interruption-level": "passive" } : { sound: "default" }),
           "thread-id": message.source,
+          // The launcher's notification service extension downloads the image and attaches it.
+          ...(message.image ? { "mutable-content": 1 } : {}),
         },
         url: message.url,
         source: message.source,
         ...(message.tag ? { tag: message.tag } : {}),
+        ...(message.image ? { image: message.image } : {}),
       }),
     }),
   );
@@ -340,6 +346,7 @@ const sendFcm = Effect.fnUntraced(function* (
             notification: {
               title: message.subtitle ? `${message.title} · ${message.subtitle}` : message.title,
               ...(message.body ? { body: message.body } : {}),
+              ...(message.image ? { image: message.image } : {}),
             },
             // The launcher opens what a tap asks for from these, and shows the notification
             // itself while it is open.
@@ -351,6 +358,7 @@ const sendFcm = Effect.fnUntraced(function* (
               body: message.body,
               ...(message.tag ? { tag: message.tag } : {}),
               ...(message.quiet ? { quiet: "1" } : {}),
+              ...(message.image ? { image: message.image } : {}),
             },
             android: {
               priority: "high",
@@ -465,6 +473,8 @@ export const sendNotification = Effect.fn("sendNotification")(function* (
     only?: unknown;
     tag?: unknown;
     quiet?: unknown;
+    /** A file id of the sending site (nap.files): an image the notification shows. */
+    image?: unknown;
   },
 ) {
   if (!notificationsOn()) {
@@ -479,6 +489,20 @@ export const sendNotification = Effect.fn("sendNotification")(function* (
   if (!url) {
     return yield* failNoStore(400, `open must be a page on ${source.place.rootDomain}`);
   }
+  const imageId = typeof input.image === "string" ? input.image.trim() : "";
+  if (imageId && source.kind !== "site") {
+    return yield* failNoStore(
+      400,
+      "image is a file of a site: send the notification as that site (/_nap/api/naps/<id>/notify)",
+    );
+  }
+  if (input.image !== undefined && input.image !== null && typeof input.image !== "string") {
+    return yield* failNoStore(400, "image must be the id of an image file of this site");
+  }
+  const image =
+    imageId && source.kind === "site"
+      ? yield* notificationImageUrl(source.slug, imageId, source.place.localOrigin ?? null)
+      : null;
 
   const db = yield* Database;
   const key = sourceKey(source);
@@ -556,6 +580,7 @@ export const sendNotification = Effect.fn("sendNotification")(function* (
   const tag = readTag(input.tag);
   if (tag) message.tag = `${key}:${tag}`;
   if (input.quiet === true) message.quiet = true;
+  if (image) message.image = image;
   if (targets.length) {
     const keys = targets.some((target) => target.kind === "web") ? yield* vapidKeys() : null;
     yield* inBackground(

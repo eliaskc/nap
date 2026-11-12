@@ -8,6 +8,9 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.drawable.Icon
 import android.os.Build
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -18,6 +21,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.google.android.gms.tasks.Task
+import java.net.HttpURLConnection
+import java.net.URL
 import com.google.firebase.FirebaseApp
 import com.google.firebase.FirebaseOptions
 import com.google.firebase.messaging.FirebaseMessaging
@@ -271,11 +276,21 @@ object NapPush {
     val tap = PendingIntent.getActivity(
       context, source.hashCode(), launch, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
     )
+    // A picture (nap.notify's image): as Android shows it from the background, a thumbnail and
+    // the big picture when expanded. Firebase calls this off the main thread, so it can wait.
+    val picture = (data["image"] ?: message.notification?.imageUrl?.toString())?.let { picture(it) }
     val notification = Notification.Builder(context, if (data["quiet"] == "1") QUIET_CHANNEL else CHANNEL)
       .setSmallIcon(R.drawable.nap_notification)
       .setContentTitle(title)
       .setContentText(body)
-      .setStyle(Notification.BigTextStyle().bigText(body))
+      .setStyle(
+        if (picture != null) {
+          Notification.BigPictureStyle().bigPicture(picture).bigLargeIcon(null as Icon?).setSummaryText(body)
+        } else {
+          Notification.BigTextStyle().bigText(body)
+        },
+      )
+      .apply { picture?.let { setLargeIcon(it) } }
       .setAutoCancel(true)
       .setContentIntent(tap)
       .apply { data["subtitle"]?.takeIf { it.isNotEmpty() }?.let { setSubText(it) } }
@@ -285,6 +300,28 @@ object NapPush {
     val tag = data["tag"]?.ifEmpty { null } ?: source.ifEmpty { null }
     runCatching { context.getSystemService(NotificationManager::class.java).notify(tag, 0, notification) }
   }
+}
+
+/** A notification's picture from its https URL, or null when it cannot be had in a few seconds. */
+internal fun picture(url: String): Bitmap? {
+  if (!url.startsWith("https://")) return null
+  return runCatching {
+    val connection = URL(url).openConnection() as HttpURLConnection
+    connection.connectTimeout = 5_000
+    connection.readTimeout = 8_000
+    try {
+      if (connection.responseCode !in 200..299) return null
+      val bytes = connection.inputStream.use { it.readBytes() }
+      val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+      BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+      // Big enough for the expanded picture, small enough for a notification's memory.
+      var sample = 1
+      while (bounds.outWidth / (sample * 2) >= 1024 || bounds.outHeight / (sample * 2) >= 1024) sample *= 2
+      BitmapFactory.decodeByteArray(bytes, 0, bytes.size, BitmapFactory.Options().apply { inSampleSize = sample })
+    } finally {
+      connection.disconnect()
+    }
+  }.getOrNull()
 }
 
 /**

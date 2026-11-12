@@ -117,8 +117,15 @@ public struct AppView: View {
 - `site.rtc()`: ICE servers for WebRTC between people on the page (STUN, and TURN relays when
   the Nap has them).
 - `site.fetch(url)`: APIs the page lists in its nap.json, like nap.fetch.
-- `site.notify(title:body:open:skip:only:tag:quiet:)`: a notification to everyone else who can see the page (but `skip`, a list of emails; or `only` those), on their
-  phones and in their browsers, never to the sender. A newer one with the same `tag` replaces the older one; `quiet` has no sound or banner. Only on Naps with notifications; a few a
+- `site.files`: the page's files, like nap.files (photos and other blobs up to 15 MB, shared
+  with everyone who can see the page). `upload(data, type: "image/jpeg", name: "photo.jpg")`
+  returns a `NapFile` (`id`, `type`, `size`, `name`, `createdBy`, `createdAt`); keep its `id` in
+  a document. `data(id)` downloads one with the sign-in, `delete(id)` removes it. Files never
+  change, so cache what you show. Scale photos down before uploading.
+- `site.notify(title:body:open:skip:only:tag:quiet:image:)`: a notification to everyone else who can see the page (but `skip`, a list of emails; or `only` those), on their
+  phones and in their browsers, never to the sender. A newer one with the same `tag` replaces the older one; `quiet` has no sound or banner. `image`: the id of an
+  image file of the page (`files.upload`): the launcher's notification extension
+  (`Launcher/Notifications`) shows it as the thumbnail and when expanded. Only on Naps with notifications; a few a
   minute. Put `"site": "<id>"` in the app's app.json so a tap on that page's notifications opens
   the app. An app with no page uses `Nap.notify(title:body:open:app: "<its folder>")`.
 - `Nap.me()`, `Nap.people()`: names and looks. `Nap.account`: `signedIn`, `email`, `name`.

@@ -238,6 +238,11 @@ again on every send and closes the sockets of people who lost access. The
 client polls the changes feed when it connects and, more slowly, while
 connected, so a missed message only delays an update.
 
+Files (`nap.files`, `src/lib/site-files.ts`) are what pages and apps upload that is not JSON,
+such as photos: R2 objects at `files/<slug>/<id>`, with their type, name, and uploader as the
+object's metadata, and no rows in D1. Access is the collections' rule. A file never changes, so
+it is served as immutable. A rename copies them with the versions; deleting the site deletes them.
+
 A site can let another site's pages use some of its collections, in the `nap.json` of its live
 version (`"data": { "allow": { "<other site>": ["<collection>"] } }`). Those pages call
 `/_nap/data/@<site>/<collection>` on their own host, so Access works as for their own data; Nap
@@ -319,7 +324,10 @@ With `notifications: true`, a page calls `nap.notify({ title, body, open })` (`/
 it to everyone else who can view the page, never the sender: to browsers that turned it on
 (web push, with a VAPID key pair Nap makes and keeps in `nap_keys`, and payloads encrypted to
 each browser) and to phones with the app (APNs on iPhones, with the instance's key; Firebase
-Cloud Messaging on Android, as the Google service account). Where they go is
+Cloud Messaging on Android, as the Google service account). A notification can carry an image
+file of its page: every device gets a presigned R2 URL to it that lasts 7 days, since phones and
+push services cannot pass Access; on iPhones the launcher's notification service extension
+downloads and attaches it. Where they go is
 `push_targets`, by email; dead subscriptions and uninstalled apps are dropped when a push
 service says so. A tap opens a page on the Nap's own domains only. Each send is logged in
 `notifications`, which the per-sender and per-page rate limits count.
@@ -449,8 +457,9 @@ and copies nothing.
 
 ### R2 signing token
 
-Presigned URLs are signed with the S3 credentials of an R2 API token that has
-only "Workers R2 Storage Bucket Item Write" on `nap-sites`. Its access key id
+Presigned URLs (direct uploads, and the images of notifications) are signed with the S3
+credentials of an R2 API token that has only "Workers R2 Storage Bucket Item Write" on
+`nap-sites`. Its access key id
 is the token id, and its secret access key is the SHA-256 of the token value.
 Deploys read them from the config repository secrets `NAP_R2_ACCESS_KEY_ID` and
 `NAP_R2_SECRET_ACCESS_KEY`; a production plan or deploy fails without them. To
@@ -488,7 +497,7 @@ agent → local build → publish with sourceCommit → Nap checks the commit �
   commit, the same trust as any agent upload.
 - **Restores, renames, deletes.** A restore moves the live pointer and leaves
   the repo alone. A rename keeps the repo name. Deleting a site leaves its
-  repo, as it leaves its files in R2.
+  repo, as it leaves its version files in R2.
 
 Moving a site's source in: the owner's agent publishes with
 `publish.mjs --update <id> --source <dir>`, which creates the repo, pushes
@@ -565,7 +574,13 @@ Nap (reMarkable) → the zip as it came, with its SHA-256 → tablet (Nap token)
   with its token, checking the SHA-256.
 - **Apple's side.** Nap uploads builds, reads the App Store profile, turns
   capabilities on, and adds testers. The App ID, the profile, and the app
-  record are made by hand; Nap never creates them.
+  record are made by hand; Nap never creates them. App extensions in the
+  launcher (the notification service extension, `PlugIns/*.appex`) are the
+  exception: each needs its own App ID (`<bundle id>.<suffix>`) and App Store
+  profile, and Nap makes both through the App Store Connect API when they are
+  missing, with the app profile's certificates. The signer signs each
+  extension with its profile and only the basic entitlements, in the same run
+  as the app; an extension without a profile is left out of the build.
 - **Capabilities.** An app declares Info.plist usage strings and capabilities
   in its `app.json`; the template writes the capabilities into the launcher's
   Info.plist as `NapCapabilities`, by app. When it signs, Nap reads them (the

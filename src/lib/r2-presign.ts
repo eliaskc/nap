@@ -12,11 +12,8 @@ import type { R2Credentials } from "~/server/platform";
  * on the Nap bucket only. Its access key id is the token id; the secret access key is the SHA-256
  * of the token value.
  */
-export const presignPut = Effect.fnUntraced(function* (
-  credentials: R2Credentials,
-  key: string,
-  options: { contentType: string; contentLength: number; expiresInSeconds: number },
-) {
+/** The object's URL on R2's S3 API, with each key segment encoded as S3 signs it. */
+function objectUrl(credentials: R2Credentials, key: string) {
   const path = key
     .split("/")
     .map((segment) =>
@@ -26,9 +23,15 @@ export const presignPut = Effect.fnUntraced(function* (
       ),
     )
     .join("/");
-  const url = new URL(
-    `https://${credentials.accountId}.r2.cloudflarestorage.com/${credentials.bucket}/${path}`,
-  );
+  return `https://${credentials.accountId}.r2.cloudflarestorage.com/${credentials.bucket}/${path}`;
+}
+
+export const presignPut = Effect.fnUntraced(function* (
+  credentials: R2Credentials,
+  key: string,
+  options: { contentType: string; contentLength: number; expiresInSeconds: number },
+) {
+  const url = new URL(objectUrl(credentials, key));
   url.searchParams.set("X-Amz-Expires", String(options.expiresInSeconds));
   const headers = {
     "content-type": options.contentType,
@@ -51,4 +54,28 @@ export const presignPut = Effect.fnUntraced(function* (
     url: signed.url.toString(),
     headers: { "content-type": options.contentType } as Record<string, string>,
   };
+});
+
+/**
+ * A presigned GET of one object, for someone who cannot sign in, such as a phone showing a
+ * notification's image. Anyone with the URL can read the object until it expires (at most 7 days).
+ */
+export const presignGet = Effect.fnUntraced(function* (
+  credentials: R2Credentials,
+  key: string,
+  expiresInSeconds: number,
+) {
+  const url = new URL(objectUrl(credentials, key));
+  url.searchParams.set("X-Amz-Expires", String(Math.min(expiresInSeconds, 604_800)));
+  const signer = new AwsV4Signer({
+    method: "GET",
+    url: url.toString(),
+    accessKeyId: credentials.accessKeyId,
+    secretAccessKey: credentials.secretAccessKey,
+    service: "s3",
+    region: "auto",
+    signQuery: true,
+  });
+  const signed = yield* Effect.promise(() => signer.sign());
+  return signed.url.toString();
 });

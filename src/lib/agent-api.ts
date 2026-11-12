@@ -33,6 +33,7 @@ import { createSource, describeSource, mintSourceToken, SOURCE_BRANCH } from "~/
 import { listVersions, restoreVersion } from "~/lib/versions";
 import { handleAppsApi } from "~/lib/apps";
 import { handleSiteDataRequest } from "~/lib/site-data";
+import { handleSiteFilesRequest } from "~/lib/site-files";
 import { findPerson } from "~/lib/profiles";
 import { peopleResponse } from "~/lib/welcome";
 import { handleLiveRequest, publishChange } from "~/lib/site-live";
@@ -306,6 +307,12 @@ export const handleAgentApi = Effect.fn("handleAgentApi")(function* (request: Re
     return yield* handleSiteDataRequest(nap.slug, request, rest.slice("/data/".length), {
       frameIdentity: agent,
       onChange: (collection, change) => publishChange(nap.slug, collection, change),
+    });
+  }
+  // The nap's files (nap.files), as /_nap/files on its host. Not /files: that is a version's.
+  if (rest === "/blobs" || rest.startsWith("/blobs/")) {
+    return yield* handleSiteFilesRequest(nap.slug, request, rest.slice("/blobs".length), {
+      identity: agent,
     });
   }
   if (rest === "/live") return yield* handleLiveRequest(nap.slug, request, agent);

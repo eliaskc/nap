@@ -244,6 +244,38 @@ export interface NapFetchOptions {
   signal?: AbortSignal;
 }
 
+// Files (nap.files)
+
+/** A file of the site, from nap.files.upload. */
+export interface NapFile {
+  /** Random, 24 lowercase letters and digits. Keep it in a document to find the file again. */
+  id: string;
+  /** Its content type, such as "image/jpeg". */
+  type: string;
+  /** In bytes. */
+  size: number;
+  name: string | null;
+  /** The email of whoever uploaded it. */
+  createdBy: string;
+  createdAt: string;
+}
+
+export interface NapFileUploadOptions {
+  /** What the file is called. Default: the File's own name, if it has one. */
+  name?: string;
+}
+
+export interface NapFiles {
+  /**
+   * Stores a file (up to 15 MB) for this site: everyone who can view the site can read and delete
+   * it. A file never changes; upload a new one instead.
+   */
+  upload(file: Blob, options?: NapFileUploadOptions): Promise<NapFile>;
+  /** A URL of the file for this page, such as for <img src>. It works for people who can view the site. */
+  url(id: string): string;
+  delete(id: string): Promise<void>;
+}
+
 // Notifications (nap.notify)
 
 export interface NapNotification {
@@ -265,6 +297,11 @@ export interface NapNotification {
   tag?: string;
   /** No sound or banner: it only goes in the list (or quietly replaces one with its tag). */
   quiet?: boolean;
+  /**
+   * A picture to show with it: the id of an image file of this site (nap.files.upload). Phones
+   * show it as a thumbnail and when expanded; browsers that show images in notifications show it.
+   */
+  image?: string;
 }
 
 export interface Nap {
@@ -274,6 +311,8 @@ export interface Nap {
       options?: NapCollectionOptions,
     ): NapCollection<T>;
   };
+  /** The site's files: photos and other blobs, up to 15 MB each. */
+  files: NapFiles;
   channel<S = unknown, M = unknown>(name: string): NapChannel<S, M>;
   voice<M = unknown>(name?: string): NapVoiceCall<M>;
   /** Fetches a URL through Nap, for APIs that do not allow other origins. The page lists the hosts in nap.json ("fetch"). */

@@ -48,6 +48,9 @@ class NapSite internal constructor(val id: String) {
   /** The page's collections, like nap.db on the web. */
   val db: NapDB get() = NapDB(this)
 
+  /** The page's files (photos and other blobs), like nap.files on the web. */
+  val files: NapFiles get() = NapFiles(this)
+
   /** A channel of the page, like nap.channel(name), with any JSON as messages. Call `leave()` when done. */
   fun channel(name: String): NapChannel<JsonElement> = NapChannel(this, name, JsonElement.serializer())
 
@@ -102,7 +105,8 @@ class NapSite internal constructor(val id: String) {
    * notifications on. Never to the sender. `open` is where a tap goes: a path on the page's site
    * (default its home) or a URL on this Nap. `skip`: emails of people to leave out too; `only`:
    * the only people it may go to. `tag`: a newer one with the same tag replaces it on every
-   * device. `quiet`: no sound or banner, only in the list. Returns how many people it went to.
+   * device. `quiet`: no sound or banner, only in the list. `image`: the id of an image file of
+   * this page (`files.upload`), shown with it. Returns how many people it went to.
    */
   suspend fun notify(
     title: String,
@@ -112,12 +116,13 @@ class NapSite internal constructor(val id: String) {
     only: List<String>? = null,
     tag: String? = null,
     quiet: Boolean = false,
+    image: String? = null,
   ): Int {
     val sent = Nap.request(
       "POST", url("notify"), JsonObject.serializer(),
       NapJson.encodeToJsonElement(
         NapNotification.serializer(),
-        NapNotification(title, body, open, skip = skip.ifEmpty { null }, only = only, tag = tag, quiet = quiet.takeIf { it }),
+        NapNotification(title, body, open, skip = skip.ifEmpty { null }, only = only, tag = tag, quiet = quiet.takeIf { it }, image = image),
       ),
     )
     return (sent["sent"] as? JsonPrimitive)?.intOrNull ?: 0

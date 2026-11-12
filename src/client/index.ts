@@ -1,6 +1,6 @@
 /**
  * window.nap, the client Nap serves to every site and artifact at /_nap/client.js: collections
- * (nap.db), channels, voice calls, nap.fetch, nap.notify, nap.me, nap.people, avatars (<nap-avatar>), and the
+ * (nap.db), files (nap.files), channels, voice calls, nap.fetch, nap.notify, nap.me, nap.people, avatars (<nap-avatar>), and the
  * deployment's extensions (nap.<name>, see nap.extension.ts). It is built into one classic script
  * (see vite.config.ts), so pages load it with a plain <script> tag. Its types are api.d.ts,
  * served at /_nap/client.d.ts.
@@ -11,6 +11,7 @@ import { collection, me } from "./db";
 import { NapError } from "./errors";
 import { extensionApis } from "./extensions";
 import { proxyFetch } from "./fetch";
+import { remove as deleteFile, upload as uploadFile, url as fileUrl } from "./files";
 import { canNotify, notify } from "./notify";
 import { avatar, defineAvatarElement, looks, people } from "./people";
 import { voice } from "./voice";
@@ -24,6 +25,7 @@ const nap: Nap = Object.freeze({
   notify,
   canNotify,
   db: Object.freeze({ collection }),
+  files: Object.freeze({ upload: uploadFile, url: fileUrl, delete: deleteFile }),
   me,
   people,
   avatar,

@@ -35,6 +35,9 @@ public final class NapSite {
   /// The page's collections, like nap.db on the web.
   public var db: NapDB { NapDB(site: self) }
 
+  /// The page's files (photos and other blobs), like nap.files on the web.
+  public var files: NapFiles { NapFiles(site: self) }
+
   /// A channel of the page, like nap.channel(name), with any JSON as messages. Call `leave()`
   /// when done.
   public func channel(_ name: String) -> NapChannel<JSONValue> { NapChannel(site: self, name: name) }
@@ -83,18 +86,19 @@ public final class NapSite {
   /// site (default its home) or a URL on this Nap. On phones with this launcher, a tap opens the
   /// app whose app.json names this site. `skip`: emails of people to leave out too; `only`: the
   /// only people it may go to. `tag`: a newer one with the same tag replaces it on every device.
-  /// `quiet`: no sound or banner, only in the list. Resolves with how many people it went to.
+  /// `quiet`: no sound or banner, only in the list. `image`: the id of an image file of this page
+  /// (`files.upload`), shown with it. Resolves with how many people it went to.
   @discardableResult
   public func notify(
     title: String, body: String? = nil, open: String? = nil, skip: [String] = [], only: [String]? = nil,
-    tag: String? = nil, quiet: Bool = false
+    tag: String? = nil, quiet: Bool = false, image: String? = nil
   ) async throws -> Int {
     struct Sent: Decodable { var sent: Int }
     let sent: Sent = try await Nap.request(
       "POST", url("notify"),
       body: NapNotification(
         title: title, body: body, open: open, skip: skip.isEmpty ? nil : skip, only: only, tag: tag,
-        quiet: quiet ? true : nil))
+        quiet: quiet ? true : nil, image: image))
     return sent.sent
   }
 

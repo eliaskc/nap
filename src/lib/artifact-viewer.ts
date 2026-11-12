@@ -8,6 +8,7 @@ import { ARTIFACT_PATH, isLocalHostname, napUrl, type NapPlace } from "~/lib/nap
 import { handleNotifyRequest } from "~/lib/notifications";
 import { handleSiteAccessRequest } from "~/lib/site-access";
 import { handleSiteDataRequest } from "~/lib/site-data";
+import { handleSiteFilesRequest } from "~/lib/site-files";
 import { serveSiteDataClient, serveVoiceEngine } from "~/lib/site-data-client";
 import { handleLiveRequest, publishChange } from "~/lib/site-live";
 import { handleChannelRequest } from "~/lib/site-channel";
@@ -222,7 +223,7 @@ export const handleFrameRequest = Effect.fn("handleFrameRequest")(function* (req
         headers: {
           "access-control-allow-methods": "GET, HEAD, POST, PUT, PATCH, DELETE",
           "access-control-allow-headers":
-            "content-type, if-match, if-none-match, x-nap-fetch-headers",
+            "content-type, if-match, if-none-match, x-nap-fetch-headers, x-nap-file-name",
           "access-control-max-age": "600",
         },
       }),
@@ -283,6 +284,15 @@ export const handleFrameRequest = Effect.fn("handleFrameRequest")(function* (req
         handleSiteDataRequest(slug, request, path, {
           frameIdentity: identity,
           onChange: (collection, change) => publishChange(slug, collection, change),
+        }),
+      ),
+    );
+  }
+  if (rest === "/_nap/files" || rest.startsWith("/_nap/files/")) {
+    return withCors(
+      yield* recoverHttpError(
+        handleSiteFilesRequest(frame.slug, request, rest.slice("/_nap/files".length), {
+          identity,
         }),
       ),
     );

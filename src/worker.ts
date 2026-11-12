@@ -19,6 +19,7 @@ import { handleNotifyRequest } from "~/lib/notifications";
 import { handleChannelRequest } from "~/lib/site-channel";
 import { handleRtcRequest } from "~/lib/site-rtc";
 import { handleSiteFetch } from "~/lib/site-fetch";
+import { handleSiteFilesRequest } from "~/lib/site-files";
 import { EXTENSIONS } from "~/lib/extension-registry";
 import { handleExtensionRequest } from "~/lib/extensions";
 import { resolveHost, serveUploadedSite } from "~/lib/site-serving";
@@ -114,6 +115,10 @@ const routeRequest = Effect.fn("routeRequest")(function* (
     if (localDataMatch) {
       return yield* siteData(localDataMatch[1], request, localDataMatch[2]);
     }
+    const localFilesMatch = url.pathname.match(/^\/s\/([^/]+)\/_nap\/files(?:\/(.*))?$/);
+    if (localFilesMatch) {
+      return yield* handleSiteFilesRequest(localFilesMatch[1], request, localFilesMatch[2] ?? "");
+    }
     const localLiveMatch = url.pathname.match(/^\/s\/([^/]+)\/_nap\/live$/);
     if (localLiveMatch) {
       return yield* handleLiveRequest(localLiveMatch[1], request, getIdentity(request));
@@ -190,6 +195,9 @@ const routeRequest = Effect.fn("routeRequest")(function* (
     }
     if (url.pathname.startsWith("/_nap/data/")) {
       return yield* siteData(slug, request, url.pathname.slice("/_nap/data/".length));
+    }
+    if (url.pathname === "/_nap/files" || url.pathname.startsWith("/_nap/files/")) {
+      return yield* handleSiteFilesRequest(slug, request, url.pathname.slice("/_nap/files".length));
     }
     if (url.pathname === "/_nap/live") {
       return yield* handleLiveRequest(slug, request, getIdentity(request));

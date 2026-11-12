@@ -310,3 +310,44 @@ test("fetch: the page's headers travel apart from the browser's", async () => {
     globalThis.fetch = original;
   }
 });
+
+test("files: upload sends the raw file with its type and name, url and delete use its id", async () => {
+  const nap = page({ href: "http://localhost:3000/s/quiz/" });
+  const original = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async (url, init) => {
+    calls.push({ url: String(url), init });
+    if (init.method === "DELETE") {
+      return String(url).endsWith("/missing")
+        ? Response.json({ error: "File not found" }, { status: 404 })
+        : new Response(null, { status: 204 });
+    }
+    return Response.json(
+      { file: { id: "a".repeat(24), type: "image/jpeg", size: 3, name: "kväll.jpg" } },
+      { status: 201 },
+    );
+  };
+  try {
+    const photo = new File([new Uint8Array([1, 2, 3])], "kväll.jpg", { type: "image/jpeg" });
+    const file = await nap.files.upload(photo);
+    assert.equal(file.id, "a".repeat(24));
+    assert.equal(calls[0].url, "/s/quiz/_nap/files");
+    assert.equal(calls[0].init.method, "POST");
+    assert.equal(calls[0].init.body, photo);
+    assert.equal(calls[0].init.headers["content-type"], "image/jpeg");
+    assert.equal(calls[0].init.headers["x-nap-file-name"], "kv%C3%A4ll.jpg");
+
+    await nap.files.upload(new Blob(["x"]), { name: "notes" });
+    assert.equal(calls[1].init.headers["content-type"], "application/octet-stream");
+    assert.equal(calls[1].init.headers["x-nap-file-name"], "notes");
+
+    assert.equal(nap.files.url(file.id), `/s/quiz/_nap/files/${file.id}`);
+    await nap.files.delete(file.id);
+    assert.equal(calls[2].init.method, "DELETE");
+    await assert.rejects(nap.files.delete("missing"), { name: "NapError", status: 404 });
+  } finally {
+    globalThis.fetch = original;
+  }
+  const site = page({ href: "https://quiz.nap.test/" });
+  assert.equal(site.files.url("b".repeat(24)), `/_nap/files/${"b".repeat(24)}`);
+});

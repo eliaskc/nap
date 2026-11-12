@@ -471,7 +471,10 @@ const readJsonDocument = Effect.fnUntraced(function* (request: Request) {
 });
 
 /** The whole stream, or null (and the stream cancelled) once it passes `maxBytes`. */
-async function readLimited(reader: ReadableStreamDefaultReader<Uint8Array>, maxBytes: number) {
+export async function readLimited(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  maxBytes: number,
+) {
   const chunks: Uint8Array[] = [];
   let size = 0;
   while (true) {

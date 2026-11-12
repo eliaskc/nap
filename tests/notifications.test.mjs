@@ -524,3 +524,114 @@ test("POST /_nap/notify: only people who can see the page, and not from other si
     assert.equal((await post({ "sec-fetch-site": "cross-site" })).status, 403);
   });
 });
+
+test("an image file of the page goes to every device as a presigned URL", async () => {
+  const firebase = {
+    projectId: "gg-play",
+    senderId: "123",
+    appId: "1:123:android:ab",
+    apiKey: "k",
+  };
+  await withConfig(
+    {
+      notifications: true,
+      apps: { ...IOS, android: { packageName: "com.x.app", testersUrl: null, firebase } },
+    },
+    async () => {
+      const { env, site } = setup();
+      site("quiz", "everyone");
+      const id = "a".repeat(24);
+      const objects = {
+        [`files/quiz/${id}`]: "image/jpeg",
+        [`files/quiz/${"t".repeat(24)}`]: "text/plain",
+      };
+      env.SITES = {
+        async head(key) {
+          return objects[key] ? { size: 3, httpMetadata: { contentType: objects[key] } } : null;
+        },
+      };
+      Object.assign(env, {
+        NAP_R2_ACCOUNT_ID: "acct",
+        NAP_R2_BUCKET: "nap-sites",
+        NAP_R2_ACCESS_KEY_ID: "key",
+        NAP_R2_SECRET_ACCESS_KEY: "secret",
+      });
+      const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
+      env.NAP_PLAY_SERVICE_ACCOUNT = JSON.stringify({
+        client_email: "nap@gg-play.iam.gserviceaccount.com",
+        private_key: privateKey.export({ type: "pkcs8", format: "pem" }),
+      });
+      const ann = browser("https://push.example/ann");
+      await runNap(env, saveWebTarget("ann@x.com", ann.subscription, "Chrome"));
+      await runNap(
+        env,
+        saveApnsTarget(
+          "ann@x.com",
+          { token: "ab".repeat(32), environment: "production" },
+          "iPhone",
+        ),
+      );
+      await runNap(env, saveFcmTarget("ann@x.com", "fcm-token-ann-0123456789", "Pixel"));
+      const pushes = capture();
+      const wrapped = globalThis.fetch;
+      globalThis.fetch = async (url, init) =>
+        String(url).startsWith("https://oauth2.googleapis.com/")
+          ? Response.json({ access_token: "ya29.fcm", expires_in: 3600 })
+          : wrapped(url, init);
+      try {
+        await failsWith(
+          runNap(env, sendNotification(SITE("quiz"), ME, { title: "Hi", image: "t".repeat(24) })),
+          /image file of this site/,
+        );
+        await failsWith(
+          runNap(
+            env,
+            sendNotification({ kind: "app", app: null, place: PLACE }, ME, {
+              title: "Hi",
+              image: id,
+            }),
+          ),
+          /file of a site/,
+        );
+        assert.equal(pushes.sent.length, 0);
+        await runNap(env, sendNotification(SITE("quiz"), ME, { title: "Quiz night", image: id }));
+      } finally {
+        globalThis.fetch = wrapped;
+        pushes.restore();
+      }
+      const web = ann.decrypt(pushes.sent.find((p) => p.url === "https://push.example/ann").body);
+      const image = new URL(web.image);
+      assert.equal(
+        image.origin + image.pathname,
+        `https://acct.r2.cloudflarestorage.com/nap-sites/files/quiz/${id}`,
+      );
+      assert.equal(image.searchParams.get("X-Amz-Expires"), "604800");
+      const apns = JSON.parse(pushes.sent.find((p) => p.url.includes("apple.com")).body);
+      assert.equal(apns.aps["mutable-content"], 1);
+      assert.equal(apns.image, web.image);
+      const fcm = JSON.parse(pushes.sent.find((p) => p.url.includes("fcm.googleapis")).body);
+      assert.equal(fcm.message.notification.image, web.image);
+      assert.equal(fcm.message.data.image, web.image);
+    },
+  );
+});
+
+test("without an image, APNs gets no mutable-content", async () => {
+  await withConfig({ notifications: true, apps: IOS }, async () => {
+    const { env, site } = setup();
+    site("quiz", "everyone");
+    await runNap(
+      env,
+      saveApnsTarget("ann@x.com", { token: "ab".repeat(32), environment: "production" }, "iPhone"),
+    );
+    const pushes = capture();
+    try {
+      await runNap(env, sendNotification(SITE("quiz"), ME, { title: "Hi" }));
+    } finally {
+      pushes.restore();
+    }
+    const apns = JSON.parse(pushes.sent[0].body);
+    assert.equal(apns.aps["mutable-content"], undefined);
+    assert.equal(apns.image, undefined);
+  });
+});
