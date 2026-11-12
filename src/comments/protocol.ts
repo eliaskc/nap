@@ -13,8 +13,6 @@ export type FrameAnchor = {
   /** Where the text starts in the page text. Orders threads. */
   start: number;
   rects: Array<Rect>;
-  /** The right edge of the text's block, for pins in the margin. */
-  blockRight: number | null;
 };
 
 export type FrameState = {

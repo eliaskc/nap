@@ -2,6 +2,8 @@ import {
   ArrowUpIcon,
   CheckIcon,
   ChevronLeftIcon,
+  EyeIcon,
+  EyeOffIcon,
   MessageSquareIcon,
   MessageSquarePlusIcon,
   RotateCcwIcon,
@@ -12,7 +14,6 @@ import {
   useMemo,
   useRef,
   useState,
-  type CSSProperties,
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
@@ -25,17 +26,17 @@ import { commentsApi, type Message, type Thread } from "./api";
 import type { FrameAnchor, FrameState, FromBar, FromFrame } from "./protocol";
 
 /**
- * Comments that float over an artifact. Commented text gets a soft highlight, and a pin with the
- * first commenter's avatar sits in the margin next to it. Hovering the text or the pin previews
- * the thread; clicking opens it with a reply box. Selecting text shows a small button to comment.
- * The Comments button in the bar lists every thread on the page, including comments on the
+ * Comments that float over an artifact. Commented text gets a soft highlight and nothing else:
+ * there is no reliable margin to put markers in, and markers over the text would cover it.
+ * Hovering the highlight previews the thread below it; clicking opens it with a reply box.
+ * Selecting text shows a small button to comment. The eye button in the bar hides the
+ * highlights. The Comments button lists every thread on the page, including comments on the
  * whole page, comments whose text is gone, and resolved ones.
  *
  * This runs in the Nap bar at /artifact/<slug>. The artifact is in a sandboxed frame with an
  * opaque origin, so this page cannot read it. The comments script in the frame (frame.ts) finds
- * the text and reports rectangles, the selection, hovers, and clicks with postMessage. Pins and
- * popovers live here, above the frame, and only this page calls the comment API. Pins and
- * popovers follow the artifact's own background (light or dark); the bar button follows the
+ * the text and reports rectangles, the selection, hovers, and clicks with postMessage. Popovers
+ * live here, above the frame, and only this page calls the comment API. Popovers follow the artifact's own background (light or dark); the bar button follows the
  * system, like the bar.
  */
 
@@ -43,10 +44,8 @@ const SHORTCUT = /Mac|iPhone|iPad/.test(navigator.userAgent) ? "⌘⌥M" : "Ctrl
 const POLL_MS = 30_000;
 const HOVER_OPEN_MS = 150;
 const HOVER_CLOSE_MS = 400;
-const PIN = 24;
-/** Width of a pin docked to the frame's edge when the artifact has no margin. */
-const DOCKED = 8;
 const DRAFT = "__draft";
+const VISIBLE_KEY = "nap:comments:visible";
 
 type Draft = { quote: string; prefix: string; suffix: string; path: string };
 type Open = { kind: "thread"; id: string; pinned: boolean } | { kind: "draft" } | null;
@@ -57,7 +56,7 @@ export type CommentsConfig = {
   frame: HTMLIFrameElement;
   /** Where the bar button goes. */
   slot: HTMLElement;
-  /** The element around the frame. Pins are drawn over it. */
+  /** The element around the frame. Popover anchors are drawn over it. */
   stage: HTMLElement;
   /** Where popovers go. Its theme follows the artifact. */
   layer: HTMLElement;
@@ -104,7 +103,15 @@ export function CommentsApp({ api: apiPath, frame, slot, stage, layer }: Comment
   // In the list: a thread id, "new" for a comment on the page, or null for the list.
   const [listDetail, setListDetail] = useState<string | null>(null);
   const [showResolved, setShowResolved] = useState(false);
-  const pins = useRef(new Map<string, HTMLElement>());
+  const [visible, setVisibleState] = useState(() => readVisible());
+  const setVisible = (next: boolean) => {
+    setVisibleState(next);
+    try {
+      localStorage.setItem(VISIBLE_KEY, next ? "1" : "0");
+    } catch {}
+    if (!next && openRef.current?.kind === "thread") setOpen(null);
+  };
+  const highlights = useRef(new Map<string, HTMLElement>());
   const draftAnchor = useRef<HTMLSpanElement>(null);
   const timers = useRef({ open: 0, close: 0 });
 
@@ -135,8 +142,11 @@ export function CommentsApp({ api: apiPath, frame, slot, stage, layer }: Comment
   const here = useMemo(() => threads.filter((thread) => thread.path === path), [threads, path]);
   const openId = open?.kind === "thread" ? open.id : null;
 
-  // Tell the frame which quotes to find and highlight: open threads on this page.
-  const wanted = useMemo(() => here.filter((thread) => !thread.resolved && thread.quote), [here]);
+  // Tell the frame which quotes to find and highlight: open threads on this page, unless hidden.
+  const wanted = useMemo(
+    () => (visible ? here.filter((thread) => !thread.resolved && thread.quote) : []),
+    [here, visible],
+  );
   const showDraft = Boolean(draft && open?.kind === "draft");
   useEffect(() => {
     send({
@@ -273,6 +283,7 @@ export function CommentsApp({ api: apiPath, frame, slot, stage, layer }: Comment
       replace(created);
       setDraft(null);
       setText("draft", "");
+      setVisible(true);
       setOpen({ kind: "thread", id: created.id, pinned: true });
     });
 
@@ -306,35 +317,31 @@ export function CommentsApp({ api: apiPath, frame, slot, stage, layer }: Comment
   // The frame fills the stage, so the frame's viewport coordinates are the stage's.
   const width = frameState?.width ?? frame.clientWidth;
   const height = frame.clientHeight;
-  const pinSpots = useMemo(() => {
-    const spots: Array<{ thread: Thread; left: number; top: number; docked: boolean }> = [];
+  const highlightBoxes = useMemo(() => {
+    const boxes: Array<{ id: string; left: number; top: number; width: number; height: number }> =
+      [];
     for (const thread of floating) {
-      const anchor = anchors.get(thread.id)!;
-      const first = anchor.rects[0];
-      if (!first) continue;
-      // In the margin to the right of the text's block, level with its first line.
-      const right = anchor.blockRight ?? first.left + first.width;
-      // No margin (the text runs to the edge): dock a slim tab to the frame's edge instead of
-      // covering the text. The highlight still opens the thread on hover and click.
-      const docked = right + 12 + PIN + 8 > width;
-      const left = docked ? width - DOCKED : Math.max(4, right + 12);
-      let top = first.top + (first.height - PIN) / 2;
-      while (spots.some((spot) => Math.abs(spot.left - left) < 40 && Math.abs(spot.top - top) < 28))
-        top += 28;
-      if (top < -PIN || top > height) continue;
-      spots.push({ thread, left, top, docked });
+      const rects = anchors.get(thread.id)!.rects;
+      if (!rects.length) continue;
+      const top = Math.min(...rects.map((r) => r.top));
+      const bottom = Math.max(...rects.map((r) => r.top + r.height));
+      const left = Math.min(...rects.map((r) => r.left));
+      const right = Math.max(...rects.map((r) => r.left + r.width));
+      if (bottom < 0 || top > height) continue;
+      boxes.push({ id: thread.id, left, top, width: right - left, height: bottom - top });
     }
-    return spots;
-  }, [floating, anchors, width, height]);
+    return boxes;
+  }, [floating, anchors, height]);
 
   const selectionEnd = selection?.rects[selection.rects.length - 1];
   const draftRects = showDraft ? anchors.get(DRAFT)?.rects : undefined;
   const draftRect = draftRects?.[draftRects.length - 1];
   const openThread = openId ? here.find((thread) => thread.id === openId) : undefined;
-  // Next to the pin when there is room, else below it, so the card never covers the text.
-  const openSpot = pinSpots.find((spot) => spot.thread.id === openId);
-  const roomRight = !openSpot || openSpot.left + PIN + 8 + 336 <= stage.clientWidth;
-  const anchorReady = open?.kind === "draft" ? Boolean(draftRect) : Boolean(openSpot);
+  // Cards open below the highlighted text (above when there is no room), never over it.
+  const anchorReady =
+    open?.kind === "draft"
+      ? Boolean(draftRect)
+      : highlightBoxes.some((box) => box.id === openId);
 
   const openCount = here.filter((thread) => !thread.resolved).length;
   const resolvedCount = here.length - openCount;
@@ -344,10 +351,21 @@ export function CommentsApp({ api: apiPath, frame, slot, stage, layer }: Comment
       (a, b) => order(a, anchors) - order(b, anchors) || a.createdAt.localeCompare(b.createdAt),
     );
   const detail = listDetail && listDetail !== "new" ? here.find((t) => t.id === listDetail) : null;
+  // While hidden the frame looks for nothing, so no text counts as gone.
   const isLost = (thread: Thread) =>
-    Boolean(thread.quote) && !thread.resolved && !anchors.has(thread.id);
+    visible && Boolean(thread.quote) && !thread.resolved && !anchors.has(thread.id);
 
   const openFromList = (thread: Thread) => {
+    if (!visible) {
+      // Show the highlights again; the frame reports where the text is a moment later.
+      setVisible(true);
+      if (thread.quote && !thread.resolved) {
+        setListOpen(false);
+        setTimeout(() => send({ type: "nap:comments:scroll", id: thread.id }), 120);
+        setTimeout(() => pin(thread.id), 240);
+        return;
+      }
+    }
     if (!anchors.has(thread.id) || thread.resolved) return setListDetail(thread.id);
     setListOpen(false);
     send({ type: "nap:comments:scroll", id: thread.id });
@@ -374,6 +392,17 @@ export function CommentsApp({ api: apiPath, frame, slot, stage, layer }: Comment
     <>
       {createPortal(
         <div className={cn("contents", systemDark && "dark")}>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            className="text-inherit"
+            aria-pressed={!visible}
+            title={visible ? "Hide comments on the page" : "Show comments on the page"}
+            aria-label={visible ? "Hide comments on the page" : "Show comments on the page"}
+            onClick={() => setVisible(!visible)}
+          >
+            {visible ? <EyeIcon /> : <EyeOffIcon />}
+          </Button>
           <Popover
             open={listOpen}
             onOpenChange={(next) => {
@@ -479,24 +508,15 @@ export function CommentsApp({ api: apiPath, frame, slot, stage, layer }: Comment
             pageDark && "dark",
           )}
         >
-          {pinSpots.map(({ thread, left, top, docked }) => (
-            <CommentPin
-              key={thread.id}
-              thread={thread}
-              docked={docked}
-              style={{ left, top }}
-              active={thread.id === openId}
+          {highlightBoxes.map(({ id, ...box }) => (
+            <span
+              key={id}
               ref={(element) => {
-                if (element) pins.current.set(thread.id, element);
-                else pins.current.delete(thread.id);
+                if (element) highlights.current.set(id, element);
+                else highlights.current.delete(id);
               }}
-              onEnter={() => hover(thread.id)}
-              onLeave={leave}
-              onClick={() =>
-                open?.kind === "thread" && open.id === thread.id && open.pinned
-                  ? setOpen(null)
-                  : pin(thread.id)
-              }
+              className="absolute"
+              style={box}
             />
           ))}
           {selectionEnd && !draftRect && (
@@ -552,11 +572,11 @@ export function CommentsApp({ api: apiPath, frame, slot, stage, layer }: Comment
             open?.kind === "draft"
               ? draftAnchor.current
               : openId
-                ? (pins.current.get(openId) ?? null)
+                ? (highlights.current.get(openId) ?? null)
                 : null
           }
-          side={open?.kind === "draft" || !roomRight ? "bottom" : "right"}
-          align={open?.kind === "draft" || roomRight ? "start" : "end"}
+          side="bottom"
+          align="start"
           sideOffset={8}
           collisionPadding={8}
           initialFocus={false}
@@ -602,79 +622,6 @@ function PersonAvatar({
         {initials(name || email)}
       </AvatarFallback>
     </Avatar>
-  );
-}
-
-function CommentPin({
-  thread,
-  docked,
-  style,
-  active,
-  ref,
-  onEnter,
-  onLeave,
-  onClick,
-}: {
-  thread: Thread;
-  docked: boolean;
-  style: CSSProperties;
-  active: boolean;
-  ref: (element: HTMLButtonElement | null) => void;
-  onEnter: () => void;
-  onLeave: () => void;
-  onClick: () => void;
-}) {
-  const replies = thread.replies.length;
-  const label = `Comment by ${thread.author.name}${replies ? `, ${replies} ${replies === 1 ? "reply" : "replies"}` : ""}: ${thread.body}`;
-  if (docked) {
-    // A tab on the frame's edge: a strip in the commenter's color that widens on hover.
-    return (
-      <button
-        ref={ref}
-        type="button"
-        aria-label={label}
-        className="group pointer-events-auto absolute flex h-6 w-2 justify-end"
-        style={style}
-        onMouseEnter={onEnter}
-        onMouseLeave={onLeave}
-        onClick={onClick}
-      >
-        <span
-          className={cn(
-            "h-full w-1 rounded-l-full shadow-sm ring-1 ring-popover transition-all group-hover:w-2",
-            active && "w-2",
-          )}
-          style={{ background: colorFor(thread.author.email) }}
-        />
-      </button>
-    );
-  }
-  return (
-    <button
-      ref={ref}
-      type="button"
-      aria-label={label}
-      className="group pointer-events-auto absolute flex items-center gap-1"
-      style={style}
-      onMouseEnter={onEnter}
-      onMouseLeave={onLeave}
-      onClick={onClick}
-    >
-      <span
-        className={cn(
-          "flex size-6 items-center justify-center rounded-full rounded-bl-[3px] text-[10px] font-semibold text-white shadow-md ring-2 ring-popover transition-transform group-hover:scale-110",
-          active && "scale-110 ring-amber-400",
-        )}
-        style={{ background: colorFor(thread.author.email) }}
-      >
-        {initials(thread.author.name || thread.author.email)}
-      </span>
-      {replies > 0 && (
-        <span className="rounded-full bg-popover px-1.5 py-px text-[10px] font-medium text-muted-foreground tabular-nums shadow-sm ring-1 ring-foreground/10">
-          +{replies}
-        </span>
-      )}
-    </button>
   );
 }
 
@@ -903,6 +850,14 @@ function Composer({
 
 // ---- Helpers ----
 
+function readVisible() {
+  try {
+    return localStorage.getItem(VISIBLE_KEY) !== "0";
+  } catch {
+    return true;
+  }
+}
+
 /** Keeps only well-formed numbers and strings from the frame's report. */
 function cleanState(state: FrameState): FrameState {
   const num = (value: unknown) => (typeof value === "number" && Number.isFinite(value) ? value : 0);
@@ -920,7 +875,6 @@ function cleanState(state: FrameState): FrameState {
       id: anchor.id,
       start: num(anchor.start),
       rects: rects(anchor.rects),
-      blockRight: typeof anchor.blockRight === "number" ? num(anchor.blockRight) : null,
     }));
   const selection =
     state.selection && typeof state.selection.quote === "string"

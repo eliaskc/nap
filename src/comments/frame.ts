@@ -88,15 +88,11 @@ function start() {
       path: path(),
       dark: isDarkPage(),
       width: document.documentElement.clientWidth,
-      anchors: [...anchors].map(([id, anchor]) => {
-        const block = blockOf(anchor.range.startContainer);
-        return {
-          id,
-          start: anchor.start,
-          rects: Array.from(anchor.range.getClientRects(), rect),
-          blockRight: block ? block.getBoundingClientRect().right : null,
-        };
-      }),
+      anchors: [...anchors].map(([id, anchor]) => ({
+        id,
+        start: anchor.start,
+        rects: Array.from(anchor.range.getClientRects(), rect),
+      })),
       selection: selection
         ? {
             quote: selection.quote,
@@ -232,17 +228,6 @@ function selectedRange() {
   if (!current || current.isCollapsed || !current.rangeCount) return null;
   if (!current.toString().trim()) return null;
   return current.getRangeAt(0);
-}
-
-/** The nearest element that is not inline, for placing pins in the margin. */
-function blockOf(node: Node) {
-  let element = node.nodeType === Node.ELEMENT_NODE ? (node as Element) : node.parentElement;
-  while (element) {
-    const display = getComputedStyle(element).display;
-    if (!display.startsWith("inline") && display !== "contents") return element;
-    element = element.parentElement;
-  }
-  return null;
 }
 
 /** Whether the artifact looks dark: the first opaque background of <body> or <html>. */
