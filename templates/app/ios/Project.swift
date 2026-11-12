@@ -167,6 +167,28 @@ let packages: [Package] = apps.flatMap(\.packages).compactMap { ref in
   return .remote(url: ref.url, requirement: .exact(Version(stringLiteral: ref.version)))
 }
 
+/// The notification service extension (Launcher/Notifications): it attaches the picture of a
+/// notification that has one (nap.notify's image). Nap gives it its own App ID and profile,
+/// <the app's bundle id>.notifications, when it signs.
+let notifications: Target = .target(
+  name: "Notifications",
+  destinations: devices,
+  product: .appExtension,
+  productName: "NapNotifications",
+  bundleId: "nap.launcher.notifications",
+  deploymentTargets: ios,
+  infoPlist: .extendingDefault(with: [
+    "CFBundleDisplayName": "Notifications",
+    "CFBundleShortVersionString": "1.0",
+    "CFBundleVersion": "1",
+    "NSExtension": [
+      "NSExtensionPointIdentifier": "com.apple.usernotifications.service",
+      "NSExtensionPrincipalClass": "$(PRODUCT_MODULE_NAME).NotificationService",
+    ],
+  ]),
+  sources: ["Launcher/Notifications/**"]
+)
+
 let launcher: Target = .target(
   name: "Launcher",
   destinations: devices,
@@ -189,7 +211,8 @@ let launcher: Target = .target(
   sources: ["Launcher/Sources/**", "Generated/Launcher/**"],
   // The app icon, Resources/AppIcon.icon (Icon Composer): TestFlight refuses builds without one.
   resources: ["Launcher/Resources/**"],
-  dependencies: [.target(name: "NapKit")] + apps.map { .target(name: moduleName($0.slug)) }
+  dependencies: [.target(name: "NapKit"), .target(name: "Notifications")]
+    + apps.map { .target(name: moduleName($0.slug)) }
 )
 
 let project = Project(
@@ -203,5 +226,5 @@ let project = Project(
     "ONLY_ACTIVE_ARCH": "YES",
     "SWIFT_VERSION": "6.0",
   ]),
-  targets: [napKit] + modules + [launcher]
+  targets: [napKit] + modules + [notifications, launcher]
 )

@@ -5,6 +5,8 @@ import {
   AppleError,
   buildUploadStatus,
   ensureCapabilities,
+  EXTENSION_SUFFIX,
+  extensionProfile,
   latestTestFlightBuildNumber,
   signingProfile,
   toBase64,
@@ -799,11 +801,23 @@ const signBuild = Effect.fnUntraced(function* (
     return yield* new SignError({ message: "The app signer is not set up", status: 503 });
   }
   // Capabilities first: turning one on makes a new App Store profile, which signing then uses.
-  const requests = yield* inspectBuild(signer, unsigned.body, unsigned.size);
-  const capabilities = yield* grantCapabilities(requests);
+  const inspected = yield* inspectBuild(signer, unsigned.body, unsigned.size);
+  const capabilities = yield* grantCapabilities(inspected.requests);
   // App Store profiles change with capabilities, from any Nap that shares the App ID, and
   // publishes are rare: ask Apple each time.
   const profile = yield* signingProfile({ fresh: true });
+  // Each app extension (the notification service extension) with its own profile. One without
+  // is left out of the build, which then signs as without it.
+  const extensionProfiles: Record<string, string> = {};
+  for (const suffix of inspected.extensions) {
+    const found = yield* extensionProfile(bundleId + suffix);
+    if (found) extensionProfiles[suffix] = toBase64(found.bytes);
+    else {
+      yield* Effect.logWarning("App extension left out: no profile").pipe(
+        Effect.annotateLogs({ bundleId: bundleId + suffix }),
+      );
+    }
+  }
   const key = signedKey(app, build, profile.id);
   const fresh = yield* storage.get(uploadKey(app, build));
   if (!fresh) {
@@ -821,6 +835,13 @@ const signBuild = Effect.fnUntraced(function* (
           "x-profile": toBase64(profile.bytes),
           "x-distribution": "app-store",
           "x-entitlement-keys": capabilities.entitlementKeys.join(","),
+          ...(Object.keys(extensionProfiles).length
+            ? {
+                "x-extension-profiles": toBase64(
+                  new TextEncoder().encode(JSON.stringify(extensionProfiles)),
+                ),
+              }
+            : {}),
           ...(Object.keys(capabilities.warnings).length
             ? {
                 "x-warnings": toBase64(
@@ -940,12 +961,13 @@ const inspectBuild = Effect.fnUntraced(function* (
   );
   const result = (yield* Effect.promise(() => response.json().catch(() => ({})))) as {
     capabilities?: unknown;
+    extensions?: unknown;
     error?: string;
   };
   // A signer from before /inspect, while a new one rolls out: the build asks for nothing.
   if (response.status === 404) {
     yield* Effect.logWarning("The signer cannot inspect builds yet");
-    return {};
+    return { requests: {}, extensions: [] };
   }
   if (!response.ok) {
     return yield* new SignError({
@@ -953,7 +975,19 @@ const inspectBuild = Effect.fnUntraced(function* (
       status: response.status === 400 ? 400 : 502,
     });
   }
-  return readRequests(result.capabilities);
+  // App extensions by the suffix of their bundle id, such as ".notifications". A signer from
+  // before extensions answers none, and drops nothing: it signs as it always has.
+  const extensions = Array.isArray(result.extensions)
+    ? [
+        ...new Set(
+          result.extensions
+            .map((item) => (item as { suffix?: unknown } | null)?.suffix)
+            .filter((suffix): suffix is string => typeof suffix === "string")
+            .filter((suffix) => EXTENSION_SUFFIX.test(suffix)),
+        ),
+      ]
+    : [];
+  return { requests: readRequests(result.capabilities), extensions };
 });
 
 /** The launcher's own requests, apart from its apps' (not a valid app slug). */

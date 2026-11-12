@@ -191,6 +191,116 @@ export const regenerateProfile = Effect.fn("regenerateProfile")(function* () {
   return yield* storeProfile(created.data.id, created.data.attributes.profileContent);
 });
 
+// ---- App extensions ----
+
+/**
+ * App extensions in the launcher, such as its notification service extension
+ * (PlugIns/NapNotifications.appex), have their own App ID, `<app bundle id><suffix>`, and need
+ * their own App Store profile. Unlike the app's, Nap makes both itself through the App Store
+ * Connect API when they are missing, with the certificates of the app's profile, and keeps a copy
+ * of the profile in R2. Extensions get only the basic entitlements.
+ */
+export const EXTENSION_SUFFIX = /^\.[A-Za-z0-9-]{1,40}$/;
+const extensionProfileKey = (identifier: string) => `apps/_signing/${identifier}.mobileprovision`;
+
+const findBundleId = Effect.fnUntraced(function* (identifier: string) {
+  const bundles = yield* appStoreConnect<BundleIdList>(
+    `bundleIds?filter[identifier]=${encodeURIComponent(identifier)}&fields[bundleIds]=identifier&limit=20`,
+  );
+  return bundles.data.find((item) => item.attributes.identifier === identifier) ?? null;
+});
+
+/** Apple's App ID for an extension, made when it is missing. */
+const ensureBundleId = Effect.fnUntraced(function* (identifier: string) {
+  const found = yield* findBundleId(identifier);
+  if (found) return found.id;
+  // App ID names take letters, digits, and spaces only.
+  const name = `Nap ${identifier.replace(/[^A-Za-z0-9]+/g, " ")}`.trim().slice(0, 60);
+  const created = yield* appStoreConnect<{ data: { id: string } }>("bundleIds", {
+    method: "POST",
+    body: {
+      data: { type: "bundleIds", attributes: { identifier, name, platform: "IOS" } },
+    },
+  });
+  yield* Effect.logInfo("App ID made for an app extension").pipe(
+    Effect.annotateLogs({ identifier }),
+  );
+  return created.data.id;
+});
+
+/** Apple's App Store profile for an extension's App ID, made (or remade) when it is not active. */
+const appleExtensionProfile = Effect.fnUntraced(function* (identifier: string) {
+  const name = `${yield* profileName} ${identifier.split(".").pop()}`;
+  const list = yield* appStoreConnect<ProfileList>(
+    `profiles?filter[name]=${encodeURIComponent(name)}&filter[profileType]=${PROFILE_TYPE}&limit=10`,
+  );
+  const named = list.data.filter((item) => item.attributes.name === name);
+  const active = named.find((item) => item.attributes.profileState === "ACTIVE");
+  if (active) return { id: active.id, content: active.attributes.profileContent };
+
+  const bundleId = yield* ensureBundleId(identifier);
+  // The app's certificates, so the one key signs both.
+  const app = yield* namedProfile();
+  if (!app) return yield* missingProfile;
+  const certificates = yield* appStoreConnect<{ data: Array<{ id: string }> }>(
+    `profiles/${app.id}/certificates`,
+  );
+  for (const stale of named) {
+    yield* appStoreConnect(`profiles/${stale.id}`, { method: "DELETE" });
+  }
+  const created = yield* appStoreConnect<{ data: ProfileList["data"][number] }>("profiles", {
+    method: "POST",
+    body: {
+      data: {
+        type: "profiles",
+        attributes: { name, profileType: PROFILE_TYPE },
+        relationships: {
+          bundleId: { data: { type: "bundleIds", id: bundleId } },
+          certificates: {
+            data: certificates.data.map((item) => ({ type: "certificates", id: item.id })),
+          },
+        },
+      },
+    },
+  });
+  yield* Effect.logInfo("App Store profile made for an app extension").pipe(
+    Effect.annotateLogs({ identifier, name }),
+  );
+  return { id: created.data.id, content: created.data.attributes.profileContent };
+});
+
+/**
+ * The App Store profile for an extension with this App ID (`<app bundle id><suffix>`): Apple's,
+ * made if needed, else the copy in R2 when Apple cannot be reached. Null when there is neither,
+ * and the build is signed without the extension.
+ */
+export const extensionProfile = Effect.fn("extensionProfile")(function* (identifier: string) {
+  const storage = yield* Storage;
+  const key = extensionProfileKey(identifier);
+  const fromApple = yield* appleExtensionProfile(identifier).pipe(
+    Effect.map((profile) => ({ ok: true as const, profile })),
+    Effect.catchCause((cause) => Effect.succeed({ ok: false as const, cause })),
+  );
+  if (fromApple.ok) {
+    const bytes = Uint8Array.from(atob(fromApple.profile.content), (c) => c.charCodeAt(0));
+    yield* storage.put(key, bytes, {
+      customMetadata: { profileId: fromApple.profile.id, fetchedAt: new Date().toISOString() },
+    });
+    return { id: fromApple.profile.id, bytes } satisfies SigningProfile;
+  }
+  yield* Effect.logWarning(
+    "No App Store profile from Apple for an app extension",
+    fromApple.cause,
+  ).pipe(Effect.annotateLogs({ identifier }));
+  const stored = yield* storage.get(key);
+  const id = stored?.customMetadata?.profileId;
+  if (!stored || !id) return null;
+  return {
+    id,
+    bytes: new Uint8Array(yield* tryStorage(() => stored.arrayBuffer())),
+  } satisfies SigningProfile;
+});
+
 // ---- TestFlight ----
 
 const testFlightApp = Effect.suspend(() => {

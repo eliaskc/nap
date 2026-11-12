@@ -12,11 +12,17 @@ Headers:
                    comma-separated (those of the capabilities Nap turned on)
   x-warnings       optional, base64 JSON {app slug: [sentence]}: capabilities the build
                    asked for and does not get. Written into Info.plist as NapCapabilityWarnings.
+  x-extension-profiles  optional, base64 JSON {bundle id suffix: profile, base64}: the App Store
+                   profiles of the app's extensions (PlugIns/*.appex), by the suffix of their
+                   bundle id after the app's, such as ".notifications". An extension gets the
+                   bundle id <x-bundle-id><suffix>, the app's version, and only the basic
+                   entitlements. An extension without a profile is left out of the build.
 Environment:
   SIGNING_PEM      the distribution private key and certificate, PEM
 
-POST /inspect takes the same body and answers {"capabilities": {slug: [name]}}, from the
-NapCapabilities key the app template writes into Info.plist.
+POST /inspect takes the same body and answers {"capabilities": {slug: [name]}, "extensions":
+[{"path", "suffix"}]}: the NapCapabilities key the app template writes into Info.plist, and the
+app extensions in PlugIns with the suffix of their bundle id.
 
 POST /sign-android takes an unsigned .aab, with x-package-name (the Play app's package name) and
 x-build-number (its versionCode, assigned by Nap), and signs it with ANDROID_UPLOAD_PEM, the Play
@@ -148,14 +154,77 @@ def unpack(body: bytes, work: str):
     return app, info_path, info
 
 
+SUFFIX = re.compile(r"^\.[A-Za-z0-9-]{1,40}$")
+
+
+def extensions(app: str, info: dict) -> list:
+    """
+    The app's extensions (PlugIns/*.appex), each with its Info.plist and the suffix of its bundle
+    id after the app's: "nap.launcher.notifications" in "nap.launcher" is ".notifications".
+    """
+    found = []
+    plugins = os.path.join(app, "PlugIns")
+    if not os.path.isdir(plugins):
+        return found
+    app_id = info.get("CFBundleIdentifier", "")
+    for name in sorted(os.listdir(plugins)):
+        path = os.path.join(plugins, name)
+        if not name.endswith(".appex") or not os.path.isdir(path):
+            continue
+        info_path = os.path.join(path, "Info.plist")
+        if not os.path.exists(info_path):
+            raise BuildError(f"The extension {name} has no Info.plist")
+        with open(info_path, "rb") as handle:
+            extension_info = plistlib.load(handle)
+        identifier = extension_info.get("CFBundleIdentifier", "")
+        if app_id and identifier.startswith(app_id + "."):
+            suffix = identifier[len(app_id) :]
+        else:
+            suffix = "." + identifier.rsplit(".", 1)[-1]
+        if not SUFFIX.match(suffix):
+            raise BuildError(f"The extension {name} has a bad bundle id: {identifier}")
+        found.append(
+            {
+                "path": os.path.relpath(path, app),
+                "dir": path,
+                "info_path": info_path,
+                "info": extension_info,
+                "suffix": suffix,
+            }
+        )
+    return found
+
+
 def inspect(body: bytes) -> dict:
     work = tempfile.mkdtemp()
     try:
-        _, _, info = unpack(body, work)
+        app, _, info = unpack(body, work)
         requests = info.get("NapCapabilities", {})
-        return {"capabilities": requests if isinstance(requests, dict) else {}}
+        return {
+            "capabilities": requests if isinstance(requests, dict) else {},
+            "extensions": [
+                {"path": item["path"], "suffix": item["suffix"]} for item in extensions(app, info)
+            ],
+        }
     finally:
         shutil.rmtree(work, ignore_errors=True)
+
+
+def checked_profile(profile_bytes: bytes, bundle_id: str):
+    """A profile's team and App Store entitlements for this bundle id, checked."""
+    profile = read_profile(profile_bytes)
+    team = profile["TeamIdentifier"][0]
+    entitlements = dict(profile["Entitlements"])
+    app_id = f"{team}.{bundle_id}"
+    if not matches(entitlements["application-identifier"], app_id):
+        raise BuildError(f"The profile does not cover {bundle_id}")
+    if profile["ExpirationDate"].replace(tzinfo=timezone.utc) < datetime.now(timezone.utc):
+        raise BuildError(f"The provisioning profile for {bundle_id} has expired")
+    entitlements["application-identifier"] = app_id
+    entitlements["get-task-allow"] = False
+    if "beta-reports-active" not in entitlements:
+        raise BuildError("The profile is not an App Store profile")
+    return entitlements
 
 
 def sign(
@@ -166,6 +235,7 @@ def sign(
     distribution: str = "app-store",
     extra_keys: list = (),
     warnings: dict = None,
+    extension_profiles: dict = None,
 ):
     pem = os.environ.get("SIGNING_PEM", "")
     if "PRIVATE KEY" not in pem or "CERTIFICATE" not in pem:
@@ -177,23 +247,14 @@ def sign(
     if distribution != "app-store":
         raise BuildError("Bad distribution")
 
-    profile = read_profile(profile_bytes)
-    team = profile["TeamIdentifier"][0]
-    entitlements = dict(profile["Entitlements"])
-    app_id = f"{team}.{bundle_id}"
-    if not matches(entitlements["application-identifier"], app_id):
-        raise BuildError(f"The profile does not cover {bundle_id}")
-    if profile["ExpirationDate"].replace(tzinfo=timezone.utc) < datetime.now(timezone.utc):
-        raise BuildError("The provisioning profile has expired")
-    entitlements["application-identifier"] = app_id
-    entitlements["get-task-allow"] = False
-    if "beta-reports-active" not in entitlements:
-        raise BuildError("The profile is not an App Store profile")
-    entitlements = app_store_entitlements(entitlements, list(extra_keys))
+    entitlements = app_store_entitlements(checked_profile(profile_bytes, bundle_id), list(extra_keys))
+    extension_profiles = dict(extension_profiles or {})
 
     work = tempfile.mkdtemp()
     try:
         app, info_path, info = unpack(body, work)
+        # Read before the app's bundle id changes: their suffixes are relative to the build's.
+        nested = extensions(app, info)
         if info.get("DTPlatformName") != "iphoneos":
             raise BuildError(
                 f"This is a {info.get('DTPlatformName', 'unknown')} build. Build for iphoneos."
@@ -223,6 +284,45 @@ def sign(
         # Leftovers from a signed build would make the signature lie about the bundle.
         shutil.rmtree(os.path.join(app, "_CodeSignature"), ignore_errors=True)
 
+        # The extensions, each with its own profile and entitlements; rcodesign signs them
+        # (nested bundles first) in the same run, with the entitlements scoped to their path.
+        scoped = []
+        for index, extension in enumerate(nested):
+            encoded = extension_profiles.get(extension["suffix"])
+            if not encoded:
+                # No profile for it (Nap could not make one): the app goes out without it.
+                print(f"leaving out {extension['path']}: no profile")
+                shutil.rmtree(extension["dir"])
+                continue
+            extension_id = bundle_id + extension["suffix"]
+            extension_bytes = base64.b64decode(encoded)
+            extension_entitlements = app_store_entitlements(
+                checked_profile(extension_bytes, extension_id), []
+            )
+            extension_info = extension["info"]
+            extension_executable = os.path.join(
+                extension["dir"], extension_info.get("CFBundleExecutable", "")
+            )
+            if not extension_info.get("CFBundleExecutable") or not os.path.isfile(
+                extension_executable
+            ):
+                raise BuildError(f"The executable of {extension['path']} is missing")
+            check_executable(extension_executable)
+            extension_info["CFBundleIdentifier"] = extension_id
+            # App Store Connect wants an extension's versions to be its app's.
+            extension_info["CFBundleVersion"] = build_number
+            if info.get("CFBundleShortVersionString"):
+                extension_info["CFBundleShortVersionString"] = info["CFBundleShortVersionString"]
+            with open(extension["info_path"], "wb") as handle:
+                plistlib.dump(extension_info, handle, fmt=plistlib.FMT_BINARY)
+            with open(os.path.join(extension["dir"], "embedded.mobileprovision"), "wb") as handle:
+                handle.write(extension_bytes)
+            shutil.rmtree(os.path.join(extension["dir"], "_CodeSignature"), ignore_errors=True)
+            path = _bytes_file(
+                work, f"extension-{index}.plist", plistlib.dumps(extension_entitlements)
+            )
+            scoped += ["--entitlements-xml-file", f"{extension['path']}:{path}"]
+
         key = _bytes_file(work, "signer.pem", pem.encode())
         ents = _bytes_file(work, "entitlements.plist", plistlib.dumps(entitlements))
         result = subprocess.run(
@@ -230,6 +330,7 @@ def sign(
                 "rcodesign", "sign",
                 "--pem-file", key,
                 "--entitlements-xml-file", ents,
+                *scoped,
                 "--timestamp-url", "none",
                 app,
             ],
@@ -300,6 +401,12 @@ class Handler(BaseHTTPRequestHandler):
             warnings = json.loads(base64.b64decode(warnings_header)) if warnings_header else None
             if warnings is not None and not isinstance(warnings, dict):
                 raise BuildError("Bad warnings")
+            extensions_header = self.headers.get("x-extension-profiles", "")
+            extension_profiles = (
+                json.loads(base64.b64decode(extensions_header)) if extensions_header else {}
+            )
+            if not isinstance(extension_profiles, dict):
+                raise BuildError("Bad extension profiles")
             signed, meta = sign(
                 body,
                 self.headers.get("x-bundle-id", ""),
@@ -308,6 +415,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.headers.get("x-distribution", "") or "app-store",
                 [key for key in keys.split(",") if key],
                 warnings,
+                extension_profiles,
             )
         except (BuildError, android.BundleError) as error:
             return self._json(400, {"error": str(error)})
