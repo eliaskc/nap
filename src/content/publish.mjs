@@ -226,6 +226,21 @@ async function putFile(target, source) {
   }
 }
 
+/** The next page of presigned URLs of a direct upload. */
+async function nextPage(token, url) {
+  const path = new URL(url);
+  const page = await api(`${path.pathname.replace(/^\/_nap\/api/, "")}${path.search}`, {
+    token,
+    method: "GET",
+  });
+  if (!page.ok) {
+    throw new ExitError(
+      `Upload stopped (${page.status}): ${page.data.error || JSON.stringify(page.data)}`,
+    );
+  }
+  return page.data;
+}
+
 function idFrom(value) {
   const match =
     value.match(/^https?:\/\/[^/]+\/artifact\/([a-z0-9-]+)/) ||
@@ -288,23 +303,31 @@ async function publish(options) {
     await pushSource(local, started.data.source, { kind: "site", id: started.data.id });
   }
   const byPath = new Map(files.map((file) => [file.path, file]));
-  const queue = [...started.data.files];
   let done = 0;
   let sent = 0;
   let lastReport = 0;
-  const worker = async () => {
-    for (let target = queue.shift(); target; target = queue.shift()) {
-      const source = byPath.get(target.path);
-      await putFile(target, source);
-      done++;
-      sent += source.size;
-      if (Date.now() - lastReport > 2000 || done === files.length) {
-        lastReport = Date.now();
-        console.log(`Uploaded ${done}/${files.length} files (${mb(sent)} of ${mb(total)})`);
+  // Nap signs URLs a page at a time. Upload a page while the next one is signed.
+  let page = started.data;
+  while (true) {
+    const following = page.nextPage ? nextPage(token, page.nextPage) : null;
+    following?.catch(() => {});
+    const queue = [...page.files];
+    const worker = async () => {
+      for (let target = queue.shift(); target; target = queue.shift()) {
+        const source = byPath.get(target.path);
+        await putFile(target, source);
+        done++;
+        sent += source.size;
+        if (Date.now() - lastReport > 2000 || done === files.length) {
+          lastReport = Date.now();
+          console.log(`Uploaded ${done}/${files.length} files (${mb(sent)} of ${mb(total)})`);
+        }
       }
-    }
-  };
-  await Promise.all(Array.from({ length: Math.min(CONCURRENCY, queue.length) }, worker));
+    };
+    await Promise.all(Array.from({ length: Math.min(CONCURRENCY, queue.length) }, worker));
+    if (!following) break;
+    page = await following;
+  }
 
   const committed = await api(new URL(commitUrl).pathname.replace(/^\/_nap\/api/, ""), { token });
   if (!committed.ok) {

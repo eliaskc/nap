@@ -5,10 +5,17 @@ import { HttpError } from "~/server/http";
 /** Artifacts: quick pages, shared by link, only in the owner's Artifacts list. Sites: everything else. */
 export type SiteKind = "site" | "artifact";
 
+/**
+ * Uploads that pass through the Worker. It holds them in memory and writes each file to R2
+ * itself, so keep these small.
+ */
 export const MAX_UPLOAD_FILES = 1_000;
-/** Uploads that pass through the Worker. It holds them in memory, so keep this small. */
 export const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
-/** Direct uploads go from the client to R2 and never pass through the Worker. */
+/**
+ * Direct uploads go from the client to R2 and never pass through the Worker. Nap signs their
+ * URLs a page at a time, so the file count is bound only by the manifest Nap keeps in R2.
+ */
+export const MAX_DIRECT_UPLOAD_FILES = 100_000;
 export const MAX_DIRECT_UPLOAD_BYTES = 1024 * 1024 * 1024;
 
 // Host labels that Nap uses itself. No site may take them.
@@ -191,7 +198,7 @@ export const readUpload = Effect.fnUntraced(function* <Name extends string>(
 export const checkFiles = (files: Array<IncomingFile>) =>
   checkManifest(
     files.map((file) => ({ path: file.path, size: file.body.size })),
-    MAX_UPLOAD_BYTES,
+    { maxFiles: MAX_UPLOAD_FILES, maxBytes: MAX_UPLOAD_BYTES },
   ).pipe(
     Effect.mapError((error) =>
       error.status === 413
@@ -200,23 +207,31 @@ export const checkFiles = (files: Array<IncomingFile>) =>
     ),
   );
 
-const DIRECT_HINT = `Direct uploads take up to ${formatLimit(MAX_DIRECT_UPLOAD_BYTES)}; see "Direct uploads" in GET /_nap/api/instructions/api.`;
+const DIRECT_HINT = `Direct uploads take up to ${formatLimit(MAX_DIRECT_UPLOAD_BYTES)} and ${MAX_DIRECT_UPLOAD_FILES.toLocaleString("en")} files; see "Direct uploads" in GET /_nap/api/instructions/api.`;
 
 /** Checks a list of paths and sizes, before or without the file contents. */
 export const checkManifest = (
   files: Array<{ path: string; size: number }>,
-  maxBytes: number,
+  limits: { maxFiles: number; maxBytes: number },
 ): Effect.Effect<{ totalBytes: number }, HttpError> => {
-  const problem = manifestProblem(files, maxBytes);
+  const problem = manifestProblem(files, limits);
   return problem
     ? Effect.fail(problem)
     : Effect.succeed({ totalBytes: files.reduce((sum, file) => sum + file.size, 0) });
 };
 
-function manifestProblem(files: Array<{ path: string; size: number }>, maxBytes: number) {
+function manifestProblem(
+  files: Array<{ path: string; size: number }>,
+  { maxFiles, maxBytes }: { maxFiles: number; maxBytes: number },
+) {
   if (files.length === 0) return uploadError("No files uploaded", 400);
-  if (files.length > MAX_UPLOAD_FILES) {
-    return uploadError(`Too many files (max ${MAX_UPLOAD_FILES})`, 400);
+  if (files.length > maxFiles) {
+    return uploadError(
+      maxFiles === MAX_UPLOAD_FILES
+        ? `Too many files (max ${maxFiles.toLocaleString("en")}). ${DIRECT_HINT}`
+        : `Too many files (max ${maxFiles.toLocaleString("en")})`,
+      400,
+    );
   }
   const unsafe = files.find((file) => !isSafePath(file.path));
   if (unsafe) return uploadError(`Unsafe file path: ${unsafe.path}`, 400);

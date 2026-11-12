@@ -16,6 +16,8 @@ const toStorageError = (cause: unknown) =>
 export const tryStorage = <A>(evaluate: () => Promise<A>) =>
   Effect.tryPromise({ try: evaluate, catch: toStorageError });
 
+export type StoredObject = { key: string; size: number };
+
 export class Storage extends Context.Service<
   Storage,
   {
@@ -30,8 +32,11 @@ export class Storage extends Context.Service<
       options?: R2PutOptions,
     ) => Effect.Effect<R2Object | null, StorageError>;
     readonly delete: (keys: string | Array<string>) => Effect.Effect<void, StorageError>;
-    /** Every object below `prefix`, across pages. */
-    readonly list: (prefix: string) => Effect.Effect<Array<R2Object>, StorageError>;
+    /**
+     * The key and size of every object below `prefix`, across pages. Only those two, so a
+     * version with many files stays small in memory.
+     */
+    readonly list: (prefix: string) => Effect.Effect<Array<StoredObject>, StorageError>;
   }
 >()("nap/Storage") {
   static make(bucket: R2Bucket): Storage["Service"] {
@@ -43,11 +48,11 @@ export class Storage extends Context.Service<
       delete: (keys) => tryStorage(() => bucket.delete(keys)),
       list: (prefix) =>
         tryStorage(async () => {
-          const objects: Array<R2Object> = [];
+          const objects: Array<StoredObject> = [];
           let cursor: string | undefined;
           do {
             const listed = await bucket.list({ prefix, cursor });
-            objects.push(...listed.objects);
+            for (const { key, size } of listed.objects) objects.push({ key, size });
             cursor = listed.truncated ? listed.cursor : undefined;
           } while (cursor);
           return objects;

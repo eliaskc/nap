@@ -33,6 +33,7 @@ import { Route as ApiTokensIdRouteImport } from './routes/api/tokens.$id'
 import { Route as ApiSitesSlugRouteImport } from './routes/api/sites.$slug'
 import { Route as ApiDraftsIdRouteImport } from './routes/api/drafts.$id'
 import { Route as ApiConnectCodeRouteImport } from './routes/api/connect.$code'
+import { Route as ApiUploadsIdUrlsRouteImport } from './routes/api/uploads.$id.urls'
 import { Route as ApiUploadsIdCommitRouteImport } from './routes/api/uploads.$id.commit'
 import { Route as ApiSitesSlugVersionsRouteImport } from './routes/api/sites.$slug.versions'
 import { Route as ApiSitesSlugSettingsRouteImport } from './routes/api/sites.$slug.settings'
@@ -160,6 +161,11 @@ const ApiConnectCodeRoute = ApiConnectCodeRouteImport.update({
   path: '/api/connect/$code',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiUploadsIdUrlsRoute = ApiUploadsIdUrlsRouteImport.update({
+  id: '/$id/urls',
+  path: '/$id/urls',
+  getParentRoute: () => ApiUploadsRoute,
+} as any)
 const ApiUploadsIdCommitRoute = ApiUploadsIdCommitRouteImport.update({
   id: '/$id/commit',
   path: '/$id/commit',
@@ -221,6 +227,7 @@ export interface FileRoutesByFullPath {
   '/api/sites/$slug/settings': typeof ApiSitesSlugSettingsRoute
   '/api/sites/$slug/versions': typeof ApiSitesSlugVersionsRoute
   '/api/uploads/$id/commit': typeof ApiUploadsIdCommitRoute
+  '/api/uploads/$id/urls': typeof ApiUploadsIdUrlsRoute
   '/api/drafts/$id/preview/$': typeof ApiDraftsIdPreviewSplatRoute
 }
 export interface FileRoutesByTo {
@@ -253,6 +260,7 @@ export interface FileRoutesByTo {
   '/api/sites/$slug/settings': typeof ApiSitesSlugSettingsRoute
   '/api/sites/$slug/versions': typeof ApiSitesSlugVersionsRoute
   '/api/uploads/$id/commit': typeof ApiUploadsIdCommitRoute
+  '/api/uploads/$id/urls': typeof ApiUploadsIdUrlsRoute
   '/api/drafts/$id/preview/$': typeof ApiDraftsIdPreviewSplatRoute
 }
 export interface FileRoutesById {
@@ -286,6 +294,7 @@ export interface FileRoutesById {
   '/api/sites/$slug/settings': typeof ApiSitesSlugSettingsRoute
   '/api/sites/$slug/versions': typeof ApiSitesSlugVersionsRoute
   '/api/uploads/$id/commit': typeof ApiUploadsIdCommitRoute
+  '/api/uploads/$id/urls': typeof ApiUploadsIdUrlsRoute
   '/api/drafts/$id/preview/$': typeof ApiDraftsIdPreviewSplatRoute
 }
 export interface FileRouteTypes {
@@ -320,6 +329,7 @@ export interface FileRouteTypes {
     | '/api/sites/$slug/settings'
     | '/api/sites/$slug/versions'
     | '/api/uploads/$id/commit'
+    | '/api/uploads/$id/urls'
     | '/api/drafts/$id/preview/$'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -352,6 +362,7 @@ export interface FileRouteTypes {
     | '/api/sites/$slug/settings'
     | '/api/sites/$slug/versions'
     | '/api/uploads/$id/commit'
+    | '/api/uploads/$id/urls'
     | '/api/drafts/$id/preview/$'
   id:
     | '__root__'
@@ -384,6 +395,7 @@ export interface FileRouteTypes {
     | '/api/sites/$slug/settings'
     | '/api/sites/$slug/versions'
     | '/api/uploads/$id/commit'
+    | '/api/uploads/$id/urls'
     | '/api/drafts/$id/preview/$'
   fileRoutesById: FileRoutesById
 }
@@ -582,6 +594,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiConnectCodeRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/uploads/$id/urls': {
+      id: '/api/uploads/$id/urls'
+      path: '/$id/urls'
+      fullPath: '/api/uploads/$id/urls'
+      preLoaderRoute: typeof ApiUploadsIdUrlsRouteImport
+      parentRoute: typeof ApiUploadsRoute
+    }
     '/api/uploads/$id/commit': {
       id: '/api/uploads/$id/commit'
       path: '/$id/commit'
@@ -671,10 +690,12 @@ const ApiTokensRouteWithChildren = ApiTokensRoute._addFileChildren(
 
 interface ApiUploadsRouteChildren {
   ApiUploadsIdCommitRoute: typeof ApiUploadsIdCommitRoute
+  ApiUploadsIdUrlsRoute: typeof ApiUploadsIdUrlsRoute
 }
 
 const ApiUploadsRouteChildren: ApiUploadsRouteChildren = {
   ApiUploadsIdCommitRoute: ApiUploadsIdCommitRoute,
+  ApiUploadsIdUrlsRoute: ApiUploadsIdUrlsRoute,
 }
 
 const ApiUploadsRouteWithChildren = ApiUploadsRoute._addFileChildren(

@@ -399,7 +399,10 @@ try {
     const refused = await watcher.next((m) => m.t === "error", "watcher refused");
     assert.match(refused.error, /cannot send/);
     assert.ok(!watcher.inbox.some((m) => m.t === "message"), "watchers get no messages");
-    assert.ok(!player.inbox.some((m) => m.t === "join" && m.peer.id === seen.id), "no join for the watcher");
+    assert.ok(
+      !player.inbox.some((m) => m.t === "join" && m.peer.id === seen.id),
+      "no join for the watcher",
+    );
     for (const s of [player, watcher, second]) s.socket.close();
   }
   // ICE servers for voice: STUN at least, and TURN credentials when the stage has a TURN key.
@@ -479,6 +482,47 @@ try {
     201,
     "others update after reading it",
   );
+  // Many files: the URLs come a page at a time, from nextPage.
+  {
+    const count = 1_201;
+    const manyFiles = [
+      { path: "index.html", size: 4 },
+      ...Array.from({ length: count - 1 }, (_, i) => ({ path: `tiles/${i}.txt`, size: 1 })),
+    ];
+    const many = await postJson("/_nap/api/uploads", { files: manyFiles }, bearer(directToken));
+    assert.equal(many.status, 201, many.text);
+    assert.equal(many.json.fileCount, count);
+    assert.equal(many.json.files.length, 1000);
+    assert.match(many.json.next, /nextPage/);
+    const signed = [...many.json.files];
+    let nextPage = many.json.nextPage;
+    assert.match(nextPage, /\/_nap\/api\/uploads\/[0-9a-f-]{36}\/urls\?offset=1000$/);
+    assert.equal((await call(new URL(nextPage).pathname + "?offset=1000")).status, 401);
+    while (nextPage) {
+      const { pathname, search } = new URL(nextPage);
+      const page = await call(pathname + search, { headers: bearer(directToken) });
+      assert.equal(page.status, 200, page.text);
+      signed.push(...page.json.files);
+      nextPage = page.json.nextPage;
+    }
+    assert.equal(signed.length, count);
+    for (const file of signed) await putLocal(file.url, file.path === "index.html" ? "<h1>" : "x");
+    const manyCommit = await postJson(
+      new URL(many.json.commitUrl).pathname,
+      {},
+      bearer(directToken),
+    );
+    assert.equal(manyCommit.status, 201, manyCommit.text);
+    const tile = await call(`/_nap/api/naps/${manyCommit.json.id}/files/tiles/1199.txt`, {
+      headers: bearer(directToken),
+    });
+    assert.equal(tile.text, "x", "a file from the last page is live");
+    const removed = await call(`/api/sites/${manyCommit.json.id}`, {
+      method: "DELETE",
+      headers: as(OWNER),
+    });
+    assert.equal(removed.status, 200, removed.text);
+  }
   // Dashboard direct uploads use the same flow behind Access. An agent cannot commit them.
   const dashboardStart = await postJson(
     "/api/uploads",

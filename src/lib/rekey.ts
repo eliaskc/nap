@@ -1,6 +1,7 @@
 import { Effect } from "effect";
 import type { SiteKind } from "~/lib/uploads";
 import { Database, sql } from "~/server/database";
+import { fail } from "~/server/http";
 import { objectHeaders, Storage } from "~/server/storage";
 
 type NapRow = {
@@ -108,11 +109,24 @@ export const findRedirect = Effect.fn("findRedirect")(function* (slug: string) {
   return row?.slug ?? null;
 });
 
+/**
+ * Files in every version that a rename or move copies. Each costs two R2 calls in one request,
+ * and a Worker request makes at most 10,000 of those.
+ */
+const MAX_COPIED_FILES = 4_000;
+
 const copySiteObjects = Effect.fnUntraced(function* (fromSlug: string, toSlug: string) {
   const storage = yield* Storage;
   const fromPrefix = `sites/${fromSlug}/`;
   const toPrefix = `sites/${toSlug}/`;
-  for (const item of yield* storage.list(fromPrefix)) {
+  const items = yield* storage.list(fromPrefix);
+  if (items.length > MAX_COPIED_FILES) {
+    return yield* fail(
+      409,
+      `This nap has ${items.length.toLocaleString("en")} files across its versions, too many to move to a new URL (up to ${MAX_COPIED_FILES.toLocaleString("en")}).`,
+    );
+  }
+  for (const item of items) {
     const source = yield* storage.get(item.key);
     if (!source) continue;
     yield* storage.put(item.key.replace(fromPrefix, toPrefix), source.body, {

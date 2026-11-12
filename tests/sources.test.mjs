@@ -337,8 +337,10 @@ function uploadEnv() {
       const listed = [...objects.keys()].filter((key) => key.startsWith(prefix));
       return { objects: listed.map((key) => ({ key, size: objects.get(key) })), truncated: false };
     },
-    async get() {
-      return null;
+    // Only the manifests are read back; version files are stored as their sizes.
+    async get(key) {
+      const value = objects.get(key);
+      return typeof value === "string" ? { text: async () => value } : null;
     },
     async delete(keys) {
       for (const key of [keys].flat()) objects.delete(key);
@@ -376,9 +378,7 @@ const startNewSite = (env, input = {}) =>
 
 test("a new site gets its source repo with its first upload, built from a commit", async () => {
   const { env, sqlite, SOURCES, objects } = uploadEnv();
-  const started = await startNewSite(env);
-  assert.equal(started.status, 201);
-  const { uploadId, source } = await started.json();
+  const { uploadId, source } = await startNewSite(env);
   assert.equal(source.repo, "team-map");
   assert.equal(source.scope, "write");
   assert.equal(site(sqlite, "team-map"), undefined, "no site until the upload is committed");
@@ -422,4 +422,109 @@ test("an expired upload deletes the repo it created", async () => {
   sqlite.exec("UPDATE uploads SET expires_at = '2000-01-01T00:00:00.000Z'");
   await startNewSite(env, { slug: "other", createSource: false, sourceCommit: null });
   assert.equal(SOURCES.repos.has("team-map"), false);
+});
+
+const { SIGNED_PAGE_SIZE, signDirectUploadPage } = await import("../src/lib/direct-uploads.ts");
+
+const startFiles = (env, files) =>
+  call(
+    env,
+    startDirectUpload(
+      { email: OWNER, name: "" },
+      {
+        files,
+        targetSlug: null,
+        requireExpectedVersion: true,
+        expectedCurrentVersion: null,
+        kind: "artifact",
+        source: "agent",
+      },
+    ),
+  );
+
+const tiles = (count) => [
+  { path: "index.html", size: 18 },
+  ...Array.from({ length: count - 1 }, (_, i) => ({ path: `tiles/${i}.png`, size: 100 + (i % 7) })),
+];
+
+test("a direct upload of many files signs its URLs a page at a time", async () => {
+  const { env, sqlite, objects } = uploadEnv();
+  const files = tiles(2 * SIGNED_PAGE_SIZE + 500);
+  const started = await startFiles(env, files);
+  assert.equal(started.fileCount, files.length);
+  assert.equal(started.files.length, SIGNED_PAGE_SIZE);
+  assert.equal(started.nextOffset, SIGNED_PAGE_SIZE);
+  assert.ok(objects.has(`uploads/${started.uploadId}/manifest.json`), "the manifest is in R2");
+  assert.equal(
+    sqlite.prepare("SELECT name FROM pragma_table_info('uploads') WHERE name = 'files_json'").get(),
+    undefined,
+    "not in D1",
+  );
+
+  const agent = { email: OWNER, name: "" };
+  const signed = [...started.files];
+  let offset = started.nextOffset;
+  sqlite.exec("UPDATE uploads SET expires_at = '2999-01-01T00:00:00.000Z'");
+  while (offset !== null) {
+    const page = await call(env, signDirectUploadPage(agent, started.uploadId, "agent", offset));
+    signed.push(...page.files);
+    offset = page.nextOffset;
+  }
+  assert.deepEqual(
+    signed.map((file) => file.path),
+    files.map((file) => file.path),
+    "every file once, in order",
+  );
+  const [{ expires_at: expiresAt }] = sqlite.prepare("SELECT expires_at FROM uploads").all();
+  assert.ok(expiresAt < "2999", "asking for a page moves the expiry");
+
+  for (const [bad, why] of [
+    [files.length, "past the end"],
+    [-1, "negative"],
+    [Number.NaN, "missing"],
+  ]) {
+    const refused = await call(env, signDirectUploadPage(agent, started.uploadId, "agent", bad));
+    assert.equal(refused.status, 400, why);
+  }
+  const other = await call(
+    env,
+    signDirectUploadPage({ email: OTHER, name: "" }, started.uploadId, "agent", 0),
+  );
+  assert.equal(other.status, 404, "owner only");
+
+  // Commit checks the whole manifest, not just the first page.
+  const [{ version_id: versionId }] = sqlite.prepare("SELECT version_id FROM uploads").all();
+  const prefix = `sites/${started.id}/versions/${versionId}/`;
+  for (const file of files.slice(0, -1)) objects.set(prefix + file.path, file.size);
+  const early = await call(env, commitDirectUpload(agent, started.uploadId, "agent"));
+  assert.equal(early.status, 409);
+  assert.deepEqual((await early.json()).missing, [files.at(-1).path]);
+
+  objects.set(prefix + files.at(-1).path, files.at(-1).size);
+  const published = await call(env, commitDirectUpload(agent, started.uploadId, "agent"));
+  assert.equal(published.created, true);
+  assert.equal(
+    sqlite.prepare("SELECT file_count FROM versions WHERE id = ?").get(versionId).file_count,
+    files.length,
+  );
+  assert.equal(objects.has(`uploads/${started.uploadId}/manifest.json`), false, "manifest gone");
+  const again = await call(env, signDirectUploadPage(agent, started.uploadId, "agent", 0));
+  assert.equal(again.status, 409, "no URLs after the commit");
+});
+
+test("direct uploads take up to 100,000 files", async () => {
+  const { env } = uploadEnv();
+  const started = await startFiles(env, tiles(100_000));
+  assert.equal(started.fileCount, 100_000);
+  const refused = await startFiles(env, tiles(100_001));
+  assert.equal(refused.status, 400);
+  assert.match((await refused.json()).error, /max 100,000/);
+});
+
+test("an expired upload deletes its manifest", async () => {
+  const { env, sqlite, objects } = uploadEnv();
+  const started = await startFiles(env, tiles(3));
+  sqlite.exec("UPDATE uploads SET expires_at = '2000-01-01T00:00:00.000Z'");
+  await startFiles(env, tiles(2));
+  assert.equal(objects.has(`uploads/${started.uploadId}/manifest.json`), false);
 });

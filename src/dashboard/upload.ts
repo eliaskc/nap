@@ -58,15 +58,21 @@ async function collectDirectoryFiles(
   }
 }
 
-type DirectUploadStart = {
-  uploadId: string;
+type SignedPage = {
   files: Array<{ path: string; url: string; headers: Record<string, string> }>;
+  /** The next page of URLs, or null after the last. */
+  nextPage: string | null;
 };
 
+type DirectUploadStart = SignedPage & { uploadId: string };
+
+/** Files uploading at once. */
+const CONCURRENCY = 6;
+
 /**
- * Uploads straight to R2: Nap returns a presigned URL per file, the browser PUTs each file, and
- * Nap commits the version. Returns false when Nap cannot sign URLs, so the caller can fall back
- * to an upload through the Worker.
+ * Uploads straight to R2: Nap returns presigned URLs a page at a time, the browser PUTs each
+ * file, and Nap commits the version. Returns false when Nap cannot sign URLs, so the caller can
+ * fall back to an upload through the Worker.
  */
 export async function directUpload(
   files: Array<UploadFile>,
@@ -90,26 +96,46 @@ export async function directUpload(
 
   const byPath = new Map(files.map((item) => [item.path, item.file]));
   const total = files.reduce((sum, item) => sum + item.file.size, 0) || 1;
-  const sent = new Map<string, number>();
-  const report = () => onProgress([...sent.values()].reduce((sum, n) => sum + n, 0) / total);
-  const queue = [...data.files];
-  const worker = async () => {
-    for (let next = queue.shift(); next; next = queue.shift()) {
-      const file = byPath.get(next.path);
-      if (!file) throw new Error(`Missing file: ${next.path}`);
-      const { path } = next;
-      await putFile(next.url, next.headers, file, (bytes) => {
-        sent.set(path, bytes);
-        report();
-      });
-    }
-  };
-  await Promise.all(Array.from({ length: Math.min(4, queue.length) }, worker));
+  // Bytes sent: done files plus the ones in flight. A running total, since uploads can have many
+  // thousands of files.
+  let sent = 0;
+  // Upload a page while the next one is signed.
+  let page: SignedPage = { files: data.files, nextPage: data.nextPage ?? null };
+  while (true) {
+    const following = page.nextPage ? fetchPage(page.nextPage) : null;
+    // Do not leave the next page's rejection unhandled while this page uploads.
+    following?.catch(() => {});
+    const queue = [...page.files];
+    const worker = async () => {
+      for (let next = queue.shift(); next; next = queue.shift()) {
+        const file = byPath.get(next.path);
+        if (!file) throw new Error(`Missing file: ${next.path}`);
+        let mine = 0;
+        await putFile(next.url, next.headers, file, (bytes) => {
+          sent += bytes - mine;
+          mine = bytes;
+          onProgress(sent / total);
+        });
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(CONCURRENCY, queue.length) }, worker));
+    if (!following) break;
+    page = await following;
+  }
 
   const committed = await fetch(`/api/uploads/${data.uploadId}/commit`, { method: "POST" });
   const result = (await committed.json().catch(() => ({}))) as { error?: string };
   if (!committed.ok) throw new Error(result.error ?? "Upload failed");
   return true;
+}
+
+async function fetchPage(url: string) {
+  const response = await fetch(url);
+  const data = (await response.json().catch(() => ({}))) as Partial<SignedPage> & {
+    error?: string;
+  };
+  if (!response.ok || !data.files) throw new Error(data.error ?? "Upload failed");
+  return { files: data.files, nextPage: data.nextPage ?? null };
 }
 
 /** PUTs one file to a presigned URL, with progress. Retries network errors twice. */

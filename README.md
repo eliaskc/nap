@@ -412,10 +412,11 @@ so agents always pass that on with the link.
 - **Direct uploads.** Uploads through the Worker are held in memory, so they
   stay small. Larger uploads go straight to R2: Nap checks the token (or the
   Access identity, for the dashboard) and the file list, picks the URL and a
-  new version id, and returns one presigned PUT URL per file. Each URL writes
+  new version id, keeps the file list in R2, and returns presigned PUT URLs
+  a page at a time (R2 signs single objects, not folders). Each URL writes
   one object under that new version, with a signed type and size, for an
-  hour. A commit checks the files in R2 and moves the live pointer, so a URL
-  can never change a live version. `src/content/publish.mjs`, served at
+  hour. A commit checks the files in R2 against the list and moves the live
+  pointer, so a URL can never change a live version. `src/content/publish.mjs`, served at
   `/_nap/api/publish.mjs`, does the steps for agents.
 - **Claim links.** Agents without a token upload a draft to `/_nap/drafts`.
   The user opens the claim link behind Access, checks the preview, and

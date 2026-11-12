@@ -12,7 +12,12 @@ import {
   type AgentIdentity,
 } from "~/lib/agent-auth";
 import { handleComments } from "~/lib/comments";
-import { commitDirectUpload, startDirectUpload } from "~/lib/direct-uploads";
+import {
+  commitDirectUpload,
+  nextPageUrl,
+  signDirectUploadPage,
+  startDirectUpload,
+} from "~/lib/direct-uploads";
 import { objectKey, slugify } from "~/lib/nap-server";
 import { isLocalHostname, napUrl as placeUrl, type NapKind } from "~/lib/nap-urls";
 import { publishFiles, type PublishedNap } from "~/lib/publish";
@@ -259,6 +264,20 @@ export const handleAgentApi = Effect.fn("handleAgentApi")(function* (request: Re
   if (path === "/uploads" && method === "POST") {
     return yield* startUpload(request, url, agent);
   }
+  // The next page of URLs. Not an upload of its own, so not rate limited.
+  const urlsMatch = path.match(/^\/uploads\/([0-9a-f-]{36})\/urls$/);
+  if (urlsMatch && method === "GET") {
+    const page = yield* signDirectUploadPage(
+      agent,
+      urlsMatch[1],
+      "agent",
+      Number(url.searchParams.get("offset") ?? ""),
+    );
+    return json(
+      { ...page, nextPage: nextPageUrl(`${url.origin}${PREFIX}`, urlsMatch[1], page.nextOffset) },
+      { headers: noStore },
+    );
+  }
   const commitMatch = path.match(/^\/uploads\/([0-9a-f-]{36})\/commit$/);
   if (commitMatch && method === "POST") {
     const published = yield* commitDirectUpload(agent, commitMatch[1], "agent");
@@ -480,13 +499,15 @@ const napShape = Effect.fnUntraced(function* (
   return { kind, slug };
 });
 
-const MAX_MANIFEST_BYTES = 1024 * 1024;
+/** Room for MAX_DIRECT_UPLOAD_FILES entries with long paths. */
+const MAX_MANIFEST_BYTES = 32 * 1024 * 1024;
 
 /**
  * POST /_nap/api/uploads with JSON:
  * { files: [{ path, size, type? }], title?, kind?, slug?, access?, emails?, id?, expectedVersion?,
  *   message?, sourceCommit? }
- * With id, a new version of that nap. Returns presigned PUT URLs and the commit URL.
+ * With id, a new version of that nap. Returns presigned PUT URLs for the first page of files,
+ * nextPage while there are more, and the commit URL.
  */
 const startUpload = Effect.fnUntraced(function* (request: Request, url: URL, agent: AgentIdentity) {
   yield* limitUploads(agent);
@@ -525,19 +546,19 @@ const startUpload = Effect.fnUntraced(function* (request: Request, url: URL, age
     sourceCommit: field("sourceCommit") || null,
     createSource: body.createSource === true,
   });
-  const data = (yield* Effect.promise(() => started.json())) as {
-    uploadId: string;
-    id: string;
-    source?: { repo: string; branch: string };
-  };
-  if (data.source) yield* logSourceAccess(agent, data.id, data.source.repo, "create");
+  if (started.source) yield* logSourceAccess(agent, started.id, started.source.repo, "create");
+  const nextPage = nextPageUrl(`${url.origin}${PREFIX}`, started.uploadId, started.nextOffset);
+  const put = nextPage
+    ? "PUT each file to its url with its headers. When a page is done, GET nextPage (with the token) for the next page of URLs, until nextPage is null"
+    : "PUT each file to its url with its headers";
   return json(
     {
-      ...data,
-      commitUrl: `${url.origin}${PREFIX}/uploads/${data.uploadId}/commit`,
-      next: data.source
-        ? `Push sourceCommit to ${data.source.branch} of source.remote with source.token, PUT each file to its url with its headers, then POST to commitUrl.`
-        : "PUT each file to its url with its headers, then POST to commitUrl.",
+      ...started,
+      nextPage,
+      commitUrl: `${url.origin}${PREFIX}/uploads/${started.uploadId}/commit`,
+      next: started.source
+        ? `Push sourceCommit to ${started.source.branch} of source.remote with source.token, ${put[0].toLowerCase()}${put.slice(1)}, then POST to commitUrl.`
+        : `${put}, then POST to commitUrl.`,
     },
     { status: 201, headers: noStore },
   );
