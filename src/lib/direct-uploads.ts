@@ -20,6 +20,7 @@ import {
 import {
   checkManifest,
   contentTypeForPath,
+  MAX_DIRECT_FILE_BYTES,
   MAX_DIRECT_UPLOAD_BYTES,
   MAX_DIRECT_UPLOAD_FILES,
   normalizePath,
@@ -38,8 +39,8 @@ import { Storage, tryStorage } from "~/server/storage";
  *    returns presigned PUT URLs for the first page of files. Each URL writes exactly one object at
  *    sites/<slug>/versions/<version>/<path>, with a fixed content type and size, and expires
  *    after an hour.
- * 2. The client PUTs each file straight to R2, and asks for the next page of URLs when it gets
- *    there. Signing is per object (R2 has no upload policy for a whole folder), so Nap signs a
+ * 2. The client PUTs each file straight to R2, and asks for the next page of URLs when it runs
+ *    out. Signing is per object (R2 has no upload policy for a whole folder), so Nap signs a
  *    page at a time: a large upload never signs everything in one request, and URLs are fresh
  *    when they are used.
  * 3. Commit: Nap checks that every file in the manifest is in R2 with its size, records the
@@ -47,7 +48,7 @@ import { Storage, tryStorage } from "~/server/storage";
  *    a URL can never overwrite a live version.
  *
  * The manifest is in R2, not D1: a D1 row holds at most 2 MB, and a list of many thousands of
- * paths does not fit. Uncommitted uploads expire two hours after they last signed URLs. Nap
+ * paths does not fit. Uncommitted uploads expire a day after they last signed URLs. Nap
  * deletes their files when the next upload starts.
  *
  * A new site can get its source repo with its first upload (`createSource`). Start creates the
@@ -122,9 +123,15 @@ export type StartedDirectUpload = SignedPage & {
 };
 
 const URL_TTL_SECONDS = 60 * 60;
-const UPLOAD_TTL_MS = 2 * 60 * 60 * 1000;
-/** URLs per page. Signing is CPU work; a page stays well under a second. */
+/** An upload stays open this long after it last asked for URLs. Large files take a while. */
+const UPLOAD_TTL_MS = 24 * 60 * 60 * 1000;
+/** Files per page. Signing is CPU work; a page stays well under a second. */
 export const SIGNED_PAGE_SIZE = 1_000;
+/**
+ * Bytes per page, so a page uploads well within the hour its URLs last. A larger file gets a
+ * page of its own.
+ */
+export const SIGNED_PAGE_BYTES = 256 * 1024 * 1024;
 const MIME_TYPE = /^[a-z0-9][a-z0-9!#$&^_.+-]*\/[a-z0-9][a-z0-9!#$&^_.+-]*$/i;
 const now = () => new Date().toISOString();
 
@@ -152,6 +159,7 @@ const parseManifest = Effect.fnUntraced(function* (value: unknown) {
   yield* checkManifest(files, {
     maxFiles: MAX_DIRECT_UPLOAD_FILES,
     maxBytes: MAX_DIRECT_UPLOAD_BYTES,
+    maxFileBytes: MAX_DIRECT_FILE_BYTES,
   });
   return files;
 });
@@ -169,7 +177,7 @@ const readManifest = Effect.fnUntraced(function* (uploadId: string) {
   return JSON.parse(yield* tryStorage(() => object.text())) as Array<ManifestFile>;
 });
 
-/** Presigned PUT URLs for files[offset, offset + SIGNED_PAGE_SIZE). */
+/** Presigned PUT URLs from `offset`: up to SIGNED_PAGE_SIZE files and SIGNED_PAGE_BYTES. */
 const signPage = Effect.fnUntraced(function* (
   files: Array<ManifestFile>,
   offset: number,
@@ -182,7 +190,16 @@ const signPage = Effect.fnUntraced(function* (
       code: "direct_uploads_unavailable",
     });
   }
-  const end = Math.min(offset + SIGNED_PAGE_SIZE, files.length);
+  let end = offset;
+  let bytes = 0;
+  while (
+    end < files.length &&
+    end - offset < SIGNED_PAGE_SIZE &&
+    (end === offset || bytes + files[end].size <= SIGNED_PAGE_BYTES)
+  ) {
+    bytes += files[end].size;
+    end++;
+  }
   const signed = yield* Effect.all(
     files.slice(offset, end).map((file) =>
       presignPut(credentials, objectKey(slug, versionId, file.path), {
@@ -348,7 +365,7 @@ const openUpload = Effect.fnUntraced(function* (
 
 /**
  * The next page of URLs, from `offset` in the manifest. Asking for a page keeps the upload open
- * for another two hours, so a large upload does not expire while it runs.
+ * for another day, so a large upload does not expire while it runs.
  */
 export const signDirectUploadPage = Effect.fn("signDirectUploadPage")(function* (
   identity: Identity,

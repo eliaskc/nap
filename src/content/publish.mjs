@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Nap publish script. Publishes a folder or a single HTML file to Nap, for any size up to 1 GB.
+// Nap publish script. Publishes a folder or a single HTML file to Nap, for any size up to 10 GB.
 // Nap serves this file at https://{{rootDomain}}/_nap/api/publish.mjs. Needs Node 20+.
 //
 // Usage:
@@ -306,28 +306,36 @@ async function publish(options) {
   let done = 0;
   let sent = 0;
   let lastReport = 0;
-  // Nap signs URLs a page at a time. Upload a page while the next one is signed.
-  let page = started.data;
-  while (true) {
-    const following = page.nextPage ? nextPage(token, page.nextPage) : null;
-    following?.catch(() => {});
-    const queue = [...page.files];
-    const worker = async () => {
-      for (let target = queue.shift(); target; target = queue.shift()) {
-        const source = byPath.get(target.path);
-        await putFile(target, source);
-        done++;
-        sent += source.size;
-        if (Date.now() - lastReport > 2000 || done === files.length) {
-          lastReport = Date.now();
-          console.log(`Uploaded ${done}/${files.length} files (${mb(sent)} of ${mb(total)})`);
-        }
+  // Nap signs URLs a page at a time, and they last an hour. Ask for the next page only when the
+  // queue runs out, so no URL waits long before it is used.
+  const queue = [...started.data.files];
+  let next = started.data.nextPage;
+  let fetching = null;
+  const take = async () => {
+    while (true) {
+      if (queue.length) return queue.shift();
+      if (!next) return null;
+      fetching ??= nextPage(token, next).then((page) => {
+        queue.push(...page.files);
+        next = page.nextPage;
+        fetching = null;
+      });
+      await fetching;
+    }
+  };
+  const worker = async () => {
+    for (let target = await take(); target; target = await take()) {
+      const source = byPath.get(target.path);
+      await putFile(target, source);
+      done++;
+      sent += source.size;
+      if (Date.now() - lastReport > 2000 || done === files.length) {
+        lastReport = Date.now();
+        console.log(`Uploaded ${done}/${files.length} files (${mb(sent)} of ${mb(total)})`);
       }
-    };
-    await Promise.all(Array.from({ length: Math.min(CONCURRENCY, queue.length) }, worker));
-    if (!following) break;
-    page = await following;
-  }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(CONCURRENCY, files.length) }, worker));
 
   const committed = await api(new URL(commitUrl).pathname.replace(/^\/_nap\/api/, ""), { token });
   if (!committed.ok) {

@@ -23,11 +23,11 @@ Never print the token or put it in a project. In a sandbox that cannot write the
 - The response has id, url, version, access, and a message that says who can see it. Tell the user who can see it.
 - Uploads through Nap take up to 25 MB. Larger, or more than a few files: direct uploads, below.
 
-## Direct uploads (up to 1 GB and 100,000 files)
+## Direct uploads (up to 10 GB and 100,000 files)
 
-1. `POST /_nap/api/uploads` with JSON `{"files":[{"path":"index.html","size":1234}],"title":"..."}` listing every file (exact sizes in bytes), plus kind, slug, access, and emails for a new page, or `"id"` and `"message"` for a new version. The response has uploadId, commitUrl, and a url and headers for each file of the first page (up to 1,000).
+1. `POST /_nap/api/uploads` with JSON `{"files":[{"path":"index.html","size":1234}],"title":"..."}` listing every file (exact sizes in bytes), plus kind, slug, access, and emails for a new page, or `"id"` and `"message"` for a new version. Each file can be up to 4 GB. The response has uploadId, commitUrl, and a url and headers for each file of the first page (up to 1,000 files or 256 MB).
 2. PUT each file to its url with exactly those headers: `curl -sS --fail -X PUT -T img/a.png -H 'content-type: image/png' '<url>'`. The URLs last an hour. Do not send the token to them.
-3. While the response has a `nextPage` URL, GET it with the token when you reach it: it has the next page of `files` and its own `nextPage` (null after the last page).
+3. While the response has a `nextPage` URL, GET it with the token when you have started the last file of the page, not before (URLs last an hour): it has the next page of `files` and its own `nextPage` (null after the last page).
 4. POST to commitUrl with the token. If it says files are missing, PUT them again and POST again.
 
 ## Read and change pages
@@ -46,4 +46,4 @@ Never print the token or put it in a project. In a sandbox that cannot write the
 
 ## Limits
 
-Through Nap: 25 MB and 1,000 files per upload. Direct uploads: 1 GB and 100,000 files. 20 uploads a minute.
+Through Nap: 25 MB and 1,000 files per upload. Direct uploads: 10 GB, 100,000 files, and 4 GB per file. 20 uploads a minute.

@@ -437,7 +437,28 @@ try {
       400,
       "access on update",
     ],
-    [{ files: [{ path: "index.html", size: 2 * 1024 ** 3 }] }, 413, "over 1 GB"],
+    [
+      {
+        files: [
+          { path: "index.html", size: 1 },
+          { path: "a.bin", size: 4 * 1024 ** 3 },
+          { path: "b.bin", size: 4 * 1024 ** 3 },
+          { path: "c.bin", size: 4 * 1024 ** 3 },
+        ],
+      },
+      413,
+      "over 10 GB",
+    ],
+    [
+      {
+        files: [
+          { path: "index.html", size: 1 },
+          { path: "big.bin", size: 4 * 1024 ** 3 + 1 },
+        ],
+      },
+      413,
+      "one file over 4 GB",
+    ],
     [{ files: [{ path: "app.js", size: 1 }] }, 400, "needs index.html"],
     [
       {

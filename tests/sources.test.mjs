@@ -424,7 +424,8 @@ test("an expired upload deletes the repo it created", async () => {
   assert.equal(SOURCES.repos.has("team-map"), false);
 });
 
-const { SIGNED_PAGE_SIZE, signDirectUploadPage } = await import("../src/lib/direct-uploads.ts");
+const { SIGNED_PAGE_BYTES, SIGNED_PAGE_SIZE, signDirectUploadPage } =
+  await import("../src/lib/direct-uploads.ts");
 
 const startFiles = (env, files) =>
   call(
@@ -527,4 +528,55 @@ test("an expired upload deletes its manifest", async () => {
   sqlite.exec("UPDATE uploads SET expires_at = '2000-01-01T00:00:00.000Z'");
   await startFiles(env, tiles(2));
   assert.equal(objects.has(`uploads/${started.uploadId}/manifest.json`), false);
+});
+
+test("pages also stop at SIGNED_PAGE_BYTES, and a larger file gets a page of its own", async () => {
+  const { env, sqlite } = uploadEnv();
+  const third = Math.floor(SIGNED_PAGE_BYTES / 3);
+  const files = [
+    { path: "index.html", size: 18 },
+    { path: "a.bin", size: third },
+    { path: "b.bin", size: third },
+    { path: "c.bin", size: third },
+    { path: "huge.bin", size: 3 * SIGNED_PAGE_BYTES },
+    { path: "d.bin", size: 1 },
+  ];
+  const started = await startFiles(env, files);
+  const pages = [started.files.map((file) => file.path)];
+  let offset = started.nextOffset;
+  while (offset !== null) {
+    const page = await call(
+      env,
+      signDirectUploadPage({ email: OWNER, name: "" }, started.uploadId, "agent", offset),
+    );
+    pages.push(page.files.map((file) => file.path));
+    offset = page.nextOffset;
+  }
+  assert.deepEqual(pages, [["index.html", "a.bin", "b.bin"], ["c.bin"], ["huge.bin"], ["d.bin"]]);
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM uploads").get().n, 1);
+});
+
+test("direct uploads take 10 GB, with up to 4 GB a file", async () => {
+  const { env } = uploadEnv();
+  const gb = 1024 ** 3;
+  const ok = await startFiles(env, [
+    { path: "index.html", size: 1 },
+    { path: "a.bin", size: 4 * gb },
+    { path: "b.bin", size: 4 * gb },
+    { path: "c.bin", size: 2 * gb - 1 },
+  ]);
+  assert.equal(ok.totalBytes, 10 * gb);
+  const total = await startFiles(env, [
+    { path: "index.html", size: 2 },
+    { path: "a.bin", size: 4 * gb },
+    { path: "b.bin", size: 4 * gb },
+    { path: "c.bin", size: 2 * gb - 1 },
+  ]);
+  assert.equal(total.status, 413);
+  const one = await startFiles(env, [
+    { path: "index.html", size: 1 },
+    { path: "big.bin", size: 4 * gb + 1 },
+  ]);
+  assert.equal(one.status, 413);
+  assert.match((await one.json()).error, /big\.bin is larger than 4 GB/);
 });

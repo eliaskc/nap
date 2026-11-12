@@ -16,7 +16,9 @@ export const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
  * URLs a page at a time, so the file count is bound only by the manifest Nap keeps in R2.
  */
 export const MAX_DIRECT_UPLOAD_FILES = 100_000;
-export const MAX_DIRECT_UPLOAD_BYTES = 1024 * 1024 * 1024;
+export const MAX_DIRECT_UPLOAD_BYTES = 10 * 1024 * 1024 * 1024;
+/** One file of a direct upload is one PUT, and R2 takes at most 5 GiB in one. */
+export const MAX_DIRECT_FILE_BYTES = 4 * 1024 * 1024 * 1024;
 
 // Host labels that Nap uses itself. No site may take them.
 const RESERVED_SLUGS = new Set(["artifacts", "www", "api", "mcp", "admin", "static"]);
@@ -212,7 +214,7 @@ const DIRECT_HINT = `Direct uploads take up to ${formatLimit(MAX_DIRECT_UPLOAD_B
 /** Checks a list of paths and sizes, before or without the file contents. */
 export const checkManifest = (
   files: Array<{ path: string; size: number }>,
-  limits: { maxFiles: number; maxBytes: number },
+  limits: { maxFiles: number; maxBytes: number; maxFileBytes?: number },
 ): Effect.Effect<{ totalBytes: number }, HttpError> => {
   const problem = manifestProblem(files, limits);
   return problem
@@ -222,7 +224,11 @@ export const checkManifest = (
 
 function manifestProblem(
   files: Array<{ path: string; size: number }>,
-  { maxFiles, maxBytes }: { maxFiles: number; maxBytes: number },
+  {
+    maxFiles,
+    maxBytes,
+    maxFileBytes,
+  }: { maxFiles: number; maxBytes: number; maxFileBytes?: number },
 ) {
   if (files.length === 0) return uploadError("No files uploaded", 400);
   if (files.length > maxFiles) {
@@ -243,6 +249,13 @@ function manifestProblem(
   }
   const badSize = files.find((file) => !Number.isSafeInteger(file.size) || file.size < 0);
   if (badSize) return uploadError(`Bad file size: ${badSize.path}`, 400);
+  const tooLarge = maxFileBytes ? files.find((file) => file.size > maxFileBytes) : undefined;
+  if (tooLarge) {
+    return uploadError(
+      `${tooLarge.path} is larger than ${formatLimit(maxFileBytes!)}, the most for one file`,
+      413,
+    );
+  }
   const totalBytes = files.reduce((sum, file) => sum + file.size, 0);
   if (totalBytes > maxBytes) {
     return uploadError(`Upload is larger than ${formatLimit(maxBytes)}`, 413);

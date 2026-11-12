@@ -99,29 +99,37 @@ export async function directUpload(
   // Bytes sent: done files plus the ones in flight. A running total, since uploads can have many
   // thousands of files.
   let sent = 0;
-  // Upload a page while the next one is signed.
-  let page: SignedPage = { files: data.files, nextPage: data.nextPage ?? null };
-  while (true) {
-    const following = page.nextPage ? fetchPage(page.nextPage) : null;
-    // Do not leave the next page's rejection unhandled while this page uploads.
-    following?.catch(() => {});
-    const queue = [...page.files];
-    const worker = async () => {
-      for (let next = queue.shift(); next; next = queue.shift()) {
-        const file = byPath.get(next.path);
-        if (!file) throw new Error(`Missing file: ${next.path}`);
-        let mine = 0;
-        await putFile(next.url, next.headers, file, (bytes) => {
-          sent += bytes - mine;
-          mine = bytes;
-          onProgress(sent / total);
-        });
-      }
-    };
-    await Promise.all(Array.from({ length: Math.min(CONCURRENCY, queue.length) }, worker));
-    if (!following) break;
-    page = await following;
-  }
+  // Nap signs URLs a page at a time, and they last an hour. Ask for the next page only when the
+  // queue runs out, so no URL waits long before it is used.
+  const queue = [...data.files];
+  let nextPage = data.nextPage ?? null;
+  let fetching: Promise<void> | null = null;
+  const take = async () => {
+    while (true) {
+      const next = queue.shift();
+      if (next) return next;
+      if (!nextPage) return null;
+      fetching ??= fetchPage(nextPage).then((page) => {
+        queue.push(...page.files);
+        nextPage = page.nextPage;
+        fetching = null;
+      });
+      await fetching;
+    }
+  };
+  const worker = async () => {
+    for (let next = await take(); next; next = await take()) {
+      const file = byPath.get(next.path);
+      if (!file) throw new Error(`Missing file: ${next.path}`);
+      let mine = 0;
+      await putFile(next.url, next.headers, file, (bytes) => {
+        sent += bytes - mine;
+        mine = bytes;
+        onProgress(sent / total);
+      });
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(CONCURRENCY, files.length) }, worker));
 
   const committed = await fetch(`/api/uploads/${data.uploadId}/commit`, { method: "POST" });
   const result = (await committed.json().catch(() => ({}))) as { error?: string };
