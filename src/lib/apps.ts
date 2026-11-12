@@ -33,6 +33,7 @@ import { SignerBinding } from "~/server/bindings";
 import { Database } from "~/server/database";
 import type { NapServices } from "~/server/runtime";
 import { failNoStore, json, noStore, readParams } from "~/server/http";
+import { inBackground } from "~/server/platform";
 import { Storage } from "~/server/storage";
 
 /**
@@ -108,6 +109,7 @@ type BuildRow = {
   playKey: string | null;
   sha256: string | null;
   contents: string | null;
+  filesDeletedAt: string | null;
   createdByEmail: string;
   client: string;
   createdAt: string;
@@ -124,7 +126,7 @@ const BUILD_COLUMNS = `id, app_slug AS appSlug, target, build_number AS buildNum
   testflight_upload AS testflightUpload, testflight_key AS testflightKey,
   testflight_checked_at AS testflightCheckedAt, play_state AS playState,
   play_error AS playError, play_key AS playKey, sha256, contents,
-  created_by_email AS createdByEmail, client, created_at AS createdAt`;
+  files_deleted_at AS filesDeletedAt, created_by_email AS createdByEmail, client, created_at AS createdAt`;
 
 /** Workers take request bodies up to 100 MB. Launchers are far smaller. */
 export const MAX_APP_BYTES = 95 * 1024 * 1024;
@@ -246,7 +248,7 @@ export const handleAppsApi = Effect.fn("handleAppsApi")(function* (
       method === "HEAD"
         ? yield* storage.head(uploadKey(app.slug, build.id))
         : yield* storage.get(uploadKey(app.slug, build.id));
-    if (!object) return yield* failNoStore(404, "The build is missing");
+    if (!object) return yield* missingBuild(build);
     if (method === "GET") {
       yield* logAppEvent(agent, app.slug, "download", {
         target: build.target,
@@ -273,7 +275,7 @@ export const handleAppsApi = Effect.fn("handleAppsApi")(function* (
       return yield* failNoStore(404, "Build not found");
     }
     const object = yield* (yield* Storage).get(build.playKey);
-    if (!object) return yield* failNoStore(404, "The build is missing");
+    if (!object) return yield* missingBuild(build);
     yield* logAppEvent(agent, app.slug, "download", {
       target: build.target,
       buildNumber: build.buildNumber,
@@ -525,6 +527,7 @@ const publishBuild = Effect.fnUntraced(function* (
   }
   yield* db.run("UPDATE apps SET updated_at = ? WHERE slug = ?", now(), app.slug);
   yield* logAppEvent(agent, app.slug, "publish", { target, buildNumber, commit });
+  yield* inBackground(deleteOldBuildFiles(app.slug, target), "delete old build files");
 
   const page = `${url.origin}/app`;
   return json(
@@ -1078,6 +1081,53 @@ export const testFlightBuild = Effect.fn("testFlightBuild")(function* () {
   };
 });
 
+/** Builds of a target whose files Nap keeps: the newest ready ones, besides the live build. */
+export const KEPT_BUILDS = 3;
+
+/**
+ * Deletes the R2 files of a target's older builds: everything but the live build, the newest
+ * KEPT_BUILDS ready builds, and builds still signing. Nap needs a build's files only while it
+ * processes it (and, for reMarkable and Android, to hand recent builds out), so old ones are
+ * dead weight. The rows stay, for the history.
+ */
+export const deleteOldBuildFiles = Effect.fn("deleteOldBuildFiles")(function* (
+  app: string,
+  target: string,
+) {
+  const db = yield* Database;
+  const storage = yield* Storage;
+  const old = yield* db.all<{ id: string }>(
+    `SELECT id FROM app_builds
+     WHERE app_slug = ?1 AND target = ?2 AND files_deleted_at IS NULL AND status <> 'signing'
+       AND id IS NOT (SELECT live_build FROM app_targets WHERE app_slug = ?1 AND target = ?2)
+       AND id NOT IN (SELECT id FROM app_builds
+                      WHERE app_slug = ?1 AND target = ?2 AND status = 'ready'
+                      ORDER BY build_number DESC LIMIT ?3)`,
+    app,
+    target,
+    KEPT_BUILDS,
+  );
+  for (const { id } of old) {
+    const keys = (yield* storage.list(`apps/${app}/builds/${id}/`)).map((item) => item.key);
+    if (keys.length > 0) yield* storage.delete(keys);
+    yield* db.run("UPDATE app_builds SET files_deleted_at = ? WHERE id = ?", now(), id);
+  }
+  if (old.length > 0) {
+    yield* Effect.logInfo("Deleted old build files").pipe(
+      Effect.annotateLogs({ app, target, builds: old.length }),
+    );
+  }
+});
+
+const missingBuild = (build: BuildRow) =>
+  build.filesDeletedAt
+    ? failNoStore(
+        410,
+        `Nap no longer keeps this build's files: it keeps the live build and the newest ${KEPT_BUILDS}.`,
+        { code: "build_files_deleted" },
+      )
+    : failNoStore(404, "The build is missing");
+
 function describeBuild(build: BuildRow) {
   return {
     id: build.id,
@@ -1093,8 +1143,9 @@ function describeBuild(build: BuildRow) {
     bytes: build.signedBytes,
     sha256: build.sha256,
     apps: readContents(build.contents),
+    filesDeleted: Boolean(build.filesDeletedAt),
     download:
-      build.target === "remarkable" && build.status === "ready"
+      build.target === "remarkable" && build.status === "ready" && !build.filesDeletedAt
         ? `/_nap/api/apps/${build.appSlug}/targets/remarkable/builds/${build.id}/download`
         : null,
     testFlight: build.testflightState
@@ -1104,9 +1155,10 @@ function describeBuild(build: BuildRow) {
       ? {
           state: build.playState,
           error: build.playError,
-          bundle: build.playKey
-            ? `/_nap/api/apps/${build.appSlug}/targets/android/builds/${build.id}/bundle`
-            : null,
+          bundle:
+            build.playKey && !build.filesDeletedAt
+              ? `/_nap/api/apps/${build.appSlug}/targets/android/builds/${build.id}/bundle`
+              : null,
         }
       : null,
     by: build.createdByEmail,

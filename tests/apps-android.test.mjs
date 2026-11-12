@@ -135,6 +135,16 @@ function bucket() {
       const object = objects.get(key);
       return object ? { size: object.bytes.byteLength } : null;
     },
+    async list({ prefix }) {
+      const keys = [...objects.keys()].filter((key) => key.startsWith(prefix));
+      return {
+        objects: keys.map((key) => ({ key, size: objects.get(key).bytes.byteLength })),
+        truncated: false,
+      };
+    },
+    async delete(keys) {
+      for (const key of [keys].flat()) objects.delete(key);
+    },
   };
 }
 
@@ -426,5 +436,33 @@ test("Android with Play: a draft app gets a draft release, and an unknown app a 
     } finally {
       fake.restore();
     }
+  });
+});
+
+test("Nap keeps the files of the newest builds only, and the rows of all", async () => {
+  await withApps(ANDROID, async () => {
+    const { api, SOURCES, SITES, sqlite } = setup();
+    await created(api, SOURCES);
+    const ids = [];
+    for (let n = 1; n <= 5; n++) {
+      const response = await api("POST", `/notes/builds?target=android&sourceCommit=${sha(1)}`, {
+        body: bytes(`bundle ${n}`),
+      });
+      assert.equal(response.status, 201);
+      ids.push((await response.json()).buildId);
+    }
+    const kept = (id) => [...SITES.objects.keys()].some((key) => key.includes(`/builds/${id}/`));
+    assert.deepEqual(ids.map(kept), [false, false, true, true, true]);
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM app_builds").get().n, 5);
+    const deleted = sqlite
+      .prepare("SELECT id FROM app_builds WHERE files_deleted_at IS NOT NULL ORDER BY build_number")
+      .all()
+      .map((row) => row.id);
+    assert.deepEqual(deleted, ids.slice(0, 2));
+
+    const gone = await api("GET", `/notes/targets/android/builds/${ids[0]}/bundle`);
+    assert.equal(gone.status, 410);
+    assert.equal((await gone.json()).code, "build_files_deleted");
+    assert.equal((await api("GET", `/notes/targets/android/builds/${ids[4]}/bundle`)).status, 200);
   });
 });
