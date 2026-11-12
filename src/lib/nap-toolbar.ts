@@ -1,3 +1,4 @@
+import { iconUrl } from "~/lib/icons";
 import { SHARE_WIDGET_VERSION } from "~/lib/share-widget";
 
 /**
@@ -59,7 +60,15 @@ export function toolbarPage(options: {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${text(title)}</title>
+<title>${text(title)}</title>${
+    // Artifacts are on the dashboard's host, so they get its icon. Sites keep their own.
+    artifact
+      ? `
+<link rel="icon" type="image/svg+xml" href="${attr(iconUrl("favicon.svg"))}">
+<link rel="icon" type="image/png" sizes="32x32" href="${attr(iconUrl("favicon-32x32.png"))}">
+<link rel="apple-touch-icon" href="${attr(iconUrl("apple-touch-icon.png"))}">`
+      : ""
+  }
 <style>
   :root { color-scheme: light dark; --nap-bg: #fff; --nap-fg: #18181b; --nap-muted: #71717a; --nap-line: #e4e4e7; --nap-hover: #f4f4f5; }
   @media (prefers-color-scheme: dark) { :root { --nap-bg: #18181b; --nap-fg: #fafafa; --nap-muted: #a1a1aa; --nap-line: #3f3f46; --nap-hover: #27272a; } }
@@ -91,6 +100,7 @@ export function toolbarPage(options: {
         "content-security-policy": [
           "default-src 'none'",
           "style-src 'unsafe-inline'",
+          "img-src 'self'",
           "script-src 'self'",
           "connect-src 'self'",
           "frame-src 'self'",
