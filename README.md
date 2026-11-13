@@ -136,7 +136,16 @@ the secrets and a deploy workflow that deploys this code with them.
     Android app with the package name, and copy its values from
     `google-services.json` into `apps.android.firebase`; then give the service
     account the role Firebase Cloud Messaging API Admin.
-11. **Icon (optional).** Nap's icon (`brand/AppIcon.icon`, made in Icon
+11. **Access requests (optional).** Someone who opens a nap that is not
+    shared with them can ask its owner for it, and the owner answers in one
+    click: invite them, share with everyone, or deny. Turn on channels in
+    `instance/config.ts`, such as `accessRequests: { channels: ["slack"] }`.
+    For Slack, create a Slack app from `infra/slack-app-manifest.yml`, with
+    `<root>` replaced by the domain, and install it in the
+    workspace: its bot token is the secret `NAP_SLACK_BOT_TOKEN` and its
+    signing secret the secret `NAP_SLACK_SIGNING_SECRET`. Owners get a direct
+    message from the app; Nap finds them by their email.
+12. **Icon (optional).** Nap's icon (`brand/AppIcon.icon`, made in Icon
     Composer) is the icon of the dashboard and of new app launchers. For your
     own, put an Icon Composer icon at `instance/icon/AppIcon.icon` and run
     `node scripts/icons.mjs instance/icon` on a Mac. Commit both the icon and
@@ -437,11 +446,12 @@ Agents get everything they need from `GET /_nap/api/instructions`.
 These are the only paths that bypass Access. Each one has its own Access
 application in `alchemy.run.ts`, and the Worker checks a credential itself:
 
-| Path            | Access app            | Credential                                  |
-| --------------- | --------------------- | ------------------------------------------- |
-| `/_nap/drafts`  | `DraftUploadAccess`   | none; rate-limited, and drafts need a claim |
-| `/_nap/api/*`   | `AgentApiAccess`      | agent token                                 |
-| `/_nap/frame/*` | `ArtifactFrameAccess` | frame token                                 |
+| Path                | Access app            | Credential                                            |
+| ------------------- | --------------------- | ----------------------------------------------------- |
+| `/_nap/drafts`      | `DraftUploadAccess`   | none; rate-limited, and drafts need a claim           |
+| `/_nap/api/*`       | `AgentApiAccess`      | agent token                                           |
+| `/_nap/frame/*`     | `ArtifactFrameAccess` | frame token                                           |
+| `/_nap/hooks/slack` | `SlackHookAccess`     | Slack's signature; only with Slack access requests on |
 
 Code on these paths must never call `getIdentity()` or `ensureProfile()`.
 The Access headers are not set there, and a token must not keep its owner

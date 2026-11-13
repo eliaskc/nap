@@ -146,6 +146,22 @@ export const ArtifactFrameAccess = Cloudflare.Access.Application(
   }),
 ).pipe(RemovalPolicy.retain());
 
+// Slack, for access requests (napConfig.accessRequests with "slack"). Slack calls this path when
+// an owner clicks a button on a request, without an Access session. The Worker checks Slack's
+// signature, and that the person who clicked owns the nap. Only made when Slack is on.
+export const SlackHookAccess = Cloudflare.Access.Application(
+  "SlackHookAccess",
+  Effect.gen(function* () {
+    return {
+      type: "self_hosted" as const,
+      name: "nap-slack-hook",
+      domain: `${ROOT_DOMAIN}/_nap/hooks/slack`,
+      policies: yield* bypassPolicies("nap-slack-hook"),
+      appLauncherVisible: false,
+    };
+  }),
+).pipe(RemovalPolicy.retain());
+
 export const DraftLimiter = Cloudflare.RateLimit("DRAFT_LIMITER", {
   namespaceId: 1001,
   simple: { limit: 20, period: 60 },
@@ -202,6 +218,10 @@ export class NapWorker extends Cloudflare.Website.Vite<NapWorker>()(
     // {"AMPLITUDE_API_KEY": "..."}. Optional on every stage; an extension without its secrets
     // answers that it is not set up.
     const extensionSecrets = yield* optional("NAP_EXTENSION_SECRETS");
+    // Access requests through Slack: the Slack app's bot token and signing secret. Optional;
+    // without them, requests reach nobody on Slack and the page says so.
+    const slackBotToken = yield* optional("NAP_SLACK_BOT_TOKEN");
+    const slackSigningSecret = yield* optional("NAP_SLACK_SIGNING_SECRET");
     return {
       name: production ? "nap" : `nap-${stage}`,
       main: "./src/worker.ts",
@@ -286,6 +306,8 @@ export class NapWorker extends Cloudflare.Website.Vite<NapWorker>()(
         NAP_TURN_KEY_ID: yield* plain("NAP_TURN_KEY_ID"),
         NAP_TURN_KEY_API_TOKEN: turnKeyToken,
         NAP_EXTENSION_SECRETS: extensionSecrets,
+        NAP_SLACK_BOT_TOKEN: slackBotToken,
+        NAP_SLACK_SIGNING_SECRET: slackSigningSecret,
       },
       observability: { enabled: true },
     };
@@ -351,6 +373,7 @@ export default Alchemy.Stack(
       yield* DraftUploadAccess;
       yield* AgentApiAccess;
       yield* ArtifactFrameAccess;
+      if (napConfig.accessRequests?.channels.includes("slack")) yield* SlackHookAccess;
     }
     const worker = yield* NapWorker.pipe(RemovalPolicy.retain());
     const database = yield* Database;

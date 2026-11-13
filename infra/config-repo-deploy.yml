@@ -96,6 +96,10 @@ jobs:
           NAP_TURN_KEY_API_TOKEN: ${{ secrets.NAP_TURN_KEY_API_TOKEN }}
           # Extensions only (instance/extensions): their secrets as one JSON object.
           NAP_EXTENSION_SECRETS: ${{ secrets.NAP_EXTENSION_SECRETS }}
+          # Access requests through Slack only (napConfig.accessRequests): the Slack app's bot
+          # token and signing secret.
+          NAP_SLACK_BOT_TOKEN: ${{ secrets.NAP_SLACK_BOT_TOKEN }}
+          NAP_SLACK_SIGNING_SECRET: ${{ secrets.NAP_SLACK_SIGNING_SECRET }}
         run: |
           test -n "$CLOUDFLARE_API_TOKEN" || { echo "Missing secret CLOUDFLARE_API_TOKEN"; exit 1; }
           test -n "$NAP_R2_ACCESS_KEY_ID" && test -n "$NAP_R2_SECRET_ACCESS_KEY" || { echo "Missing secrets NAP_R2_ACCESS_KEY_ID and NAP_R2_SECRET_ACCESS_KEY"; exit 1; }

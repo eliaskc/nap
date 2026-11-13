@@ -86,11 +86,12 @@ export const Route = createFileRoute("/api/sites/$slug")({
             const results = yield* db.batch([
               sql("DELETE FROM site_documents WHERE site_slug = ?", slug),
               sql("DELETE FROM comments WHERE site_slug = ?", slug),
+              sql("DELETE FROM access_requests WHERE site_slug = ?", slug),
               sql("DELETE FROM versions WHERE site_slug = ?", slug),
               sql("DELETE FROM sites WHERE slug = ?", slug),
               sql("DELETE FROM nap_redirects WHERE site_slug = ?", slug),
             ]);
-            if (results[3].changes === 0) return yield* fail(404, "Site not found");
+            if (results[4].changes === 0) return yield* fail(404, "Site not found");
             // Its files (nap.files) go with it; the version files stay, as they always have.
             yield* inBackground(deleteSiteFiles(slug), "Deleting a site's files failed");
 

@@ -26,6 +26,9 @@ export type PlayServiceAccount = { clientEmail: string; privateKey: string };
 /** A Cloudflare Realtime TURN key, for voice and video between the people on a nap. */
 export type TurnKey = { keyId: string; token: string };
 
+/** A Slack app: its bot token (xoxb-...) and the signing secret that signs its requests. */
+export type SlackApp = { botToken: string; signingSecret: string };
+
 /** Settings from the Worker's environment. Empty values mean "not set up". */
 export class Settings extends Context.Service<
   Settings,
@@ -45,6 +48,8 @@ export class Settings extends Context.Service<
     readonly turn: TurnKey | null;
     /** The deployment's extension secrets by name (NAP_EXTENSION_SECRETS, a JSON object). */
     readonly extensionSecrets: Readonly<Record<string, string>>;
+    /** The Slack app for access requests. Null when it is not set up. */
+    readonly slack: SlackApp | null;
   }
 >()("nap/Settings") {}
 
@@ -64,6 +69,8 @@ export type SettingsEnv = {
   NAP_TURN_KEY_ID?: string;
   NAP_TURN_KEY_API_TOKEN?: string;
   NAP_EXTENSION_SECRETS?: string;
+  NAP_SLACK_BOT_TOKEN?: string;
+  NAP_SLACK_SIGNING_SECRET?: string;
 };
 
 export function settingsFromEnv(env: SettingsEnv, rootDomain: string): Settings["Service"] {
@@ -79,6 +86,8 @@ export function settingsFromEnv(env: SettingsEnv, rootDomain: string): Settings[
   const apnsPrivateKey = text(env.NAP_APNS_PRIVATE_KEY);
   const turnKeyId = text(env.NAP_TURN_KEY_ID);
   const turnToken = text(env.NAP_TURN_KEY_API_TOKEN);
+  const slackBotToken = text(env.NAP_SLACK_BOT_TOKEN);
+  const slackSigningSecret = text(env.NAP_SLACK_SIGNING_SECRET);
   return Settings.of({
     rootDomain: text(env.NAP_ROOT_DOMAIN) || rootDomain,
     r2:
@@ -91,6 +100,10 @@ export function settingsFromEnv(env: SettingsEnv, rootDomain: string): Settings[
     signerUrl: text(env.NAP_SIGNER_URL) || null,
     turn: turnKeyId && turnToken ? { keyId: turnKeyId, token: turnToken } : null,
     extensionSecrets: parseExtensionSecrets(text(env.NAP_EXTENSION_SECRETS)),
+    slack:
+      slackBotToken && slackSigningSecret
+        ? { botToken: slackBotToken, signingSecret: slackSigningSecret }
+        : null,
   });
 }
 

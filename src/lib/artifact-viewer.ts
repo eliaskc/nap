@@ -3,6 +3,8 @@ import { Effect } from "effect";
 import { handleSiteCommentsRequest } from "~/lib/comments";
 import { ensureProfile, getIdentity, objectKey, type Identity } from "~/lib/nap-server";
 import { toolbarPage } from "~/lib/nap-toolbar";
+import { handleVisitorAccessRequest, visitorRequestState } from "~/lib/access-requests";
+import { noAccessHeaders, noAccessPage } from "~/lib/no-access-page";
 import { findRedirect } from "~/lib/rekey";
 import { ARTIFACT_PATH, isLocalHostname, napUrl, type NapPlace } from "~/lib/nap-urls";
 import { handleNotifyRequest } from "~/lib/notifications";
@@ -94,6 +96,15 @@ export const handleArtifactPage = Effect.fn("handleArtifactPage")(function* (
   const rest = match[2] ?? "";
 
   if (rest === "/_nap/access") return yield* handleSiteAccessRequest(slug, request);
+  if (rest === "/_nap/access/request" || rest === "/_nap/access/status") {
+    return yield* handleVisitorAccessRequest(
+      slug,
+      rest === "/_nap/access/request" ? "request" : "status",
+      request,
+      getIdentity(request),
+      place,
+    );
+  }
   if (rest === "/_nap/comments" || rest.startsWith("/_nap/comments/")) {
     return yield* handleSiteCommentsRequest(slug, request, rest.slice("/_nap/comments".length));
   }
@@ -118,11 +129,22 @@ export const handleArtifactPage = Effect.fn("handleArtifactPage")(function* (
     return redirect(`${target}${rest || "/"}${url.search}`);
   }
   if (access.status === "denied") {
-    return statusPage(
-      403,
-      "You do not have access to this artifact",
-      "Ask the owner to share it with you.",
-      place,
+    const { nap } = access;
+    return new Response(
+      noAccessPage({
+        kind: "artifact",
+        title: nap.title,
+        visibility: nap.visibility,
+        ownerName: nap.ownerName,
+        ownerEmail: nap.createdByEmail,
+        viewerEmail: identity.email,
+        dashboardUrl: place.localOrigin ? "/" : `https://${place.rootDomain}/`,
+        signOutUrl: place.localOrigin ? undefined : "/cdn-cgi/access/logout",
+        request: yield* visitorRequestState(slug, identity.email),
+        accessPath: `${ARTIFACT_PATH}/${slug}/_nap/access`,
+        back: url.pathname + url.search,
+      }),
+      { status: 403, headers: noAccessHeaders },
     );
   }
 

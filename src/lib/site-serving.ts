@@ -2,6 +2,8 @@ import { Effect } from "effect";
 import { getIdentity, objectKey } from "~/lib/nap-server";
 import { toolbarPage } from "~/lib/nap-toolbar";
 import type { NapKind } from "~/lib/nap-urls";
+import { visitorRequestState } from "~/lib/access-requests";
+import { noAccessHeaders, noAccessPage } from "~/lib/no-access-page";
 import { findRedirect } from "~/lib/rekey";
 import { canViewSite, isSameEmail, type Visibility } from "~/lib/site-access";
 import { siteManifest } from "~/lib/site-manifest";
@@ -62,6 +64,8 @@ export const serveUploadedSite = Effect.fn("serveUploadedSite")(function* (
     artifactUrl: (slug: string) => string;
     /** Nap's own /favicon.ico, for sites without one. */
     napFavicon?: Effect.Effect<Response>;
+    /** Signs out of Cloudflare Access, for someone signed in with the wrong account. */
+    signOutUrl?: string;
   },
 ) {
   const url = new URL(request.url);
@@ -79,7 +83,25 @@ export const serveUploadedSite = Effect.fn("serveUploadedSite")(function* (
 
   if (access.nap.kind === "artifact") return toArtifact(slug);
   if (access.status === "denied") {
-    return yield* failText(403, "You do not have access to this site");
+    if (!wantsHtml(request)) return yield* failText(403, "You do not have access to this site");
+    const { nap } = access;
+    return yield* failText(
+      403,
+      noAccessPage({
+        kind: "site",
+        title: nap.title,
+        visibility: nap.visibility,
+        ownerName: nap.ownerName,
+        ownerEmail: nap.createdByEmail,
+        viewerEmail: identity.email,
+        dashboardUrl: options.dashboardUrl ?? "/",
+        signOutUrl: options.signOutUrl,
+        request: yield* visitorRequestState(nap.slug, identity.email),
+        accessPath: options.accessPath ?? "/_nap/access",
+        back: url.pathname + url.search,
+      }),
+      noAccessHeaders,
+    );
   }
   const { nap, isOwner } = access;
   const normalizedPath = normalizeRequestPath(path);
@@ -158,6 +180,14 @@ export function fileHeaders(object: R2ObjectBody) {
   headers.set("etag", object.httpEtag);
   headers.set("cache-control", "no-store");
   return headers;
+}
+
+/** A browser opening a page in a tab, not a frame, script, image, or fetch. */
+function wantsHtml(request: Request) {
+  if (request.method !== "GET") return false;
+  const dest = request.headers.get("sec-fetch-dest");
+  if (dest) return dest === "document";
+  return (request.headers.get("accept") ?? "").includes("text/html");
 }
 
 /** A person opening a page in the browser, not a frame, script, or fetch. */

@@ -38,7 +38,7 @@ workersDev: { enabled: false, previewsEnabled: false }
 Temporary testing may enable them, but revert before deploying.
 
 - Nap has no Wrangler config. Production deployment and D1 migration history belong to Alchemy; local dev and the HTTP tests run `local*` Alchemy stages. Read the infrastructure section in `README.md` before changes to production resources. Preserve the live database and bucket; review the plan for replacements.
-- Code on Access-bypassed paths (`/_nap/drafts`, `/_nap/api/*`, `/_nap/frame/*`) must never call `getIdentity()` or `ensureProfile()`.
+- Code on Access-bypassed paths (`/_nap/drafts`, `/_nap/api/*`, `/_nap/frame/*`, `/_nap/hooks/*`) must never call `getIdentity()` or `ensureProfile()`.
 
 ## Server code (Effect)
 

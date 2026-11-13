@@ -1,6 +1,9 @@
 import handler from "@tanstack/react-start/server-entry";
 import { Effect } from "effect";
 import { handleAgentApi } from "~/lib/agent-api";
+import { handleVisitorAccessRequest } from "~/lib/access-requests";
+import { handleSlackHook } from "~/lib/access-slack";
+import { serveAccessScript } from "~/lib/no-access-page";
 import {
   handleArtifactPage,
   handleFrameRequest,
@@ -78,6 +81,9 @@ const routeRequest = Effect.fn("routeRequest")(function* (
   if (url.pathname === "/_nap/viewer.js" && request.method === "GET") {
     return serveViewerScript();
   }
+  if (url.pathname === "/_nap/access.js" && request.method === "GET") {
+    return serveAccessScript();
+  }
   // The comments UI for the Nap bar on artifact pages, built from src/comments into the assets.
   if (
     target.type === "dashboard" &&
@@ -101,6 +107,10 @@ const routeRequest = Effect.fn("routeRequest")(function* (
   }
   if (target.type === "dashboard" && isFramePath(url.pathname)) {
     return yield* handleFrameRequest(request);
+  }
+  // Slack, when an owner clicks a button on an access request. Checks Slack's signature.
+  if (target.type === "dashboard" && url.pathname === "/_nap/hooks/slack") {
+    return yield* handleSlackHook(request, place);
   }
 
   // Artifacts: <root>/artifact/<slug>, a sandboxed frame below the Nap bar.
@@ -157,6 +167,17 @@ const routeRequest = Effect.fn("routeRequest")(function* (
     if (/^\/s\/[^/]+\/_nap\/people$/.test(url.pathname) && request.method === "GET") {
       return yield* peopleResponse(request);
     }
+    const localRequestMatch = url.pathname.match(/^\/s\/([^/]+)\/_nap\/access\/(request|status)$/);
+    if (localRequestMatch) {
+      const [, localSlug, action] = localRequestMatch;
+      return yield* handleVisitorAccessRequest(
+        localSlug,
+        action as "request" | "status",
+        request,
+        getIdentity(request),
+        place,
+      );
+    }
     const localAccessMatch = url.pathname.match(/^\/s\/([^/]+)\/_nap\/access$/);
     if (localAccessMatch) {
       return yield* handleSiteAccessRequest(localAccessMatch[1], request);
@@ -188,6 +209,15 @@ const routeRequest = Effect.fn("routeRequest")(function* (
     }
     if (url.pathname === "/_nap/access") {
       return yield* handleSiteAccessRequest(slug, request);
+    }
+    if (url.pathname === "/_nap/access/request" || url.pathname === "/_nap/access/status") {
+      return yield* handleVisitorAccessRequest(
+        slug,
+        url.pathname === "/_nap/access/request" ? "request" : "status",
+        request,
+        getIdentity(request),
+        place,
+      );
     }
     // The old artifact viewer sent tabs here once. Keep those links working.
     if (url.pathname === "/_nap/session" && request.method === "GET") {
@@ -227,6 +257,7 @@ const routeRequest = Effect.fn("routeRequest")(function* (
         env.ASSETS.fetch(new Request(new URL("/favicon.ico", dashboardOrigin), request)),
       ),
       artifactUrl: (key) => `https://${rootDomain}${ARTIFACT_PATH}/${key}`,
+      signOutUrl: "/cdn-cgi/access/logout",
     });
   }
 

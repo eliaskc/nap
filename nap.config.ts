@@ -117,6 +117,16 @@ export type NapConfig = {
    */
   avatars?: boolean;
   /**
+   * Access requests: someone who opens a nap that is not shared with them can ask its owner for
+   * it, and the owner hears through these channels and answers in one click (invite them, or
+   * share it with everyone). Off, the page only says to ask the owner. Off when left out.
+   *
+   * - "slack": a direct message from the Nap Slack app, with buttons. Needs NAP_SLACK_BOT_TOKEN
+   *   and NAP_SLACK_SIGNING_SECRET, and makes <root>/_nap/hooks/slack skip Access (Slack calls it
+   *   when the owner clicks a button; the Worker checks Slack's signature).
+   */
+  accessRequests?: { channels: Array<"slack"> };
+  /**
    * Example requests the dashboard rotates through under "Ask your agent", such as
    * `{ kind: "site", text: "where we vote on the offsite venue" }`. Each reads after
    * "Make me a site", "Make me an artifact", or "Make me an app". Optional: Nap has generic ones.

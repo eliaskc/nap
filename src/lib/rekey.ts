@@ -73,6 +73,7 @@ export const rekeyNap = Effect.fn("rekeyNap")(function* (
     ),
     move("versions"),
     move("site_viewers"),
+    move("access_requests"),
     move("site_documents"),
     move("comments"),
     move("artifact_frames"),
