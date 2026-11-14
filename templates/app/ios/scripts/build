@@ -1,6 +1,7 @@
 #!/bin/sh
 # Builds the launcher for iPhone without signing and zips it: build/launcher.zip.
-# Nap signs the build when you publish it. Incremental builds take a few seconds.
+# Nap signs the build when you publish it. Release: Swift's optimizer makes SwiftUI noticeably
+# smoother on a phone than an unoptimized Debug build.
 set -eu
 cd "$(dirname "$0")/.."
 
@@ -9,7 +10,7 @@ mkdir -p .build
 xcodebuild build \
   -project NapApps.xcodeproj \
   -scheme Launcher \
-  -configuration Debug \
+  -configuration Release \
   -sdk iphoneos \
   -destination 'generic/platform=iOS' \
   -derivedDataPath .build/DerivedData \
@@ -22,5 +23,5 @@ xcodebuild build \
 
 mkdir -p build
 rm -f build/launcher.zip
-ditto -c -k --keepParent .build/DerivedData/Build/Products/Debug-iphoneos/Nap.app build/launcher.zip
+ditto -c -k --keepParent .build/DerivedData/Build/Products/Release-iphoneos/Nap.app build/launcher.zip
 echo build/launcher.zip
