@@ -19,8 +19,8 @@ export type SiteRecord = {
   theme: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
-  viewCount: number;
-  lastViewedAt: string | null;
+  /** How many people other than the owner have opened it. */
+  visitorCount: number;
   authorDisplayName: string | null;
   authorUsername: string | null;
   visibility: "everyone" | "private" | "selected";
@@ -97,8 +97,7 @@ export const listSites = Effect.fn("listSites")(function* (identity: Identity) {
     themeJson: string;
     createdAt: string;
     updatedAt: string;
-    viewCount: number;
-    lastViewedAt: string | null;
+    visitorCount: number;
     authorDisplayName: string | null;
     authorUsername: string | null;
     visibility: "everyone" | "private" | "selected";
@@ -126,8 +125,9 @@ export const listSites = Effect.fn("listSites")(function* (identity: Identity) {
         sites.theme_json AS themeJson,
         sites.created_at AS createdAt,
         sites.updated_at AS updatedAt,
-        sites.view_count AS viewCount,
-        sites.last_viewed_at AS lastViewedAt,
+        (SELECT count(*) FROM site_visits
+         WHERE site_visits.site_slug = sites.slug
+           AND site_visits.email <> lower(sites.created_by_email)) AS visitorCount,
         profiles.display_name AS authorDisplayName,
         profiles.username AS authorUsername,
         sites.visibility,
@@ -161,8 +161,7 @@ export const listSites = Effect.fn("listSites")(function* (identity: Identity) {
       theme: safeJson(row.themeJson),
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
-      viewCount: row.viewCount,
-      lastViewedAt: row.lastViewedAt,
+      visitorCount: row.visitorCount,
       authorDisplayName: row.authorDisplayName,
       authorUsername: row.authorUsername,
       visibility: row.visibility,

@@ -2,6 +2,7 @@ import {
   ArrowRightLeftIcon,
   ArrowUpRightIcon,
   EditIcon,
+  EyeIcon,
   FileIcon,
   FolderArchiveIcon,
   HistoryIcon,
@@ -11,6 +12,7 @@ import {
   UsersIcon,
 } from "lucide-react";
 import * as React from "react";
+import { Avatar } from "~/components/avatar";
 import { OwnerPicker, ShareAccess, type Access } from "~/components/share-access";
 import { Badge } from "~/components/ui/badge";
 import { Button } from "~/components/ui/button";
@@ -36,7 +38,14 @@ import { Input } from "~/components/ui/input";
 import { Progress } from "~/components/ui/progress";
 import { Skeleton } from "~/components/ui/skeleton";
 import type { Item, Site } from "~/dashboard/data";
-import { formatBytes, formatDateTime, slugify } from "~/dashboard/format";
+import {
+  formatAgo,
+  formatBytes,
+  formatDate,
+  formatDateTime,
+  formatPeople,
+  slugify,
+} from "~/dashboard/format";
 import { KindIcon } from "~/dashboard/kinds";
 import {
   celebrate,
@@ -45,6 +54,7 @@ import {
   normalizeUploadFiles,
   type UploadFile,
 } from "~/dashboard/upload";
+import type { Color, Shape } from "~/lib/looks";
 import { napLabel } from "~/lib/nap-urls";
 import { napConfig } from "~/nap.config";
 
@@ -54,6 +64,8 @@ export type Actions = {
   copyLink: (item: Item) => void;
   history: (site: Site) => void;
   share: (site: Site) => void;
+  /** Who has opened it. Only for the owner. */
+  visitors: (site: Site) => void;
   transfer: (site: Site) => void;
   rename: (site: Site) => void;
   toggleKind: (site: Site) => void;
@@ -117,6 +129,7 @@ export function DashboardActions({
   const [shareError, setShareError] = React.useState("");
   const shareQueue = React.useRef<Promise<unknown>>(Promise.resolve());
   const [historySite, setHistorySite] = React.useState<Site | null>(null);
+  const [visitorsSite, setVisitorsSite] = React.useState<Site | null>(null);
   const fileInput = React.useRef<HTMLInputElement>(null);
   const folderInput = React.useRef<HTMLInputElement>(null);
   const pickTarget = React.useRef<Site | undefined>(undefined);
@@ -301,6 +314,7 @@ export function DashboardActions({
       setShareAccess({ visibility: site.visibility, emails: site.viewerEmails });
       setShareError("");
     },
+    visitors: setVisitorsSite,
     transfer: (site) => {
       setTransferSite(site);
       setTransferEmail("");
@@ -467,11 +481,16 @@ export function DashboardActions({
             onChange={(next) => sharingSite && changeShareAccess(sharingSite, next)}
           />
           {shareError && <p className="text-sm text-destructive">{shareError}</p>}
+          <p className="text-xs text-muted-foreground">
+            You can see who has opened it under Visitors. Nobody else can.
+          </p>
           <DialogFooter>
             <Button onClick={() => setSharingSite(null)}>Done</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <VisitorsDialog site={visitorsSite} onClose={() => setVisitorsSite(null)} />
 
       <VersionHistoryDialog
         site={historySite}
@@ -576,6 +595,10 @@ export function ItemMenu({
                 <UsersIcon data-icon="inline-start" />
                 Share…
               </ContextMenuItem>
+              <ContextMenuItem onClick={() => actions.visitors(site)}>
+                <EyeIcon data-icon="inline-start" />
+                Visitors…
+              </ContextMenuItem>
               <ContextMenuItem onClick={() => actions.transfer(site)}>
                 <UserRoundPenIcon data-icon="inline-start" />
                 Transfer ownership…
@@ -605,6 +628,104 @@ export function ItemMenu({
         )}
       </ContextMenuContent>
     </ContextMenu>
+  );
+}
+
+type Visitor = {
+  email: string;
+  name: string;
+  shape: Shape | null;
+  color: Color | null;
+  firstVisitedAt: string;
+  visitedAt: string;
+  visits: number;
+};
+
+/** Who has opened one of your sites or artifacts, most recent first. You are left out. */
+function VisitorsDialog({ site, onClose }: { site: Site | null; onClose: () => void }) {
+  const [visitors, setVisitors] = React.useState<Array<Visitor> | null>(null);
+  const [error, setError] = React.useState("");
+  const slug = site?.slug;
+
+  React.useEffect(() => {
+    setVisitors(null);
+    setError("");
+    if (!slug) return;
+    let current = true;
+    void (async () => {
+      const response = await fetch(`/api/sites/${slug}/visitors`);
+      const body = (await response.json().catch(() => ({}))) as {
+        visitors?: Array<Visitor>;
+        error?: string;
+      };
+      if (!current) return;
+      if (!response.ok) setError(body.error ?? "Could not load the visitors");
+      else setVisitors(body.visitors ?? []);
+    })().catch(() => current && setError("Could not load the visitors"));
+    return () => {
+      current = false;
+    };
+  }, [slug]);
+
+  return (
+    <Dialog open={Boolean(site)} onOpenChange={(open) => !open && onClose()}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Visitors</DialogTitle>
+          <DialogDescription>
+            {site?.title}
+            {visitors && ` · ${formatPeople(visitors.length)}`}. Only you can see this.
+          </DialogDescription>
+        </DialogHeader>
+        {error && <p className="text-sm text-destructive">{error}</p>}
+        <div className="-mx-4 max-h-[60vh] overflow-y-auto border-t">
+          {visitors === null ? (
+            !error && (
+              <div className="flex flex-col gap-2 p-4">
+                <Skeleton className="h-10" />
+                <Skeleton className="h-10" />
+              </div>
+            )
+          ) : visitors.length === 0 ? (
+            <p className="p-4 text-sm text-muted-foreground">Nobody else has opened it yet.</p>
+          ) : (
+            <ul className="divide-y">
+              {visitors.map((visitor) => (
+                <li key={visitor.email} className="flex items-center gap-3 px-4 py-2.5">
+                  {napConfig.avatars && visitor.shape && visitor.color ? (
+                    <Avatar
+                      look={{ shape: visitor.shape, color: visitor.color }}
+                      name={visitor.name}
+                      size={28}
+                    />
+                  ) : (
+                    <span className="grid size-7 shrink-0 place-items-center rounded-full bg-muted text-xs font-semibold">
+                      {visitor.name.charAt(0).toUpperCase()}
+                    </span>
+                  )}
+                  <div className="flex min-w-0 flex-1 flex-col">
+                    <span className="truncate text-sm font-medium">{visitor.name}</span>
+                    <span className="truncate text-xs text-muted-foreground" title={visitor.email}>
+                      {visitor.visits === 1 ? "Once" : `${visitor.visits} times`} · first{" "}
+                      {formatDate(visitor.firstVisitedAt)}
+                    </span>
+                  </div>
+                  <span
+                    className="shrink-0 text-xs text-muted-foreground tabular-nums"
+                    title={formatDateTime(visitor.visitedAt)}
+                  >
+                    {formatAgo(visitor.visitedAt)}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+        <DialogFooter>
+          <Button onClick={onClose}>Done</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 

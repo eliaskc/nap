@@ -37,6 +37,7 @@ import { Route as ApiConnectCodeRouteImport } from './routes/api/connect.$code'
 import { Route as ApiAccessRequestsIdRouteImport } from './routes/api/access-requests.$id'
 import { Route as ApiUploadsIdUrlsRouteImport } from './routes/api/uploads.$id.urls'
 import { Route as ApiUploadsIdCommitRouteImport } from './routes/api/uploads.$id.commit'
+import { Route as ApiSitesSlugVisitorsRouteImport } from './routes/api/sites.$slug.visitors'
 import { Route as ApiSitesSlugVersionsRouteImport } from './routes/api/sites.$slug.versions'
 import { Route as ApiSitesSlugSettingsRouteImport } from './routes/api/sites.$slug.settings'
 import { Route as ApiSitesSlugOwnerRouteImport } from './routes/api/sites.$slug.owner'
@@ -183,6 +184,11 @@ const ApiUploadsIdCommitRoute = ApiUploadsIdCommitRouteImport.update({
   path: '/$id/commit',
   getParentRoute: () => ApiUploadsRoute,
 } as any)
+const ApiSitesSlugVisitorsRoute = ApiSitesSlugVisitorsRouteImport.update({
+  id: '/visitors',
+  path: '/visitors',
+  getParentRoute: () => ApiSitesSlugRoute,
+} as any)
 const ApiSitesSlugVersionsRoute = ApiSitesSlugVersionsRouteImport.update({
   id: '/versions',
   path: '/versions',
@@ -240,6 +246,7 @@ export interface FileRoutesByFullPath {
   '/api/sites/$slug/owner': typeof ApiSitesSlugOwnerRoute
   '/api/sites/$slug/settings': typeof ApiSitesSlugSettingsRoute
   '/api/sites/$slug/versions': typeof ApiSitesSlugVersionsRoute
+  '/api/sites/$slug/visitors': typeof ApiSitesSlugVisitorsRoute
   '/api/uploads/$id/commit': typeof ApiUploadsIdCommitRoute
   '/api/uploads/$id/urls': typeof ApiUploadsIdUrlsRoute
   '/api/drafts/$id/preview/$': typeof ApiDraftsIdPreviewSplatRoute
@@ -275,6 +282,7 @@ export interface FileRoutesByTo {
   '/api/sites/$slug/owner': typeof ApiSitesSlugOwnerRoute
   '/api/sites/$slug/settings': typeof ApiSitesSlugSettingsRoute
   '/api/sites/$slug/versions': typeof ApiSitesSlugVersionsRoute
+  '/api/sites/$slug/visitors': typeof ApiSitesSlugVisitorsRoute
   '/api/uploads/$id/commit': typeof ApiUploadsIdCommitRoute
   '/api/uploads/$id/urls': typeof ApiUploadsIdUrlsRoute
   '/api/drafts/$id/preview/$': typeof ApiDraftsIdPreviewSplatRoute
@@ -311,6 +319,7 @@ export interface FileRoutesById {
   '/api/sites/$slug/owner': typeof ApiSitesSlugOwnerRoute
   '/api/sites/$slug/settings': typeof ApiSitesSlugSettingsRoute
   '/api/sites/$slug/versions': typeof ApiSitesSlugVersionsRoute
+  '/api/sites/$slug/visitors': typeof ApiSitesSlugVisitorsRoute
   '/api/uploads/$id/commit': typeof ApiUploadsIdCommitRoute
   '/api/uploads/$id/urls': typeof ApiUploadsIdUrlsRoute
   '/api/drafts/$id/preview/$': typeof ApiDraftsIdPreviewSplatRoute
@@ -348,6 +357,7 @@ export interface FileRouteTypes {
     | '/api/sites/$slug/owner'
     | '/api/sites/$slug/settings'
     | '/api/sites/$slug/versions'
+    | '/api/sites/$slug/visitors'
     | '/api/uploads/$id/commit'
     | '/api/uploads/$id/urls'
     | '/api/drafts/$id/preview/$'
@@ -383,6 +393,7 @@ export interface FileRouteTypes {
     | '/api/sites/$slug/owner'
     | '/api/sites/$slug/settings'
     | '/api/sites/$slug/versions'
+    | '/api/sites/$slug/visitors'
     | '/api/uploads/$id/commit'
     | '/api/uploads/$id/urls'
     | '/api/drafts/$id/preview/$'
@@ -418,6 +429,7 @@ export interface FileRouteTypes {
     | '/api/sites/$slug/owner'
     | '/api/sites/$slug/settings'
     | '/api/sites/$slug/versions'
+    | '/api/sites/$slug/visitors'
     | '/api/uploads/$id/commit'
     | '/api/uploads/$id/urls'
     | '/api/drafts/$id/preview/$'
@@ -648,6 +660,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiUploadsIdCommitRouteImport
       parentRoute: typeof ApiUploadsRoute
     }
+    '/api/sites/$slug/visitors': {
+      id: '/api/sites/$slug/visitors'
+      path: '/visitors'
+      fullPath: '/api/sites/$slug/visitors'
+      preLoaderRoute: typeof ApiSitesSlugVisitorsRouteImport
+      parentRoute: typeof ApiSitesSlugRoute
+    }
     '/api/sites/$slug/versions': {
       id: '/api/sites/$slug/versions'
       path: '/versions'
@@ -691,6 +710,7 @@ interface ApiSitesSlugRouteChildren {
   ApiSitesSlugOwnerRoute: typeof ApiSitesSlugOwnerRoute
   ApiSitesSlugSettingsRoute: typeof ApiSitesSlugSettingsRoute
   ApiSitesSlugVersionsRoute: typeof ApiSitesSlugVersionsRoute
+  ApiSitesSlugVisitorsRoute: typeof ApiSitesSlugVisitorsRoute
 }
 
 const ApiSitesSlugRouteChildren: ApiSitesSlugRouteChildren = {
@@ -698,6 +718,7 @@ const ApiSitesSlugRouteChildren: ApiSitesSlugRouteChildren = {
   ApiSitesSlugOwnerRoute: ApiSitesSlugOwnerRoute,
   ApiSitesSlugSettingsRoute: ApiSitesSlugSettingsRoute,
   ApiSitesSlugVersionsRoute: ApiSitesSlugVersionsRoute,
+  ApiSitesSlugVisitorsRoute: ApiSitesSlugVisitorsRoute,
 }
 
 const ApiSitesSlugRouteWithChildren = ApiSitesSlugRoute._addFileChildren(

@@ -154,24 +154,13 @@ export const serveUploadedSite = Effect.fn("serveUploadedSite")(function* (
   return new Response(object.body, { headers });
 });
 
-/** Reads a file of the live version. Opening index.html counts as a view. */
+/** Reads a file of the live version. */
 export const getNapFile = Effect.fn("getNapFile")(function* (
   nap: ServedNap,
   normalizedPath: string,
 ) {
   const storage = yield* Storage;
-  const object = yield* storage.get(objectKey(nap.slug, nap.currentVersion, normalizedPath));
-  if (object && normalizedPath.endsWith("index.html")) {
-    const db = yield* Database;
-    yield* db.run(
-      `UPDATE sites
-       SET view_count = view_count + 1,
-           last_viewed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-       WHERE slug = ?`,
-      nap.slug,
-    );
-  }
-  return object;
+  return yield* storage.get(objectKey(nap.slug, nap.currentVersion, normalizedPath));
 });
 
 export function fileHeaders(object: R2ObjectBody) {
