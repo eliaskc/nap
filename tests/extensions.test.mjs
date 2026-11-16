@@ -67,13 +67,20 @@ function environment(secrets = {}) {
     },
   };
   const objects = new Map();
+  let etags = 0;
   const SITES = {
     async get(key) {
       const stored = objects.get(key);
       return stored ? { text: async () => stored.value, uploaded: stored.uploaded } : null;
     },
-    async put(key, value) {
-      objects.set(key, { value, uploaded: new Date() });
+    async head(key) {
+      const stored = objects.get(key);
+      return stored ? { uploaded: stored.uploaded, etag: stored.etag } : null;
+    },
+    async put(key, value, options = {}) {
+      const etagMatches = options.onlyIf?.etagMatches;
+      if (etagMatches !== undefined && objects.get(key)?.etag !== etagMatches) return null;
+      objects.set(key, { value, uploaded: new Date(), etag: String(++etags) });
       return {};
     },
   };
@@ -141,6 +148,44 @@ test("an extension gets the path, the page, the viewer, and only its own secrets
   assert.match([...env.objects.keys()][0], /^extension-cache\/echo\/[0-9a-f]{64}$/);
   assert.equal(response.headers.get("cache-control"), "no-store");
   assert.equal(response.headers.get("x-content-type-options"), "nosniff");
+});
+
+test("a claim goes to one caller until it runs out, and a stale claim to one of two", async () => {
+  const env = environment();
+  const results = [];
+  const claimer = {
+    name: "claimer",
+    types: null,
+    instructions: null,
+    server: {
+      summary: "Claims",
+      async handle(request, context) {
+        const seconds = Number(new URL(request.url).searchParams.get("s"));
+        results.push(await context.cache.claim("refresh", seconds));
+        return Response.json({});
+      },
+    },
+  };
+  const claim = (seconds) => {
+    const path = "claimer/x";
+    const request = new Request(`https://board.nap.test/_nap/ext/${path}?s=${seconds}`);
+    const identity = { email: OWNER, name: OWNER };
+    return respond(env, handleExtensionRequest([claimer], "board", request, identity, path));
+  };
+  await claim(60);
+  await claim(60);
+  assert.deepEqual(results, [true, false]);
+  const [key] = [...env.objects.keys()];
+  assert.match(key, /^extension-cache\/claimer\/claims\/[0-9a-f]{64}$/);
+
+  // Run out: both servers see the same old claim, and only the first replacement lands.
+  const old = env.objects.get(key);
+  old.uploaded = new Date(Date.now() - 61_000);
+  const head = env.SITES.head;
+  env.SITES.head = async (k) => (k === key ? { uploaded: old.uploaded, etag: old.etag } : head(k));
+  await claim(60);
+  await claim(60);
+  assert.deepEqual(results, [true, false, true, false]);
 });
 
 test("only people who can view the page, and no cross-site calls on sites", async () => {

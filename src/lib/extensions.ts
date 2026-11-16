@@ -98,13 +98,20 @@ export const handleExtensionRequest = Effect.fn("handleExtensionRequest")(functi
   return new Response(response.body, { status: response.status, headers });
 });
 
-/** An extension's cache: one object per key below extension-cache/<name>/, by the key's hash. */
+/**
+ * An extension's cache: one object per key below extension-cache/<name>/, by the key's hash, and
+ * claims below extension-cache/<name>/claims/.
+ */
 function extensionCache(storage: Storage["Service"], name: string): NapExtensionCache {
-  const objectKey = async (key: string) => {
+  const hash = async (key: string) => {
     const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(key));
-    const hex = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0"));
-    return `${EXTENSION_CACHE_PREFIX}${name}/${hex.join("")}`;
+    return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join(
+      "",
+    );
   };
+  const objectKey = async (key: string) => `${EXTENSION_CACHE_PREFIX}${name}/${await hash(key)}`;
+  const claimKey = async (key: string) =>
+    `${EXTENSION_CACHE_PREFIX}${name}/claims/${await hash(key)}`;
   return {
     async get(key) {
       const object = await Effect.runPromise(storage.get(await objectKey(key)));
@@ -117,6 +124,24 @@ function extensionCache(storage: Storage["Service"], name: string): NapExtension
           httpMetadata: { contentType: "application/json" },
         }),
       );
+    },
+    // A claim is an object whose upload time says when it was taken. Taking one over replaces it
+    // only if it is still the object this caller saw (its etag; the content is unique, so every
+    // claim has its own), so of two servers at once, one wins. R2 is strongly consistent. The very
+    // first claim of a key (or the first after the bucket's lifecycle rule deleted it) is not
+    // conditional, so two servers may both get that one.
+    async claim(key, seconds) {
+      const objectKey = await claimKey(key);
+      const current = await Effect.runPromise(storage.head(objectKey));
+      if (current && Date.now() - current.uploaded.getTime() < seconds * 1000) return false;
+      const taken = await Effect.runPromise(
+        storage.put(
+          objectKey,
+          crypto.randomUUID(),
+          current ? { onlyIf: { etagMatches: current.etag } } : undefined,
+        ),
+      );
+      return taken !== null;
     },
   };
 }

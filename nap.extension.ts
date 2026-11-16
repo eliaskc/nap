@@ -61,6 +61,12 @@ export type NapExtensionCache = {
   get(key: string): Promise<{ value: string; storedAt: Date } | null>;
   /** Stores a value under this key, replacing what was there. */
   put(key: string, value: string): Promise<void>;
+  /**
+   * Claims this key for `seconds`, across all of Nap's servers: true for the one caller that got
+   * it, false while someone else holds it. Use it so that only one server does slow work, such as
+   * refreshing a cached value. Claims are not released; they run out.
+   */
+  claim(key: string, seconds: number): Promise<boolean>;
 };
 
 /** What client.ts gets to build nap.<name> with. */
