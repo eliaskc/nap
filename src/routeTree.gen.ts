@@ -16,7 +16,6 @@ import { Route as AppsRouteImport } from './routes/apps'
 import { Route as AppRouteImport } from './routes/app'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as RequestsIdRouteImport } from './routes/requests.$id'
-import { Route as DevClaimRouteImport } from './routes/dev.claim'
 import { Route as ClaimIdRouteImport } from './routes/claim.$id'
 import { Route as ApiUploadsRouteImport } from './routes/api/uploads'
 import { Route as ApiUploadRouteImport } from './routes/api/upload'
@@ -77,11 +76,6 @@ const IndexRoute = IndexRouteImport.update({
 const RequestsIdRoute = RequestsIdRouteImport.update({
   id: '/requests/$id',
   path: '/requests/$id',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const DevClaimRoute = DevClaimRouteImport.update({
-  id: '/dev/claim',
-  path: '/dev/claim',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ClaimIdRoute = ClaimIdRouteImport.update({
@@ -234,7 +228,6 @@ export interface FileRoutesByFullPath {
   '/api/upload': typeof ApiUploadRoute
   '/api/uploads': typeof ApiUploadsRouteWithChildren
   '/claim/$id': typeof ClaimIdRoute
-  '/dev/claim': typeof DevClaimRoute
   '/requests/$id': typeof RequestsIdRoute
   '/api/access-requests/$id': typeof ApiAccessRequestsIdRoute
   '/api/connect/$code': typeof ApiConnectCodeRoute
@@ -270,7 +263,6 @@ export interface FileRoutesByTo {
   '/api/upload': typeof ApiUploadRoute
   '/api/uploads': typeof ApiUploadsRouteWithChildren
   '/claim/$id': typeof ClaimIdRoute
-  '/dev/claim': typeof DevClaimRoute
   '/requests/$id': typeof RequestsIdRoute
   '/api/access-requests/$id': typeof ApiAccessRequestsIdRoute
   '/api/connect/$code': typeof ApiConnectCodeRoute
@@ -307,7 +299,6 @@ export interface FileRoutesById {
   '/api/upload': typeof ApiUploadRoute
   '/api/uploads': typeof ApiUploadsRouteWithChildren
   '/claim/$id': typeof ClaimIdRoute
-  '/dev/claim': typeof DevClaimRoute
   '/requests/$id': typeof RequestsIdRoute
   '/api/access-requests/$id': typeof ApiAccessRequestsIdRoute
   '/api/connect/$code': typeof ApiConnectCodeRoute
@@ -345,7 +336,6 @@ export interface FileRouteTypes {
     | '/api/upload'
     | '/api/uploads'
     | '/claim/$id'
-    | '/dev/claim'
     | '/requests/$id'
     | '/api/access-requests/$id'
     | '/api/connect/$code'
@@ -381,7 +371,6 @@ export interface FileRouteTypes {
     | '/api/upload'
     | '/api/uploads'
     | '/claim/$id'
-    | '/dev/claim'
     | '/requests/$id'
     | '/api/access-requests/$id'
     | '/api/connect/$code'
@@ -417,7 +406,6 @@ export interface FileRouteTypes {
     | '/api/upload'
     | '/api/uploads'
     | '/claim/$id'
-    | '/dev/claim'
     | '/requests/$id'
     | '/api/access-requests/$id'
     | '/api/connect/$code'
@@ -454,7 +442,6 @@ export interface RootRouteChildren {
   ApiUploadRoute: typeof ApiUploadRoute
   ApiUploadsRoute: typeof ApiUploadsRouteWithChildren
   ClaimIdRoute: typeof ClaimIdRoute
-  DevClaimRoute: typeof DevClaimRoute
   RequestsIdRoute: typeof RequestsIdRoute
   ApiAccessRequestsIdRoute: typeof ApiAccessRequestsIdRoute
   ApiConnectCodeRoute: typeof ApiConnectCodeRoute
@@ -511,13 +498,6 @@ declare module '@tanstack/react-router' {
       path: '/requests/$id'
       fullPath: '/requests/$id'
       preLoaderRoute: typeof RequestsIdRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/dev/claim': {
-      id: '/dev/claim'
-      path: '/dev/claim'
-      fullPath: '/dev/claim'
-      preLoaderRoute: typeof DevClaimRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/claim/$id': {
@@ -794,7 +774,6 @@ const rootRouteChildren: RootRouteChildren = {
   ApiUploadRoute: ApiUploadRoute,
   ApiUploadsRoute: ApiUploadsRouteWithChildren,
   ClaimIdRoute: ClaimIdRoute,
-  DevClaimRoute: DevClaimRoute,
   RequestsIdRoute: RequestsIdRoute,
   ApiAccessRequestsIdRoute: ApiAccessRequestsIdRoute,
   ApiConnectCodeRoute: ApiConnectCodeRoute,

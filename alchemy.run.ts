@@ -98,21 +98,6 @@ function bypassPolicies(app: string) {
   });
 }
 
-// Agents upload drafts without a login. Access must bypass exactly this path; the Worker
-// stores drafts without serving them until a signed-in person claims them.
-export const DraftUploadAccess = Cloudflare.Access.Application(
-  "DraftUploadAccess",
-  Effect.gen(function* () {
-    return {
-      type: "self_hosted" as const,
-      name: "nap-agent-drafts",
-      domain: `${ROOT_DOMAIN}/_nap/drafts`,
-      policies: yield* bypassPolicies("nap-agent-drafts"),
-      appLauncherVisible: false,
-    };
-  }),
-).pipe(RemovalPolicy.retain());
-
 // The agent API. Agents send a Nap token, not an Access session, so Access must bypass this
 // path. The Worker checks the token on every request. Tokens come from /connect, which Access
 // protects, so only people that Access allows can get one.
@@ -370,7 +355,6 @@ export default Alchemy.Stack(
           ? settings.accessPolicies.map((id, index) => ({ id, precedence: index + 1 }))
           : [yield* People],
       }).pipe(RemovalPolicy.retain());
-      yield* DraftUploadAccess;
       yield* AgentApiAccess;
       yield* ArtifactFrameAccess;
       if (napConfig.accessRequests?.channels.includes("slack")) yield* SlackHookAccess;

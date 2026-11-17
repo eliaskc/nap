@@ -52,6 +52,7 @@ function accessOf(site: SuggestedSite | null): Access {
 type LoadState =
   | { kind: "loading" }
   | { kind: "missing" }
+  | { kind: "notYours" }
   | { kind: "ready"; draft: Draft; suggestedSite: SuggestedSite | null };
 
 function ClaimPage() {
@@ -70,7 +71,7 @@ function ClaimPage() {
       const response = await fetch(`/api/drafts/${encodeURIComponent(id)}`);
       if (cancelled) return;
       if (!response.ok) {
-        setState({ kind: "missing" });
+        setState({ kind: response.status === 403 ? "notYours" : "missing" });
         return;
       }
       const body = (await response.json()) as { draft: Draft; suggestedSite: SuggestedSite | null };
@@ -193,10 +194,17 @@ function ClaimPage() {
             />
           )}
 
+          {state.kind === "notYours" && (
+            <Message
+              title="Not your draft"
+              description="Only the person whose agent uploaded this draft can open it. Ask your own agent to upload it."
+            />
+          )}
+
           {draft && draft.claimed && (
             <Message
               title="Already published"
-              description="Someone already published this draft. Ask your agent to upload again for a new link."
+              description="This draft is already published. Ask your agent to upload again for a new link."
             />
           )}
 

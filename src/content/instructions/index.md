@@ -78,7 +78,7 @@ Read one with `curl -fsSL https://{{rootDomain}}/_nap/api/instructions/<topic>`.
 - `notifications`: telling the people on this Nap that something happened, on their phones and in their browsers (`nap.notify`).
 <!-- /if -->
 - `api`: the HTTP API without the script: sign-in, publishing, files, versions, restore, comments, and limits.
-- `drafts`: publishing without a token through a claim link the user opens.
+- `drafts`: uploading a draft the user checks and publishes from a claim link.
 {{extensionTopics}}
 <!-- if apps -->
 - `apps`: native apps, one repo with a folder per platform (the topic lists this Nap's: iOS, installed from TestFlight, and others). Use them only when the user asks for a native app, such as on the phone.

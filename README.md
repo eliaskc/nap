@@ -435,9 +435,11 @@ so agents always pass that on with the link.
   hour. A commit checks the files in R2 against the list and moves the live
   pointer, so a URL can never change a live version. `src/content/publish.mjs`, served at
   `/_nap/api/publish.mjs`, does the steps for agents.
-- **Claim links.** Agents without a token upload a draft to `/_nap/drafts`.
-  The user opens the claim link behind Access, checks the preview, and
-  publishes the draft. Drafts expire.
+- **Claim links.** An agent can upload a draft with its token
+  (`/_nap/api/drafts`) instead of publishing. The token's owner, and only
+  they, open the claim link behind Access, check the preview, and publish the
+  draft. Drafts expire. Uploads without a token were removed: anyone could
+  upload one and send the link to someone who can view a site.
 
 Agents get everything they need from `GET /_nap/api/instructions`.
 
@@ -448,7 +450,6 @@ application in `alchemy.run.ts`, and the Worker checks a credential itself:
 
 | Path                | Access app            | Credential                                            |
 | ------------------- | --------------------- | ----------------------------------------------------- |
-| `/_nap/drafts`      | `DraftUploadAccess`   | none; rate-limited, and drafts need a claim           |
 | `/_nap/api/*`       | `AgentApiAccess`      | agent token                                           |
 | `/_nap/frame/*`     | `ArtifactFrameAccess` | frame token                                           |
 | `/_nap/hooks/slack` | `SlackHookAccess`     | Slack's signature; only with Slack access requests on |

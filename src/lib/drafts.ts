@@ -1,5 +1,6 @@
 import { Effect, Predicate } from "effect";
 import { DEFAULT_ACCESS } from "~/lib/deployment-text";
+import type { AgentIdentity } from "~/lib/agent-auth";
 import { ensureProfile, objectKey, slugify, type Identity } from "~/lib/nap-server";
 import {
   canViewSite,
@@ -25,7 +26,6 @@ import {
 import { insertVersion } from "~/lib/versions";
 import { Database, sql } from "~/server/database";
 import { fail, failText, json, noStore } from "~/server/http";
-import { RateLimiter } from "~/server/platform";
 import { objectHeaders, Storage } from "~/server/storage";
 
 export const DRAFT_TTL_HOURS = 24;
@@ -46,6 +46,7 @@ type DraftRow = {
   expiresAt: string;
   claimedAt: string | null;
   claimedByEmail: string | null;
+  createdByEmail: string | null;
   siteSlug: string | null;
 };
 
@@ -85,11 +86,18 @@ function parseDraftRef(value: string) {
   return isDraftId(id) ? id : null;
 }
 
+/** Only the person whose token uploaded a draft may see or publish it. */
+function isUploader(draft: Pick<DraftRow, "createdByEmail">, identity: Identity) {
+  return draft.createdByEmail ? isSameEmail(draft.createdByEmail, identity.email) : false;
+}
+
+const NOT_YOURS = "Only the person whose agent uploaded this draft can open it.";
+
 /**
- * POST /_nap/drafts
+ * POST /_nap/api/drafts (agent token)
  *
- * The only unauthenticated write in Nap. Cloudflare Access must bypass this exact path.
- * Nothing uploaded here is served until a signed-in person claims it.
+ * Uploads a draft for the token's owner to check and publish from the claim link. Nothing
+ * uploaded here is served until they claim it. The caller rate-limits the token.
  *
  * Inputs (query string or form fields):
  * - kind: "artifact" (default without slug) or "site" (default with slug)
@@ -97,16 +105,10 @@ function parseDraftRef(value: string) {
  * - slug: suggested subdomain for a site
  * - replaces: claim id (or URL) of an earlier draft; publishing can update what it became
  */
-export const handleCreateDraft = Effect.fn("handleCreateDraft")(function* (request: Request) {
-  if (request.method !== "POST") {
-    return yield* fail(405, "Use POST to upload a draft", {}, { allow: "POST" });
-  }
-
-  const key = request.headers.get("cf-connecting-ip") ?? "unknown";
-  if (!(yield* (yield* RateLimiter).allow(key))) {
-    return yield* fail(429, "Too many uploads. Wait a minute.");
-  }
-
+export const handleCreateDraft = Effect.fn("handleCreateDraft")(function* (
+  request: Request,
+  agent: AgentIdentity,
+) {
   yield* rejectLargeBody(request);
 
   const url = new URL(request.url);
@@ -123,7 +125,9 @@ export const handleCreateDraft = Effect.fn("handleCreateDraft")(function* (reque
   if (fields.replaces) {
     replacesDraftId = parseDraftRef(fields.replaces);
     const replaced = replacesDraftId ? yield* getDraft(replacesDraftId) : null;
-    if (!replaced) return yield* fail(404, "replaces: draft not found");
+    if (!replaced || !isUploader(replaced, agent)) {
+      return yield* fail(404, "replaces: draft not found");
+    }
     // An update keeps the kind of what it updates.
     kind = replaced.kind;
   } else if (fields.kind === "site" || fields.kind === "artifact") {
@@ -148,8 +152,9 @@ export const handleCreateDraft = Effect.fn("handleCreateDraft")(function* (reque
     // Drop metadata for old drafts. An R2 lifecycle rule on `drafts/` removes their files.
     sql("DELETE FROM drafts WHERE expires_at < strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-7 days')"),
     sql(
-      `INSERT INTO drafts (id, kind, title, slug, replaces_draft_id, file_count, total_bytes, expires_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO drafts (id, kind, title, slug, replaces_draft_id, file_count, total_bytes,
+                           expires_at, created_by_email)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       id,
       kind,
       title,
@@ -158,6 +163,7 @@ export const handleCreateDraft = Effect.fn("handleCreateDraft")(function* (reque
       files.length,
       totalBytes,
       expiresAt,
+      agent.email,
     ),
   ]);
 
@@ -171,7 +177,7 @@ export const handleCreateDraft = Effect.fn("handleCreateDraft")(function* (reque
       fileCount: files.length,
       totalBytes,
       message:
-        `Draft uploaded. Give the claimUrl to the user; they open it to publish. ` +
+        `Draft uploaded. Give the claimUrl to ${agent.email}; only they can open it to publish. ` +
         `To publish a new version later, upload again with replaces=${id}.`,
     },
     { status: 201 },
@@ -185,7 +191,8 @@ const getDraft = Effect.fnUntraced(function* (id: string) {
     `SELECT id, kind, title, slug, replaces_draft_id AS replacesDraftId,
             file_count AS fileCount, total_bytes AS totalBytes,
             created_at AS createdAt, expires_at AS expiresAt, claimed_at AS claimedAt,
-            claimed_by_email AS claimedByEmail, site_slug AS siteSlug
+            claimed_by_email AS claimedByEmail, created_by_email AS createdByEmail,
+            site_slug AS siteSlug
      FROM drafts WHERE id = ?`,
     id,
   );
@@ -237,6 +244,7 @@ const canUpdate = Effect.fnUntraced(function* (site: TargetSite, identity: Ident
 export const describeDraft = Effect.fn("describeDraft")(function* (identity: Identity, id: string) {
   const draft = yield* getDraft(id);
   if (!draft) return yield* fail(404, "Draft not found");
+  if (!isUploader(draft, identity)) return yield* fail(403, NOT_YOURS);
 
   const claimedByMe = draft.claimedByEmail
     ? isSameEmail(draft.claimedByEmail, identity.email)
@@ -327,9 +335,13 @@ export const describeDraft = Effect.fn("describeDraft")(function* (identity: Ide
  * The CSP sandbox gives the document an opaque origin, so draft code cannot act as the
  * signed-in person on the Nap dashboard origin.
  */
-export const serveDraftFile = Effect.fn("serveDraftFile")(function* (id: string, path: string) {
+export const serveDraftFile = Effect.fn("serveDraftFile")(function* (
+  identity: Identity,
+  id: string,
+  path: string,
+) {
   const draft = yield* getDraft(id);
-  if (!draft || draft.claimedAt || isExpired(draft)) {
+  if (!draft || !isUploader(draft, identity) || draft.claimedAt || isExpired(draft)) {
     return yield* failText(404, "Draft not found");
   }
 
@@ -371,6 +383,7 @@ export const claimDraft = Effect.fn("claimDraft")(function* (
 ) {
   const draft = yield* getDraft(id);
   if (!draft) return yield* fail(404, "Draft not found");
+  if (!isUploader(draft, identity)) return yield* fail(403, NOT_YOURS);
   if (draft.claimedAt) return yield* fail(409, "This draft is already published");
   if (isExpired(draft)) return yield* fail(410, "This draft has expired");
 

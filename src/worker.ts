@@ -10,7 +10,6 @@ import {
   isArtifactPath,
   isFramePath,
 } from "~/lib/artifact-viewer";
-import { handleCreateDraft } from "~/lib/drafts";
 import { ensureProfile, getIdentity } from "~/lib/nap-server";
 import { serveToolbarScript, serveViewerScript } from "~/lib/nap-toolbar";
 import { ARTIFACT_PATH, type NapPlace } from "~/lib/nap-urls";
@@ -28,6 +27,7 @@ import { handleExtensionRequest } from "~/lib/extensions";
 import { resolveHost, serveUploadedSite } from "~/lib/site-serving";
 import { serveShareWidget } from "~/lib/share-widget";
 import { meResponse, peopleResponse, welcomeRedirect } from "~/lib/welcome";
+import { failNoStore } from "~/server/http";
 import { inBackground, Settings } from "~/server/platform";
 import { respond, type NapEnv } from "~/server/runtime";
 
@@ -94,10 +94,13 @@ const routeRequest = Effect.fn("routeRequest")(function* (
   }
 
   // Access bypasses these paths on the dashboard host. None may use getIdentity().
-  // Draft uploads need no login. The agent API checks its own tokens. Artifact frames check
-  // their frame tokens.
+  // The agent API checks its own tokens. Artifact frames check their frame tokens.
+  // Draft uploads without a token are gone; agents upload to /_nap/api/drafts with one.
   if (target.type === "dashboard" && url.pathname === "/_nap/drafts") {
-    return yield* handleCreateDraft(request);
+    return yield* failNoStore(
+      410,
+      "Drafts need a Nap token now. Sign in (GET /_nap/api/instructions), then POST /_nap/api/drafts.",
+    );
   }
   if (
     target.type === "dashboard" &&

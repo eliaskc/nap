@@ -66,12 +66,39 @@ const jsonBody = (value) => ({
   body: JSON.stringify(value),
 });
 
-async function uploadDraft(query, html) {
-  const res = await call(`/_nap/drafts${query}`, {
+const tokens = {};
+
+/** Signs in as `email` through the device flow and returns the agent token. */
+async function signIn(email) {
+  const post = (path, value, headers = {}) =>
+    call(path, {
+      method: "POST",
+      ...jsonBody(value),
+      headers: { ...jsonBody(value).headers, ...headers },
+    });
+  const start = await post("/_nap/api/auth/device", { client: `Test agent for ${email}` });
+  assert.equal(start.status, 200, start.text);
+  const approved = await post(
+    `/api/connect/${start.json.user_code}`,
+    { action: "approve" },
+    as(email),
+  );
+  assert.equal(approved.status, 200, approved.text);
+  const exchanged = await post("/_nap/api/auth/token", { device_code: start.json.device_code });
+  assert.equal(exchanged.status, 200, exchanged.text);
+  return exchanged.json.token;
+}
+
+function postDraft(query, html, token) {
+  return call(`/_nap/api/drafts${query}`, {
     method: "POST",
-    headers: { "content-type": "text/html" },
+    headers: { "content-type": "text/html", ...(token && { authorization: `Bearer ${token}` }) },
     body: html,
   });
+}
+
+async function uploadDraft(query, html, email = OWNER) {
+  const res = await postDraft(query, html, tokens[email]);
   assert.equal(res.status, 201, `draft upload ${query}: ${res.text}`);
   return res.json;
 }
@@ -88,12 +115,35 @@ async function claim(id, value, email = OWNER) {
 let nap;
 try {
   nap = await startLocalNap({ port: PORT, label: "publish" });
+  for (const email of [OWNER, OTHER, STRANGER]) tokens[email] = await signIn(email);
+
+  // Drafts need a token. The old upload path without one is gone.
+  assert.equal((await postDraft("", "<h1>x</h1>")).status, 401, "no token, no draft");
+  const tokenless = await call("/_nap/drafts", {
+    method: "POST",
+    headers: { "content-type": "text/html" },
+    body: "<h1>x</h1>",
+  });
+  assert.equal(tokenless.status, 410, tokenless.text);
+  assert.match(tokenless.json.error, /_nap\/api\/drafts/);
 
   // A draft without a slug is an artifact: a random id, private, unlisted, with the toolbar.
   const first = await uploadDraft("?title=Report", "<h1>v1</h1>");
   assert.equal(first.kind, "artifact", "no slug means artifact");
   const preview = await call(`/api/drafts/${first.id}/preview/`, { headers: as(OWNER) });
   assert.match(preview.headers["content-security-policy"], /sandbox/, "preview is sandboxed");
+  // Only the uploader sees or publishes a draft, so a claim link sent to someone else does nothing.
+  assert.equal(
+    (await call(`/api/drafts/${first.id}/preview/`, { headers: as(OTHER) })).status,
+    404,
+    "only the uploader sees the preview",
+  );
+  assert.equal(
+    (await call(`/api/drafts/${first.id}`, { headers: as(OTHER) })).status,
+    403,
+    "only the uploader opens the claim link",
+  );
+  assert.equal((await claim(first.id, {}, OTHER)).status, 403, "only the uploader publishes");
 
   const published = await claim(first.id, { visibility: "selected", emails: [OTHER] });
   assert.equal(published.status, 200, published.text);
@@ -124,20 +174,17 @@ try {
     "older draft points at the newer one",
   );
   assert.equal(
-    (await call(`/api/drafts/${third.id}`, { headers: as(STRANGER) })).json.suggestedSite,
-    null,
-    "people who cannot view it learn nothing about the artifact",
+    (await postDraft(`?replaces=${third.id}`, "<h1>x</h1>", tokens[OTHER])).status,
+    404,
+    "replaces only takes your own drafts",
   );
+  // Someone who cannot view it gets nothing from their own draft either.
+  const byStranger = await uploadDraft("", "<h1>stranger</h1>", STRANGER);
   assert.equal(
-    (await claim(third.id, { replace: true, slug: artifact.slug }, STRANGER)).status,
+    (await claim(byStranger.id, { replace: true, slug: artifact.slug }, STRANGER)).status,
     403,
     "only people who can view it can update",
   );
-  const asInvitee = (await call(`/api/drafts/${third.id}`, { headers: as(OTHER) })).json
-    .suggestedSite;
-  assert.equal(asInvitee.canUpdate, true, "invited people can update");
-  assert.equal(asInvitee.isOwner, false);
-  assert.equal(asInvitee.viewerEmails, undefined, "only the owner sees who is invited");
   const updated = await claim(third.id, {
     replace: true,
     slug: artifact.slug,
@@ -146,8 +193,11 @@ try {
   assert.equal(updated.status, 200, updated.text);
   assert.equal(updated.json.site.visibility, "selected", "an update keeps access");
 
-  // An invited person publishes a new version, but cannot change its access or name.
-  const fourth = await uploadDraft(`?replaces=${third.id}`, "<h1>v4</h1>");
+  // An invited person publishes a new version from their own draft, but cannot change its access
+  // or name.
+  const fourth = await uploadDraft("", "<h1>v4</h1>", OTHER);
+  const asInvitee = (await call(`/api/drafts/${fourth.id}`, { headers: as(OTHER) })).json;
+  assert.equal(asInvitee.suggestedSite, null, "a draft without replaces suggests nothing");
   const byInvitee = await claim(
     fourth.id,
     { replace: true, slug: artifact.slug, title: "Renamed", visibility: "everyone" },

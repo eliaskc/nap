@@ -12,6 +12,7 @@ import {
   type AgentIdentity,
 } from "~/lib/agent-auth";
 import { handleComments } from "~/lib/comments";
+import { handleCreateDraft } from "~/lib/drafts";
 import {
   commitDirectUpload,
   nextPageUrl,
@@ -177,6 +178,12 @@ export const handleAgentApi = Effect.fn("handleAgentApi")(function* (request: Re
       agent.email,
     );
     return json({ naps: results.map(describe) }, { headers: noStore });
+  }
+
+  // A draft for the token's owner to check and publish from its claim link (drafts topic).
+  if (path === "/drafts" && method === "POST") {
+    yield* limitUploads(agent);
+    return yield* handleCreateDraft(request, agent);
   }
 
   if (path === "/naps" && method === "POST") {
