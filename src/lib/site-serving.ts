@@ -15,6 +15,8 @@ import { recordVisit } from "~/lib/visits";
 export type ServedNap = {
   slug: string;
   kind: NapKind;
+  /** "page" or "dashboard" (nap-types.ts). Unknown values count as "page". */
+  type: string;
   title: string;
   currentVersion: string;
   visibility: Visibility;
@@ -36,7 +38,7 @@ export const findViewableNap = Effect.fn("findViewableNap")(function* (
 ): Effect.fn.Return<NapAccess, DatabaseError, Database> {
   const db = yield* Database;
   const nap = yield* db.first<ServedNap>(
-    `SELECT sites.slug, sites.kind, sites.title, sites.current_version AS currentVersion,
+    `SELECT sites.slug, sites.kind, sites.type, sites.title, sites.current_version AS currentVersion,
             sites.visibility, sites.created_by_email AS createdByEmail,
             sites.updated_at AS updatedAt, sites.toolbar, profiles.display_name AS ownerName
      FROM sites LEFT JOIN profiles ON profiles.email = sites.created_by_email
@@ -106,7 +108,7 @@ export const serveUploadedSite = Effect.fn("serveUploadedSite")(function* (
   }
   const { nap, isOwner } = access;
   const normalizedPath = normalizeRequestPath(path);
-  if (isPageVisit(request, normalizedPath)) yield* recordVisit(identity.email, nap.slug);
+  if (isPageVisit(request, normalizedPath)) yield* recordVisit(identity.email, nap);
 
   if (nap.toolbar && wantsToolbar(request, normalizedPath)) {
     return toolbarPage({

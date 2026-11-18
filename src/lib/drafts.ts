@@ -26,6 +26,13 @@ import {
   type SiteKind,
 } from "~/lib/uploads";
 import { insertVersion } from "~/lib/versions";
+import {
+  DEFAULT_NAP_TYPE,
+  isNapType,
+  napTypeOf,
+  parseNapType,
+  type NapType,
+} from "~/lib/nap-types";
 import { Database, sql } from "~/server/database";
 import { fail, failText, json, noStore } from "~/server/http";
 import { objectHeaders, Storage } from "~/server/storage";
@@ -37,6 +44,8 @@ const MAX_REPLACES_CHAIN = 20;
 type DraftRow = {
   id: string;
   kind: SiteKind;
+  /** The type the agent asked for, or null for none. */
+  napType: string | null;
   title: string;
   slug: string;
   replacesDraftId: string | null;
@@ -53,6 +62,7 @@ type DraftRow = {
 type TargetSite = {
   slug: string;
   kind: SiteKind;
+  type: string;
   title: string;
   currentVersion: string;
   createdByEmail: string;
@@ -104,6 +114,7 @@ const NOT_YOURS = "Only the person whose agent uploaded this draft can open it."
  * - name: suggested name, <root>/<name> (or <name>.<root> on its own host)
  * - ownHost: "true" for a nap on its own host; the default is Nap's frame
  * - kind, slug: the older fields (see napShape)
+ * - type: "page" (the default) or "dashboard". On an update, the owner's publish changes it.
  * - replaces: claim id (or URL) of an earlier draft; publishing can update what it became
  */
 export const handleCreateDraft = Effect.fn("handleCreateDraft")(function* (
@@ -119,6 +130,7 @@ export const handleCreateDraft = Effect.fn("handleCreateDraft")(function* (
     "slug",
     "kind",
     "ownHost",
+    "type",
     "replaces",
   ]);
   const { files } = parsed;
@@ -132,6 +144,8 @@ export const handleCreateDraft = Effect.fn("handleCreateDraft")(function* (
   });
   if ("error" in shape) return yield* fail(400, shape.error);
   const slug = shape.slug;
+  const type = parseNapType(fields.type);
+  if (typeof type === "object") return yield* fail(400, type.error);
 
   const { totalBytes } = yield* checkFiles(files);
 
@@ -163,11 +177,12 @@ export const handleCreateDraft = Effect.fn("handleCreateDraft")(function* (
     // Drop metadata for old drafts. An R2 lifecycle rule on `drafts/` removes their files.
     sql("DELETE FROM drafts WHERE expires_at < strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-7 days')"),
     sql(
-      `INSERT INTO drafts (id, kind, title, slug, replaces_draft_id, file_count, total_bytes,
-                           expires_at, created_by_email)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO drafts (id, kind, nap_type, title, slug, replaces_draft_id, file_count,
+                           total_bytes, expires_at, created_by_email)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       id,
       kind,
+      type ?? null,
       title,
       slug,
       replacesDraftId,
@@ -184,6 +199,7 @@ export const handleCreateDraft = Effect.fn("handleCreateDraft")(function* (
       id,
       kind,
       ownHost: kind === "site",
+      type: type ?? null,
       claimUrl: `${url.origin}/claim/${id}`,
       expiresAt,
       fileCount: files.length,
@@ -200,7 +216,7 @@ const getDraft = Effect.fnUntraced(function* (id: string) {
   if (!isDraftId(id)) return null;
   const db = yield* Database;
   return yield* db.first<DraftRow>(
-    `SELECT id, kind, title, slug, replaces_draft_id AS replacesDraftId,
+    `SELECT id, kind, nap_type AS napType, title, slug, replaces_draft_id AS replacesDraftId,
             file_count AS fileCount, total_bytes AS totalBytes,
             created_at AS createdAt, expires_at AS expiresAt, claimed_at AS claimedAt,
             claimed_by_email AS claimedByEmail, created_by_email AS createdByEmail,
@@ -213,7 +229,7 @@ const getDraft = Effect.fnUntraced(function* (id: string) {
 const getTargetSite = Effect.fnUntraced(function* (slug: string) {
   const db = yield* Database;
   return yield* db.first<TargetSite>(
-    `SELECT slug, kind, title, current_version AS currentVersion,
+    `SELECT slug, kind, type, title, current_version AS currentVersion,
             created_by_email AS createdByEmail, source_repo AS sourceRepo, visibility
      FROM sites WHERE slug = ?`,
     slug,
@@ -325,6 +341,7 @@ export const describeDraft = Effect.fn("describeDraft")(function* (identity: Ide
         id: draft.id,
         kind: draft.kind,
         ownHost: draft.kind === "site",
+        type: isNapType(draft.napType) ? draft.napType : null,
         title: draft.title,
         slug: draft.slug,
         fileCount: draft.fileCount,
@@ -423,6 +440,9 @@ export const claimDraft = Effect.fn("claimDraft")(function* (
   let slug: string | null;
   let kind: SiteKind;
   let existing: TargetSite | null = null;
+  // A new nap gets the type the agent asked for, or is a page. An update by the owner takes the
+  // type the agent asked for; without one, or from anyone else, it keeps its own.
+  let type: NapType | null = isNapType(draft.napType) ? draft.napType : null;
   if (replace) {
     existing = requestedSlug ? yield* getTargetSite(requestedSlug) : null;
     if (!existing || !(yield* canUpdate(existing, identity))) {
@@ -434,9 +454,10 @@ export const claimDraft = Effect.fn("claimDraft")(function* (
       );
     }
     if (!isSameEmail(existing.createdByEmail, identity.email)) {
-      // Only the owner changes who can view it or renames it.
+      // Only the owner changes who can view it, renames it, or changes its type.
       visibility = null;
       requestedTitle = "";
+      type = null;
     }
     if (expectedCurrentVersion && existing.currentVersion !== expectedCurrentVersion) {
       return yield* fail(409, "It changed while you were here. Reload and try again.");
@@ -512,10 +533,11 @@ export const claimDraft = Effect.fn("claimDraft")(function* (
     if (existing) {
       const updated = yield* db.run(
         `UPDATE sites
-         SET title = ?, updated_by_email = ?, current_version = ?,
+         SET title = ?, type = COALESCE(?, type), updated_by_email = ?, current_version = ?,
              updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
          WHERE slug = ? AND current_version = ? AND management_type = 'direct'`,
         title,
+        type,
         identity.email,
         version,
         target,
@@ -530,11 +552,12 @@ export const claimDraft = Effect.fn("claimDraft")(function* (
       yield* db.batch([
         sql(
           // Private and unlisted. Naps in the frame get the Nap bar; on their own host it is off.
-          `INSERT INTO sites (slug, kind, title, created_by_email, updated_by_email, current_version,
-                              sort_order, theme_json, visibility, listed, toolbar)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'private', 0, ?)`,
+          `INSERT INTO sites (slug, kind, type, title, created_by_email, updated_by_email,
+                              current_version, sort_order, theme_json, visibility, listed, toolbar)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'private', 0, ?)`,
           target,
           kind,
+          type ?? DEFAULT_NAP_TYPE,
           title,
           identity.email,
           identity.email,
@@ -564,6 +587,7 @@ export const claimDraft = Effect.fn("claimDraft")(function* (
       slug: target,
       kind,
       ownHost: kind === "site",
+      type: type ?? napTypeOf(existing?.type),
       title,
       currentVersion: version,
       visibility: visibility ?? existing?.visibility,

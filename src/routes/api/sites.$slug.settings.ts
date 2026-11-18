@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { Effect, Predicate } from "effect";
 import { signedIn, slugify } from "~/lib/nap-server";
+import { napTypeOf, parseNapType } from "~/lib/nap-types";
 import { getSiteOwner, isSameEmail } from "~/lib/site-access";
 import { isReservedSlug } from "~/lib/uploads";
 import { Database } from "~/server/database";
@@ -8,14 +9,15 @@ import { fail, json, readJsonObject, requireSameSite } from "~/server/http";
 import { route } from "~/server/route";
 
 /**
- * PATCH /api/sites/:slug/settings — { listed?: boolean, toolbar?: boolean, ownHost?: boolean }.
- * Owner only.
+ * PATCH /api/sites/:slug/settings — { listed?: boolean, toolbar?: boolean, ownHost?: boolean,
+ * type?: "page" | "dashboard" }. Owner only.
  * - listed: show it in the shared, organisation-wide list.
  * - toolbar: show the Nap bar above it. Off, the nap fills the window.
  * - ownHost: serve it on its own host (<name>.<root>) instead of in Nap's frame (<root>/<name>).
  *   The older `kind: "site" | "artifact"` says the same. The nap keeps its name either way, and
  *   the old URL redirects to the new one: the frame sends naps on their own host there, and their
  *   host sends naps in the frame to <root>/<name>.
+ * - type: what kind of nap it is (nap-types.ts). Visit counts already stored stay as they are.
  */
 export const Route = createFileRoute("/api/sites/$slug/settings")({
   server: {
@@ -44,11 +46,15 @@ export const Route = createFileRoute("/api/sites/$slug/settings")({
               return yield* fail(400, "kind and ownHost disagree. Send only ownHost.");
             }
             const kind = fromOwnHost ?? fromKind;
-            const updates: Array<[column: "listed" | "toolbar" | "kind", value: number | string]> =
-              [];
+            const type = parseNapType(body.type);
+            if (typeof type === "object") return yield* fail(400, type.error);
+            const updates: Array<
+              [column: "listed" | "toolbar" | "kind" | "type", value: number | string]
+            > = [];
             if (Predicate.isBoolean(body.listed)) updates.push(["listed", body.listed ? 1 : 0]);
             if (Predicate.isBoolean(body.toolbar)) updates.push(["toolbar", body.toolbar ? 1 : 0]);
             if (kind) updates.push(["kind", kind]);
+            if (type) updates.push(["type", type]);
             if (updates.length === 0) return yield* fail(400, "Nothing to change");
 
             // In the frame, the name is a path on Nap's own domain, next to Nap's own pages. A nap
@@ -61,9 +67,14 @@ export const Route = createFileRoute("/api/sites/$slug/settings")({
             }
 
             const db = yield* Database;
-            const row = yield* db.first<{ listed: number; toolbar: number; kind: string }>(
+            const row = yield* db.first<{
+              listed: number;
+              toolbar: number;
+              kind: string;
+              type: string;
+            }>(
               `UPDATE sites SET ${updates.map(([column]) => `${column} = ?`).join(", ")}
-               WHERE slug = ? RETURNING listed, toolbar, kind`,
+               WHERE slug = ? RETURNING listed, toolbar, kind, type`,
               ...updates.map(([, value]) => value),
               slug,
             );
@@ -76,6 +87,7 @@ export const Route = createFileRoute("/api/sites/$slug/settings")({
               toolbar: Boolean(row.toolbar),
               kind: row.kind,
               ownHost: row.kind === "site",
+              type: napTypeOf(row.type),
             });
           }),
         ),

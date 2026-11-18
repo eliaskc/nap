@@ -306,6 +306,113 @@ try {
   );
   assert.equal(await visibilityOf(everyone.json.id), "everyone");
 
+  // Types: a nap is a page unless it is published as a dashboard. Their own tokens, so the
+  // upload rate limit does not reach the checks below.
+  {
+    const typesToken = await signIn(OWNER, "Types");
+    const otherTypes = await signIn(OTHER, "Other types");
+    const putTyped = (url, body) =>
+      nap.put(decodeURIComponent(new URL(url).pathname.replace(/^\/nap-sites-local\//, "")), body);
+    const board = await html(
+      "/_nap/api/naps?type=dashboard&access=everyone&title=Signups",
+      typesToken,
+      "<h1>board</h1>",
+    );
+    assert.equal(board.status, 201, board.text);
+    assert.equal(board.json.type, "dashboard");
+    const refused = await html("/_nap/api/naps?type=slides", typesToken, "x");
+    assert.equal(refused.status, 400, refused.text);
+    assert.equal(refused.json.error, 'type must be "page" or "dashboard"');
+    const plain = await html("/_nap/api/naps?title=Plain", typesToken, "<h1>plain</h1>");
+    assert.equal(plain.json.type, "page", "old clients that send no type get a page");
+    const hosted = await html("/_nap/api/naps?type=dashboard&ownHost=true", typesToken, "h");
+    assert.equal(hosted.json.type, "dashboard");
+
+    const typeOf = async (slug, token = typesToken) =>
+      (await call(`/_nap/api/naps/${slug}`, { headers: bearer(token) })).json.nap.type;
+    assert.equal(await typeOf(board.json.id), "dashboard");
+    const listedTypes = (await call("/_nap/api/naps", { headers: bearer(typesToken) })).json.naps;
+    assert.equal(listedTypes.find((each) => each.id === board.json.id).type, "dashboard");
+    assert.equal(listedTypes.find((each) => each.id === plain.json.id).type, "page");
+    const siteRow = (await call("/api/sites", { headers: as(OWNER) })).json.sites.find(
+      (each) => each.slug === board.json.id,
+    );
+    assert.equal(siteRow.type, "dashboard", "the dashboard lists the type");
+
+    // Someone else's version keeps the type; the owner's changes it.
+    const byOther = await html(
+      `/_nap/api/naps/${board.json.id}/versions?type=page&expectedVersion=${board.json.version}`,
+      otherTypes,
+      "<h1>board 2</h1>",
+    );
+    assert.equal(byOther.status, 200, byOther.text);
+    assert.equal(byOther.json.type, "dashboard", "only the owner changes the type");
+    assert.equal(await typeOf(board.json.id), "dashboard");
+    const kept = await html(`/_nap/api/naps/${board.json.id}/versions`, typesToken, "<h1>3</h1>");
+    assert.equal(kept.json.type, "dashboard", "no type keeps it");
+    const toPage = await html(
+      `/_nap/api/naps/${board.json.id}/versions?type=page`,
+      typesToken,
+      "<h1>4</h1>",
+    );
+    assert.equal(toPage.json.type, "page");
+    assert.equal(await typeOf(board.json.id), "page");
+    assert.equal(
+      (await html(`/_nap/api/naps/${board.json.id}/versions?type=nope`, typesToken, "x")).status,
+      400,
+    );
+
+    // Direct uploads take the type too, for new naps and for the owner's new versions.
+    const directType = async (body) => {
+      const start = await postJson(
+        "/_nap/api/uploads",
+        { files: [{ path: "index.html", size: 4 }], ...body },
+        bearer(typesToken),
+      );
+      assert.equal(start.status, 201, start.text);
+      await putTyped(start.json.files[0].url, "<h1>");
+      const done = await postJson(new URL(start.json.commitUrl).pathname, {}, bearer(typesToken));
+      assert.ok(done.status === 200 || done.status === 201, done.text);
+      return done.json;
+    };
+    const directBoard = await directType({ type: "dashboard" });
+    assert.equal(directBoard.type, "dashboard");
+    assert.equal((await directType({ id: board.json.id, type: "dashboard" })).type, "dashboard");
+    assert.equal(await typeOf(board.json.id), "dashboard");
+    assert.equal((await directType({ id: board.json.id })).type, "dashboard", "kept");
+    const badDirect = await postJson(
+      "/_nap/api/uploads",
+      { files: [{ path: "index.html", size: 4 }], type: "slides" },
+      bearer(typesToken),
+    );
+    assert.equal(badDirect.status, 400, badDirect.text);
+
+    // The owner changes it in the dashboard.
+    const setType = (slug, value, email = OWNER) =>
+      call(`/api/sites/${slug}/settings`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json", ...as(email) },
+        body: JSON.stringify(value),
+      });
+    const changed = await setType(plain.json.id, { type: "dashboard" });
+    assert.equal(changed.status, 200, changed.text);
+    assert.equal(changed.json.type, "dashboard");
+    assert.equal(await typeOf(plain.json.id), "dashboard");
+    const badSetting = await setType(plain.json.id, { type: "slides" });
+    assert.equal(badSetting.status, 400);
+    assert.equal(badSetting.json.error, 'type must be "page" or "dashboard"');
+    assert.equal((await setType(board.json.id, { type: "page" }, OTHER)).status, 403);
+
+    for (const slug of [board.json.id, plain.json.id, hosted.json.id, directBoard.id]) {
+      const removed = await call(`/api/sites/${slug}`, { method: "DELETE", headers: as(OWNER) });
+      assert.equal(removed.status, 200, removed.text);
+    }
+    const typesId = (await call("/api/tokens", { headers: as(OWNER) })).json.tokens.find(
+      (item) => item.clientName === "Types",
+    ).id;
+    await call(`/api/tokens/${typesId}`, { method: "DELETE", headers: as(OWNER) });
+  }
+
   // Direct uploads: presigned URLs, then a commit that checks the files in R2. Their own token,
   // so the upload rate limit does not reach the checks below.
   const directToken = await signIn(OWNER, "Direct uploads");

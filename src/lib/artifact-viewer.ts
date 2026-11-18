@@ -150,7 +150,7 @@ export const handleArtifactPage = Effect.fn("handleArtifactPage")(function* (
 
   // The frame token is written with this person's email, which must have a profile.
   yield* ensureProfile(identity);
-  yield* recordVisit(identity.email, slug);
+  yield* recordVisit(identity.email, access.nap);
   const token = randomString(32);
   const db = yield* Database;
   yield* db.run(

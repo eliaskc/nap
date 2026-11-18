@@ -4,7 +4,7 @@ import { ItemMenu, useActions } from "~/dashboard/actions";
 import { EmptyState, LoadingRows } from "~/dashboard/chrome";
 import type { Item, ItemView } from "~/dashboard/data";
 import { formatCount, formatPeople } from "~/dashboard/format";
-import { AccessIcon, KindIcon, KindTile, Preview, SourceIcon } from "~/dashboard/kinds";
+import { AccessIcon, KindIcon, KindTile, Preview, SourceIcon, TypeLabel } from "~/dashboard/kinds";
 import { cn } from "~/lib/utils";
 
 /** Drop files on an item you own to publish a new version of it. */
@@ -46,6 +46,7 @@ function Meta({ item }: { item: Item }) {
         {item.label}
         {!item.mine && ` · ${item.ownerName}`}
       </span>
+      <TypeLabel item={item} />
       <SourceIcon item={item} />
     </span>
   );
@@ -70,7 +71,11 @@ export function ItemRow({ item }: { item: Item }) {
             onClick={() => actions.open(item)}
             className="absolute inset-0 focus-visible:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
           />
-          <KindTile kind={item.kind} className="pointer-events-none relative" />
+          <KindTile
+            kind={item.kind}
+            type={item.site?.type}
+            className="pointer-events-none relative"
+          />
           <div className="pointer-events-none relative flex min-w-0 flex-1 flex-col">
             <span className="truncate text-[15px] font-semibold tracking-[-0.01em]">
               {item.title}
@@ -114,7 +119,7 @@ export function ItemCard({ item }: { item: Item }) {
           <Preview item={item} className="w-full" />
         </div>
         <div className="flex min-w-0 items-center gap-2">
-          <KindIcon kind={item.kind} className="size-3.5" />
+          <KindIcon kind={item.kind} type={item.site?.type} className="size-3.5" />
           <span className="flex-1 truncate text-sm font-semibold">{item.title}</span>
           {!item.mine && (
             <span className="max-w-24 truncate text-xs text-muted-foreground">

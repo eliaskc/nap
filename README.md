@@ -212,6 +212,13 @@ the owner chose, in one namespace. `kind` says how it is served:
   URLs. This is an interim mode for the naps that need these. It goes away
   once frames get origins of their own on a separate content domain.
 
+A nap also has a `type`: `page` (the default) or `dashboard`. The type
+changes how Nap shows and counts a nap and which instructions agents read;
+the agent writes the code for every type, and Nap renders nothing from a spec.
+People open a dashboard again and again, or leave it open on a screen that
+reloads it, so Nap remembers that someone opened it (for their lists and the
+owner's list of visitors) but does not count repeat opens as visits.
+
 A nap's name is the first path segment on the root domain, next to Nap's own
 routes (`/api`, `/connect`, `/_nap`, ...). Those names are reserved
 (`RESERVED_SLUGS` in `src/lib/uploads.ts`): no nap may take one, and Nap's

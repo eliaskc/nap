@@ -12,6 +12,7 @@ const RESERVED = new Set([
   "people",
   "avatar",
   "looks",
+  "files",
   "NapError",
   "ext",
   "extensions",

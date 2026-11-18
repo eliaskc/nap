@@ -8,6 +8,7 @@ import {
   FolderArchiveIcon,
   HistoryIcon,
   LinkIcon,
+  ShapesIcon,
   Trash2Icon,
   UserRoundPenIcon,
   UsersIcon,
@@ -23,7 +24,12 @@ import {
   ContextMenuGroup,
   ContextMenuItem,
   ContextMenuLabel,
+  ContextMenuRadioGroup,
+  ContextMenuRadioItem,
   ContextMenuSeparator,
+  ContextMenuSub,
+  ContextMenuSubContent,
+  ContextMenuSubTrigger,
   ContextMenuTrigger,
 } from "~/components/ui/context-menu";
 import {
@@ -57,6 +63,7 @@ import {
 } from "~/dashboard/upload";
 import type { Color, Shape } from "~/lib/looks";
 import { napLabel } from "~/lib/nap-urls";
+import { isNapType, NAP_TYPES, type NapType } from "~/lib/nap-types";
 import { napConfig } from "~/nap.config";
 
 /** What every layout can do with an item. The dialogs live in <DashboardActions>. */
@@ -73,6 +80,8 @@ export type Actions = {
   toggleKind: (site: Site) => void;
   /** The Nap bar above a nap in the frame, on or off. */
   toggleBar: (site: Site) => void;
+  /** What kind of nap it is: a page or a dashboard. */
+  setType: (site: Site, type: NapType) => void;
   remove: (site: Site) => void;
   /** Pick files for a new version of this nap, or for something new without one. */
   pickFiles: (target?: Site) => void;
@@ -298,7 +307,11 @@ export function DashboardActions({
         method: "PATCH",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(
-          change.kind ? { ownHost: change.kind === "site" } : { toolbar: change.toolbar },
+          change.kind
+            ? { ownHost: change.kind === "site" }
+            : change.type
+              ? { type: change.type }
+              : { toolbar: change.toolbar },
         ),
       });
       if (!response.ok) {
@@ -340,6 +353,9 @@ export function DashboardActions({
     toggleKind: (site) =>
       void saveSettings(site, { kind: site.kind === "site" ? "artifact" : "site" }),
     toggleBar: (site) => void saveSettings(site, { toolbar: !site.toolbar }),
+    setType: (site, type) => {
+      if (type !== site.type) void saveSettings(site, { type });
+    },
     remove: setDeletingSite,
     pickFiles: (target) => {
       pickTarget.current = target;
@@ -547,6 +563,8 @@ export function DashboardActions({
   );
 }
 
+const TYPE_NAMES: Record<NapType, string> = { page: "Page", dashboard: "Dashboard" };
+
 /**
  * Right-click on any item, in every layout. `render` replaces the wrapper element, so absolutely
  * positioned layouts keep their own element.
@@ -574,7 +592,7 @@ export function ItemMenu({
       <ContextMenuContent className="min-w-52">
         <ContextMenuGroup>
           <ContextMenuLabel className="flex items-center gap-2 text-foreground">
-            <KindIcon kind={item.kind} className="size-3.5" />
+            <KindIcon kind={item.kind} type={site?.type} className="size-3.5" />
             <span className="truncate font-medium">{item.title}</span>
           </ContextMenuLabel>
         </ContextMenuGroup>
@@ -633,6 +651,24 @@ export function ItemMenu({
                 <EditIcon data-icon="inline-start" />
                 Rename
               </ContextMenuItem>
+              <ContextMenuSub>
+                <ContextMenuSubTrigger>
+                  <ShapesIcon data-icon="inline-start" />
+                  Type
+                </ContextMenuSubTrigger>
+                <ContextMenuSubContent>
+                  <ContextMenuRadioGroup
+                    value={site.type}
+                    onValueChange={(value) => isNapType(value) && actions.setType(site, value)}
+                  >
+                    {NAP_TYPES.map((type) => (
+                      <ContextMenuRadioItem key={type} value={type}>
+                        {TYPE_NAMES[type]}
+                      </ContextMenuRadioItem>
+                    ))}
+                  </ContextMenuRadioGroup>
+                </ContextMenuSubContent>
+              </ContextMenuSub>
               {site.kind === "artifact" && (
                 <ContextMenuItem onClick={() => actions.toggleBar(site)}>
                   <PanelTopIcon data-icon="inline-start" />
@@ -737,7 +773,10 @@ function VisitorsDialog({ site, onClose }: { site: Site | null; onClose: () => v
                   <div className="flex min-w-0 flex-1 flex-col">
                     <span className="truncate text-sm font-medium">{visitor.name}</span>
                     <span className="truncate text-xs text-muted-foreground" title={visitor.email}>
-                      {visitor.visits === 1 ? "Once" : `${visitor.visits} times`} · first{" "}
+                      {/* Repeat opens of a dashboard are not counted, so its count says nothing. */}
+                      {site?.type === "dashboard"
+                        ? "First"
+                        : `${visitor.visits === 1 ? "Once" : `${visitor.visits} times`} · first`}{" "}
                       {formatDate(visitor.firstVisitedAt)}
                     </span>
                   </div>

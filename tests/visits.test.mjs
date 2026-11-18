@@ -66,7 +66,8 @@ function setup() {
   return { sqlite, env: { DB } };
 }
 
-const visit = (env, email) => runNap(env, recordVisit(email, "quiz"));
+const visit = (env, email, type = "page") =>
+  runNap(env, recordVisit(email, { slug: "quiz", type }));
 
 test("opens within 30 minutes are one visit; later ones count again", async () => {
   const { sqlite, env } = setup();
@@ -96,4 +97,27 @@ test("the owner is left out of the visitors and the count", async () => {
 
   const [site] = await runNap(env, listSites({ email: ANNA, name: "Anna" }));
   assert.equal(site.visitorCount, 2);
+});
+
+test("a dashboard counts each person once, but still remembers when they opened it", async () => {
+  const { sqlite, env } = setup();
+  const OLD = "2020-01-01T00:00:00.000Z";
+  const age = () => sqlite.exec(`UPDATE site_visits SET visited_at = '${OLD}'`);
+  await visit(env, ANNA, "dashboard");
+  age();
+  await visit(env, ANNA, "dashboard");
+  let [anna] = await runNap(env, listVisitors("quiz", OWNER));
+  assert.equal(anna.visits, 1);
+  assert.notEqual(anna.visitedAt, OLD);
+  const [site] = await runNap(env, listSites({ email: ANNA, name: "Anna" }));
+  assert.equal(site.visitorCount, 1);
+  assert.ok(site.visitedAt, "it shows as visited");
+
+  // Counts already stored stay when the type changes.
+  age();
+  await visit(env, ANNA, "page");
+  age();
+  await visit(env, ANNA, "dashboard");
+  [anna] = await runNap(env, listVisitors("quiz", OWNER));
+  assert.equal(anna.visits, 2);
 });

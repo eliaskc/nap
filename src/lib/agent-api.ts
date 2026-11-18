@@ -21,6 +21,7 @@ import {
 } from "~/lib/direct-uploads";
 import { objectKey, slugify } from "~/lib/nap-server";
 import { isLocalHostname, napUrl as placeUrl, type NapKind } from "~/lib/nap-urls";
+import { napTypeOf, parseNapType } from "~/lib/nap-types";
 import { publishFiles, type PublishedNap } from "~/lib/publish";
 import {
   canViewSite,
@@ -85,6 +86,7 @@ const PREFIX = "/_nap/api";
 type NapRow = {
   slug: string;
   kind: "site" | "artifact";
+  type: string;
   title: string;
   currentVersion: string;
   visibility: Visibility;
@@ -96,7 +98,7 @@ type NapRow = {
   updatedAt: string;
 };
 
-const NAP_COLUMNS = `slug, kind, title, current_version AS currentVersion, visibility, listed, toolbar,
+const NAP_COLUMNS = `slug, kind, type, title, current_version AS currentVersion, visibility, listed, toolbar,
   source_repo AS sourceRepo, created_by_email AS createdByEmail,
   created_at AS createdAt, updated_at AS updatedAt`;
 
@@ -147,6 +149,7 @@ export const handleAgentApi = Effect.fn("handleAgentApi")(function* (request: Re
     // kind is the older field for the serving mode: "artifact" (Nap's frame) or "site" (its own host).
     kind: row.kind,
     ownHost: row.kind === "site",
+    type: napTypeOf(row.type),
     title: row.title,
     url: napUrl(row),
     currentVersion: row.currentVersion,
@@ -467,6 +470,7 @@ const publish = Effect.fnUntraced(function* (
     "slug",
     "kind",
     "ownHost",
+    "type",
     "message",
     "expectedVersion",
     "access",
@@ -476,6 +480,7 @@ const publish = Effect.fnUntraced(function* (
 
   const access = yield* parseAccess(fields.access, fields.emails, targetSlug);
   const { kind, slug } = yield* newNapShape(fields);
+  const type = yield* napTypeField(fields.type);
 
   return yield* publishFiles(agent, {
     files,
@@ -485,6 +490,7 @@ const publish = Effect.fnUntraced(function* (
     kind,
     slug: targetSlug ? "" : slug,
     title: fields.title,
+    type,
     access: access ?? undefined,
     source: "agent",
     client: agent.client,
@@ -508,12 +514,22 @@ const newNapShape = (fields: {
   return "error" in shape ? failNoStore(400, shape.error) : Effect.succeed(shape);
 };
 
+/**
+ * The nap's type (nap-types.ts): "page" or "dashboard". Nothing sent is undefined: a new nap is
+ * a page and an update keeps its type, so older agents behave as before. Only the owner changes
+ * the type of an existing nap; publishFiles ignores it from anyone else, like the title.
+ */
+const napTypeField = (value: unknown) => {
+  const type = parseNapType(value);
+  return typeof type === "object" ? failNoStore(400, type.error) : Effect.succeed(type);
+};
+
 /** Room for MAX_DIRECT_UPLOAD_FILES entries with long paths. */
 const MAX_MANIFEST_BYTES = 32 * 1024 * 1024;
 
 /**
  * POST /_nap/api/uploads with JSON:
- * { files: [{ path, size, type? }], title?, name?, ownHost?, access?, emails?, id?,
+ * { files: [{ path, size, type? }], title?, name?, ownHost?, type?, access?, emails?, id?,
  *   expectedVersion?, message?, sourceCommit?, createSource? } (and the older kind and slug)
  * With id, a new version of that nap. Returns presigned PUT URLs for the first page of files,
  * nextPage while there are more, and the commit URL.
@@ -544,6 +560,7 @@ const startUpload = Effect.fnUntraced(function* (request: Request, url: URL, age
     name: field("name"),
     slug: field("slug"),
   });
+  const type = yield* napTypeField(body.type);
 
   const started = yield* startDirectUpload(agent, {
     files: body.files,
@@ -553,6 +570,7 @@ const startUpload = Effect.fnUntraced(function* (request: Request, url: URL, age
     kind: shape.kind,
     slug: targetSlug ? "" : shape.slug,
     title: field("title"),
+    type,
     access,
     source: "agent",
     client: agent.client,
@@ -624,6 +642,7 @@ function publishedBody(
     id: nap.slug,
     kind: nap.kind,
     ownHost: nap.kind === "site",
+    type: nap.type,
     title: nap.title,
     url: napUrl(nap),
     version: nap.currentVersion,

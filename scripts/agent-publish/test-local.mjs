@@ -662,8 +662,108 @@ try {
     "deleting a nap removes its redirects",
   );
 
+  // Dashboards: a draft with type=dashboard. Repeat opens of a dashboard are not counted as
+  // visits; a page's are.
+  assert.equal(
+    (await postDraft("?type=slides", "<h1>x</h1>", tokens[OWNER])).status,
+    400,
+    "unknown types are refused",
+  );
+  const boardDraft = await uploadDraft("?type=dashboard&title=Signups", "<h1>board</h1>");
+  assert.equal(boardDraft.type, "dashboard");
+  const boardClaim = await claim(boardDraft.id, { visibility: "everyone" });
+  assert.equal(boardClaim.status, 200, boardClaim.text);
+  assert.equal(boardClaim.json.site.type, "dashboard");
+  const board = boardClaim.json.site.slug;
+  const plainClaim = await claim((await uploadDraft("?title=Plain", "<h1>plain</h1>")).id, {
+    visibility: "everyone",
+  });
+  assert.equal(plainClaim.json.site.type, "page");
+  const plain = plainClaim.json.site.slug;
+
+  const sqlRows = async (query, ...params) => (await nap.sql(query, ...params)).results;
+  // Visits are written after the response.
+  const visitOf = async (slug, email, until = () => true) => {
+    for (let attempt = 0; ; attempt++) {
+      const [row] = await sqlRows(
+        "SELECT visit_count AS count, visited_at AS at FROM site_visits WHERE site_slug = ? AND email = ?",
+        slug,
+        email,
+      );
+      if ((row && until(row)) || attempt === 50) return row;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+  };
+  const OLD = "2000-01-01T00:00:00.000Z";
+  const ageVisit = (slug, email) =>
+    nap.sql(
+      "UPDATE site_visits SET visited_at = ? WHERE site_slug = ? AND email = ?",
+      OLD,
+      slug,
+      email,
+    );
+  /** Opens the nap, moves the visit back past the 30 minutes that count as one, opens it again. */
+  const openTwice = async (slug, open = (path) => viewer(OTHER, path)) => {
+    assert.equal((await open(`/${slug}`)).status, 200);
+    assert.ok(await visitOf(slug, OTHER), "the first open is a visit");
+    await ageVisit(slug, OTHER);
+    assert.equal((await open(`/${slug}`)).status, 200);
+    return visitOf(slug, OTHER, (row) => row.at !== OLD);
+  };
+
+  const pageVisit = await openTwice(plain);
+  assert.equal(pageVisit.count, 2, "a page counts every visit");
+  const boardVisit = await openTwice(board);
+  assert.equal(boardVisit.count, 1, "a dashboard counts each person once");
+  assert.notEqual(boardVisit.at, OLD, "but remembers when they last opened it");
+  // It still shows as visited: in the owner's visitors and in the visitor's own list.
+  const visitors = (await call(`/api/sites/${board}/visitors`, { headers: as(OWNER) })).json
+    .visitors;
+  assert.equal(visitors.find((visitor) => visitor.email === OTHER)?.visits, 1);
+  const seen = (await call("/api/sites", { headers: as(OTHER) })).json.sites.find(
+    (site) => site.slug === board,
+  );
+  assert.ok(seen?.visitedAt, "the dashboard is in the visitor's list as visited");
+
+  // Changing the type keeps the counts already stored; the rule follows the type from then on.
+  const typeSettings = (slug, value) =>
+    call(`/api/sites/${slug}/settings`, {
+      method: "PATCH",
+      ...jsonBody(value),
+      headers: { "content-type": "application/json", ...as(OWNER) },
+    });
+  assert.equal((await typeSettings(plain, { type: "dashboard" })).json.type, "dashboard");
+  assert.equal((await visitOf(plain, OTHER)).count, 2, "stored counts stay");
+  await ageVisit(plain, OTHER);
+  await viewer(OTHER, `/${plain}`);
+  assert.equal((await visitOf(plain, OTHER, (row) => row.at !== OLD)).count, 2);
+  assert.equal((await typeSettings(board, { type: "page" })).json.type, "page");
+  assert.equal((await openTwice(board)).count, 2, "a page again counts again");
+  assert.equal(
+    (await typeSettings(board, { type: "slides" })).status,
+    400,
+    "unknown types are refused",
+  );
+
+  // The same on a dashboard's own host.
+  await typeSettings(board, { type: "dashboard" });
+  assert.equal((await typeSettings(board, { ownHost: true })).status, 200);
+  const onHost = (path) =>
+    call(path.replace(`/${board}`, "/"), {
+      host: `${board}.${ROOT}`,
+      headers: { ...signedIn(OTHER), "sec-fetch-dest": "document" },
+    });
+  assert.equal((await openTwice(board, onHost)).count, 2, "counts stored before stay");
+  await nap.sql("DELETE FROM site_visits WHERE site_slug = ?", board);
+  assert.equal((await openTwice(board, onHost)).count, 1, "a dashboard on its own host too");
+
+  for (const slug of [board, plain]) {
+    const removed = await call(`/api/sites/${slug}`, { method: "DELETE", headers: as(OWNER) });
+    assert.equal(removed.status, 200, removed.text);
+  }
+
   console.log(
-    "Agent publish HTTP checks passed: drafts, claims, replaces, names, moves, the bar, and hosts.",
+    "Agent publish HTTP checks passed: drafts, claims, replaces, names, moves, the bar, hosts, and dashboards.",
   );
 } finally {
   await nap?.stop();

@@ -18,6 +18,7 @@ type NapRow = {
   listed: number;
   toolbar: number;
   kind: SiteKind;
+  type: string;
   sourceRepo: string | null;
 };
 
@@ -39,7 +40,7 @@ export const rekeyNap = Effect.fn("rekeyNap")(function* (
     `SELECT slug, title, created_by_email AS createdByEmail, current_version AS currentVersion,
             sort_order AS sortOrder, theme_json AS themeJson, created_at AS createdAt,
             view_count AS viewCount, last_viewed_at AS lastViewedAt, visibility, listed, toolbar,
-            kind, source_repo AS sourceRepo
+            kind, type, source_repo AS sourceRepo
      FROM sites WHERE slug = ? AND management_type = 'direct'`,
     from,
   );
@@ -53,8 +54,8 @@ export const rekeyNap = Effect.fn("rekeyNap")(function* (
       `INSERT INTO sites (
          slug, title, created_by_email, updated_by_email, current_version, sort_order,
          theme_json, created_at, updated_at, view_count, last_viewed_at, visibility,
-         listed, toolbar, kind, source_repo
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), ?, ?, ?, ?, ?, ?, ?)`,
+         listed, toolbar, kind, type, source_repo
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), ?, ?, ?, ?, ?, ?, ?, ?)`,
       to,
       options.title ?? nap.title,
       nap.createdByEmail,
@@ -69,6 +70,7 @@ export const rekeyNap = Effect.fn("rekeyNap")(function* (
       nap.listed,
       nap.toolbar,
       options.kind ?? nap.kind,
+      nap.type,
       nap.sourceRepo,
     ),
     move("versions"),

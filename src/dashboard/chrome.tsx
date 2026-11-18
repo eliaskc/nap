@@ -181,7 +181,10 @@ function UploadButton() {
   );
 }
 
-/** All / Mine / Shared with me, the sort menu (which also picks kinds), and list or cards. */
+/**
+ * All / Mine / Shared with me, the sort menu (which also picks kinds, and only dashboards), and
+ * list or cards.
+ */
 export function FilterBar({
   view,
   compact,
@@ -286,6 +289,14 @@ function SortMenu({ view, compact }: { view: ItemView; compact?: boolean }) {
               {KIND_LABEL[kind].many}
             </DropdownMenuCheckboxItem>
           ))}
+          <DropdownMenuCheckboxItem
+            checked={view.dashboardsOnly}
+            closeOnClick={false}
+            onCheckedChange={(checked) => view.setDashboardsOnly(checked)}
+          >
+            <KindIcon kind="artifact" type="dashboard" />
+            Only dashboards
+          </DropdownMenuCheckboxItem>
         </DropdownMenuGroup>
       </DropdownMenuContent>
     </DropdownMenu>
@@ -295,7 +306,9 @@ function SortMenu({ view, compact }: { view: ItemView; compact?: boolean }) {
 export function EmptyState({ view, className }: { view: ItemView; className?: string }) {
   return (
     <p className={cn("px-4 py-10 text-center text-sm text-muted-foreground", className)}>
-      {FILTERS.find((filter) => filter.value === view.filter)?.empty}
+      {view.dashboardsOnly
+        ? "No dashboards here. Turn off Only dashboards in the sort menu to see everything."
+        : FILTERS.find((filter) => filter.value === view.filter)?.empty}
     </p>
   );
 }

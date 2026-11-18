@@ -44,7 +44,7 @@ Everyone on Nap has a name they chose. Show people by that name instead of inven
 
 ## Both
 
-- Anyone who can view a nap can publish new versions and restore old ones. Only the owner changes who can view it, renames it, moves it between the frame and its own host, turns the bar on or off, transfers, or deletes it. A move keeps the name, and the old URL redirects.
+- Anyone who can view a nap can publish new versions and restore old ones. Only the owner changes who can view it, renames it, moves it between the frame and its own host, turns the bar on or off, changes its type, transfers, or deletes it. A move keeps the name, and the old URL redirects.
 - A nap with a build step keeps its source in a repo on Nap (`source` topic).
 - Links that leave Nap should open in a new tab (`target="_blank"`); many sites refuse to load in a frame.
 - If you bundle to one HTML file, add the `/_nap/` script tags after bundling. Bundlers fail on `/_nap/client.js` and `/_nap/share.js`, because those files only exist on Nap.

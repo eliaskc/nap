@@ -261,7 +261,7 @@ function PileCard({ item, ...handlers }: { item: Item } & React.HTMLAttributes<H
     >
       <Preview item={item} className="pointer-events-none" />
       <div className="mt-2 flex items-center gap-1.5 text-[12.5px] font-semibold">
-        <KindIcon kind={item.kind} className="size-3" />
+        <KindIcon kind={item.kind} type={item.site?.type} className="size-3" />
         <span className="flex-1 truncate">{item.title}</span>
         {!item.mine && (
           <span className="max-w-16 truncate font-normal text-muted-foreground">

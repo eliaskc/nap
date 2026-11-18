@@ -19,14 +19,15 @@ Never print the token or put it in a project. In a sandbox that cannot write the
 - A name: add `--url-query name=team-map` for `{{rootDomain}}/team-map`. Without one, the nap gets a random id.
 - Its own host, only for the needs in the `sites` topic: add `ownHost=true`, for `<name>.{{rootDomain}}`. (The older fields still work: `kind=site` is `ownHost=true`, `kind=artifact` the frame, and `slug` alone a name on its own host.)
 - Several files: multipart, each file with its path: `-F 'title=Team map' -F name=team-map -F 'files=@dist/index.html;filename=index.html' -F 'files=@dist/assets/app.js;filename=assets/app.js'`
+- A dashboard: add `type=dashboard` (`dashboards` topic). Without it a new nap is a page (`type=page`); other values are refused. On a new version, only the owner's `type` changes it.
 - Access for a new nap: `access=private`, `access=everyone`, or `access=selected` with `emails=a@x.com,b@x.com`. Without it the nap gets the default ({{defaultAccess}}).
 - New version: send the same to `/_nap/api/naps/<id>/versions` with `message=What changed`. URL, access, and settings stay. On someone else's nap, send `expectedVersion=<currentVersion>` from `GET /_nap/api/naps/<id>`. Without it Nap answers `expected_version_required`; a 409 means someone published in between, so read the nap again and merge.
-- The response has id, url, ownHost, version, access, and a message that says who can see it. Tell the user who can see it.
+- The response has id, url, ownHost, type, version, access, and a message that says who can see it. Tell the user who can see it.
 - Uploads through Nap take up to 25 MB. Larger, or more than a few files: direct uploads, below.
 
 ## Direct uploads (up to 10 GB and 100,000 files)
 
-1. `POST /_nap/api/uploads` with JSON `{"files":[{"path":"index.html","size":1234}],"title":"..."}` listing every file (exact sizes in bytes), plus name, ownHost, access, and emails for a new nap, or `"id"` and `"message"` for a new version. Each file can be up to 4 GB. The response has uploadId, commitUrl, and a url and headers for each file of the first page (up to 1,000 files or 256 MB).
+1. `POST /_nap/api/uploads` with JSON `{"files":[{"path":"index.html","size":1234}],"title":"..."}` listing every file (exact sizes in bytes), plus name, ownHost, type, access, and emails for a new nap, or `"id"` and `"message"` for a new version. Each file can be up to 4 GB. The response has uploadId, commitUrl, and a url and headers for each file of the first page (up to 1,000 files or 256 MB).
 2. PUT each file to its url with exactly those headers: `curl -sS --fail -X PUT -T img/a.png -H 'content-type: image/png' '<url>'`. The URLs last an hour. Do not send the token to them.
 3. While the response has a `nextPage` URL, GET it with the token when you have started the last file of the page, not before (URLs last an hour): it has the next page of `files` and its own `nextPage` (null after the last page).
 4. POST to commitUrl with the token. If it says files are missing, PUT them again and POST again.

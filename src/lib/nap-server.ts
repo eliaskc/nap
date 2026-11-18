@@ -1,4 +1,5 @@
 import { Effect } from "effect";
+import { napTypeOf, type NapType } from "~/lib/nap-types";
 import { Database } from "~/server/database";
 
 export type Identity = {
@@ -9,6 +10,8 @@ export type Identity = {
 export type SiteRecord = {
   slug: string;
   kind: "site" | "artifact";
+  /** "page" or "dashboard" (nap-types.ts). */
+  type: NapType;
   /** The site's source is in a Nap source repo; dashboard uploads are off. */
   hasSource: boolean;
   title: string;
@@ -88,6 +91,7 @@ export const listSites = Effect.fn("listSites")(function* (identity: Identity) {
   const results = yield* db.all<{
     slug: string;
     kind: "site" | "artifact";
+    type: string;
     hasSource: number;
     title: string;
     createdByEmail: string;
@@ -116,6 +120,7 @@ export const listSites = Effect.fn("listSites")(function* (identity: Identity) {
        SELECT
         sites.slug,
         sites.kind,
+        sites.type,
         sites.source_repo IS NOT NULL AS hasSource,
         sites.title,
         sites.created_by_email AS createdByEmail,
@@ -152,6 +157,7 @@ export const listSites = Effect.fn("listSites")(function* (identity: Identity) {
     (row): SiteRecord => ({
       slug: row.slug,
       kind: row.kind,
+      type: napTypeOf(row.type),
       hasSource: Boolean(row.hasSource),
       title: row.title,
       createdByEmail: row.createdByEmail,

@@ -14,6 +14,7 @@ import {
   type IncomingFile,
   type SiteKind,
 } from "~/lib/uploads";
+import { DEFAULT_NAP_TYPE, type NapType } from "~/lib/nap-types";
 import { checkSourceCommit } from "~/lib/sources";
 import { insertVersion, type VersionSource } from "~/lib/versions";
 import { Database, sql } from "~/server/database";
@@ -34,6 +35,7 @@ export type PublishInput = PublishTargetInput & {
 export type PublishedNap = {
   slug: string;
   kind: SiteKind;
+  type: NapType;
   title: string;
   currentVersion: string;
   previousVersion: string | null;
@@ -45,6 +47,7 @@ export type PublishedNap = {
 export type ExistingNap = {
   slug: string;
   kind: SiteKind;
+  type: NapType;
   title: string;
   currentVersion: string;
   sourceRepo: string | null;
@@ -55,7 +58,7 @@ export type ExistingNap = {
 const getNap = Effect.fnUntraced(function* (slug: string) {
   const db = yield* Database;
   return yield* db.first<ExistingNap>(
-    `SELECT slug, kind, title, current_version AS currentVersion,
+    `SELECT slug, kind, type, title, current_version AS currentVersion,
             source_repo AS sourceRepo, created_by_email AS createdByEmail, visibility
      FROM sites WHERE slug = ?`,
     slug,
@@ -84,11 +87,18 @@ export type PublishTargetInput = {
    */
   slug?: string;
   title?: string;
+  /**
+   * The nap's type (nap-types.ts). New naps without one are pages. On an update only the owner
+   * changes it; without one, or from anyone else, it stays.
+   */
+  type?: NapType;
 };
 
 export type PublishTarget = {
   slug: string;
   kind: SiteKind;
+  /** A new nap's type, or an update's new type. Null: an update keeps the type it has. */
+  type: NapType | null;
   title: string;
   existing: ExistingNap | null;
 };
@@ -124,8 +134,8 @@ export const resolvePublishTarget = Effect.fn("resolvePublishTarget")(function* 
         { code: "expected_version_required" },
       );
     }
-    // Only the owner renames. Others publish under the current name.
-    if (!isOwner) input = { ...input, title: "" };
+    // Only the owner renames or changes the type. Others publish under the current ones.
+    if (!isOwner) input = { ...input, title: "", type: undefined };
     if (input.expectedCurrentVersion && existing.currentVersion !== input.expectedCurrentVersion) {
       return yield* changedMeanwhile();
     }
@@ -149,7 +159,8 @@ export const resolvePublishTarget = Effect.fn("resolvePublishTarget")(function* 
     });
   slug ??=
     kind === "artifact" ? yield* pickArtifactId(isTaken) : yield* pickGeneratedSlug(title, isTaken);
-  return { slug, kind, title, existing } satisfies PublishTarget;
+  const type = existing ? (input.type ?? null) : (input.type ?? DEFAULT_NAP_TYPE);
+  return { slug, kind, type, title, existing } satisfies PublishTarget;
 });
 
 /**
@@ -217,6 +228,7 @@ export const recordVersion = Effect.fn("recordVersion")(function* (
 ) {
   const db = yield* Database;
   const { slug, kind, title, existing } = target;
+  const type: NapType = target.type ?? existing?.type ?? DEFAULT_NAP_TYPE;
   const { version } = input;
   const sourceRepo = existing ? existing.sourceRepo : (input.sourceRepo ?? null);
   const versionRow = insertVersion({
@@ -238,10 +250,11 @@ export const recordVersion = Effect.fn("recordVersion")(function* (
       versionRow,
       sql(
         `UPDATE sites
-         SET title = ?, updated_by_email = ?, current_version = ?,
+         SET title = ?, type = COALESCE(?, type), updated_by_email = ?, current_version = ?,
              updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
          WHERE slug = ? AND current_version = ? AND management_type = 'direct'`,
         title,
+        target.type,
         identity.email,
         version,
         slug,
@@ -259,11 +272,13 @@ export const recordVersion = Effect.fn("recordVersion")(function* (
     yield* db
       .batch([
         sql(
-          `INSERT INTO sites (slug, kind, title, created_by_email, updated_by_email, current_version,
-                              sort_order, theme_json, visibility, listed, toolbar, source_repo)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`,
+          `INSERT INTO sites (slug, kind, type, title, created_by_email, updated_by_email,
+                              current_version, sort_order, theme_json, visibility, listed, toolbar,
+                              source_repo)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`,
           slug,
           kind,
+          type,
           title,
           identity.email,
           identity.email,
@@ -291,6 +306,7 @@ export const recordVersion = Effect.fn("recordVersion")(function* (
   return {
     slug,
     kind,
+    type,
     title,
     currentVersion: version,
     previousVersion: existing?.currentVersion ?? null,

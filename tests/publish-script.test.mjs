@@ -101,3 +101,24 @@ test("what older copies of publish.mjs send means the same as before", () => {
   assert.deepEqual(served({ kind: "site" }), { kind: "site", slug: "" });
   assert.deepEqual(served({ kind: "site", slug: "elo" }), { kind: "site", slug: "elo" });
 });
+
+test("publish.mjs sends --type, and nothing without it, so Nap keeps its default", async () => {
+  const { parseNapType } = await import("../src/lib/nap-types.ts");
+  const dashboard = await publishBody(["--type", "dashboard"]);
+  assert.equal(dashboard.type, "dashboard");
+  assert.equal(parseNapType(dashboard.type), "dashboard");
+  const plain = await publishBody([]);
+  assert.equal(plain.type, undefined, "no --type, no type");
+  assert.equal(parseNapType(plain.type), undefined, "Nap makes it a page");
+  const update = await publishBody(["--update", "abc", "--type", "dashboard"]);
+  assert.equal(update.id, "abc");
+  assert.equal(update.type, "dashboard", "an update can change it");
+  assert.deepEqual(parseNapType("slides"), { error: 'type must be "page" or "dashboard"' });
+  assert.equal(parseNapType(" Dashboard "), "dashboard");
+});
+
+test("publish.mjs help points to the dashboards topic", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const source = await readFile(SCRIPT, "utf8");
+  assert.match(source, /^\/\/ {3}--type type .*\n(\/\/ .*\n)*?\/\/ .*instructions\/dashboards/m);
+});

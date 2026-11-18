@@ -8,6 +8,7 @@ import {
   type PublishedNap,
   type PublishTarget,
 } from "~/lib/publish";
+import { isNapType, napTypeOf, type NapType } from "~/lib/nap-types";
 import { presignPut } from "~/lib/r2-presign";
 import { isSameEmail, type Visibility } from "~/lib/site-access";
 import {
@@ -68,6 +69,8 @@ export type StartDirectUploadInput = {
   kind?: SiteKind;
   slug?: string;
   title?: string;
+  /** The nap's type. New naps without one are pages; updates without one keep theirs. */
+  type?: NapType;
   access?: { visibility: Visibility; emails: Array<string> } | null;
   source: DirectUploadSource;
   client?: string;
@@ -89,6 +92,7 @@ type UploadRow = {
   versionId: string;
   creates: number;
   kind: SiteKind;
+  napType: string | null;
   title: string;
   message: string;
   ownerOnly: number;
@@ -118,6 +122,8 @@ export type StartedDirectUpload = SignedPage & {
   uploadId: string;
   id: string;
   kind: SiteKind;
+  /** The type it will have, or null when an update keeps the one it has. */
+  type: NapType | null;
   fileCount: number;
   totalBytes: number;
   source?: SourceAccess;
@@ -247,6 +253,7 @@ export const startDirectUpload = Effect.fn("startDirectUpload")(function* (
       kind: input.kind,
       slug: input.slug,
       title: input.title,
+      type: input.type,
     },
     undefined,
     isHeldByUpload,
@@ -296,10 +303,11 @@ export const startDirectUpload = Effect.fn("startDirectUpload")(function* (
     .pipe(Effect.tapError(() => undo));
   yield* db
     .run(
-      `INSERT INTO uploads (id, email, source, client, site_slug, version_id, creates, kind, title,
-                            message, owner_only, expected_version, visibility, viewer_emails,
-                            file_count, total_bytes, expires_at, source_commit, source_repo)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO uploads (id, email, source, client, site_slug, version_id, creates, kind,
+                            nap_type, title, message, owner_only, expected_version, visibility,
+                            viewer_emails, file_count, total_bytes, expires_at, source_commit,
+                            source_repo)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       id,
       identity.email,
       input.source,
@@ -308,6 +316,7 @@ export const startDirectUpload = Effect.fn("startDirectUpload")(function* (
       versionId,
       target.existing ? 0 : 1,
       target.kind,
+      target.type,
       (input.title ?? "").trim().slice(0, 120),
       (input.message ?? "").trim(),
       // The owner_only column predates shared editing. It now stores requireExpectedVersion.
@@ -328,6 +337,7 @@ export const startDirectUpload = Effect.fn("startDirectUpload")(function* (
     uploadId: id,
     id: target.slug,
     kind: target.kind,
+    type: target.type,
     fileCount: files.length,
     totalBytes,
     expiresAt,
@@ -345,7 +355,7 @@ const openUpload = Effect.fnUntraced(function* (
   const db = yield* Database;
   const row = yield* db.first<UploadRow>(
     `SELECT id, email, source, client, site_slug AS siteSlug, version_id AS versionId, creates,
-            kind, title, message, owner_only AS ownerOnly, expected_version AS expectedVersion,
+            kind, nap_type AS napType, title, message, owner_only AS ownerOnly, expected_version AS expectedVersion,
             visibility, viewer_emails AS viewerEmails,
             file_count AS fileCount, total_bytes AS totalBytes, expires_at AS expiresAt,
             committed_at AS committedAt, source_commit AS sourceCommit,
@@ -439,7 +449,13 @@ export const commitDirectUpload = Effect.fn("commitDirectUpload")(function* (
   let created: PublishTarget | null = null;
   if (row.creates) {
     const title = row.title || (yield* pageTitle) || UNTITLED_NAP;
-    created = { slug: row.siteSlug, kind: row.kind, title, existing: null };
+    created = {
+      slug: row.siteSlug,
+      kind: row.kind,
+      type: napTypeOf(row.napType),
+      title,
+      existing: null,
+    };
     if (row.sourceRepo) {
       yield* checkSourceCommit(
         { slug: row.siteSlug, sourceRepo: row.sourceRepo, currentVersion: null },
@@ -464,6 +480,7 @@ export const commitDirectUpload = Effect.fn("commitDirectUpload")(function* (
           requireExpectedVersion: Boolean(row.ownerOnly),
           expectedCurrentVersion: row.expectedVersion,
           title: row.title,
+          type: isNapType(row.napType) ? row.napType : undefined,
         },
         pageTitle,
       );

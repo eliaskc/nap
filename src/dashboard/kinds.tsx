@@ -1,4 +1,5 @@
 import {
+  ChartColumnIcon,
   FileTextIcon,
   GitBranchIcon,
   GlobeIcon,
@@ -25,27 +26,46 @@ export const KIND_SOFT: Record<Kind, string> = {
   app: "bg-kind-app-soft",
 };
 
-/** Sites are a globe, artifacts a page, apps a phone. Each in its kind's colour. */
+/** A nap's type, where it is not a plain page. */
+export const TYPE_LABEL: Record<string, string> = { dashboard: "Dashboard" };
+
+/**
+ * Sites are a globe, artifacts a page, apps a phone. Each in its kind's colour. A dashboard
+ * (`type`) is a chart, in its kind's colour.
+ */
 export function KindIcon({
   kind,
+  type,
   className,
   muted,
 }: {
   kind: Kind;
+  type?: string;
   className?: string;
   muted?: boolean;
 }) {
-  const Icon = KIND_ICON[kind];
+  const Icon = type === "dashboard" ? ChartColumnIcon : KIND_ICON[kind];
+  const label = type ? TYPE_LABEL[type] : undefined;
   return (
     <Icon
-      aria-hidden="true"
+      aria-hidden={label ? undefined : "true"}
+      aria-label={label}
+      role={label ? "img" : undefined}
       className={cn("size-4 shrink-0", !muted && KIND_TEXT[kind], className)}
     />
   );
 }
 
 /** The kind as a small tinted tile, for list rows. Each kind has its own corner shape too. */
-export function KindTile({ kind, className }: { kind: Kind; className?: string }) {
+export function KindTile({
+  kind,
+  type,
+  className,
+}: {
+  kind: Kind;
+  type?: string;
+  className?: string;
+}) {
   return (
     <span
       className={cn(
@@ -59,7 +79,7 @@ export function KindTile({ kind, className }: { kind: Kind; className?: string }
         className,
       )}
     >
-      <KindIcon kind={kind} className="size-[18px]" />
+      <KindIcon kind={kind} type={type} className="size-[18px]" />
     </span>
   );
 }
@@ -77,6 +97,13 @@ export function AccessIcon({ item, className }: { item: Item; className?: string
       <Icon className={cn("size-3", className)} aria-label={label} />
     </span>
   );
+}
+
+/** "Dashboard" next to the URL, for naps that are not plain pages. */
+export function TypeLabel({ item }: { item: Item }) {
+  const label = item.site ? TYPE_LABEL[item.site.type] : undefined;
+  if (!label) return null;
+  return <span className="shrink-0">· {label}</span>;
 }
 
 export function SourceIcon({ item }: { item: Item }) {

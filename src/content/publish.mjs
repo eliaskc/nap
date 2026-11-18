@@ -34,6 +34,10 @@
 //                          the few pages that need one (see the instructions).
 //                          (--site is the same as --own-host; --slug name the same as
 //                          --name name --own-host.)
+//   --type type            page (the default) or dashboard: charts and numbers people look at
+//                          again and again. Read the dashboards topic before you make one:
+//                          GET https://{{rootDomain}}/_nap/api/instructions/dashboards.
+//                          With --update, only the owner's publish changes the type.
 //   --access who           New naps only: private, everyone, or selected. Default: {{defaultAccess}}.
 //   --emails a@x,b@x       With --access selected: who can view it.
 //   --update <id or URL>   Publish a new version of a nap. Its URL and access stay the same.
@@ -294,6 +298,9 @@ async function publish(options) {
     title: options.title,
     message: options.message,
   };
+  // Nap refuses types it does not know. Without --type, a new nap is a page, and an update keeps
+  // its type.
+  if (options.type) body.type = options.type;
   if (options.update) {
     body.id = idFrom(options.update);
     if (options["expected-version"]) body.expectedVersion = options["expected-version"];
@@ -376,6 +383,7 @@ async function publish(options) {
   console.log(nap.created ? "Published." : "Published a new version.");
   console.log(`Who can see it: ${who[nap.access] || who.private}`);
   console.log(`URL: ${nap.url}`);
+  if (nap.type && nap.type !== "page") console.log(`Type: ${nap.type}`);
   console.log(`Id (use --update ${nap.id} for the next version): ${nap.id}`);
   if (local) {
     console.log(

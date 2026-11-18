@@ -110,3 +110,19 @@ test("looks show in the instructions only when the Nap has avatars", () => {
   assert.match(on, /nap-avatar/);
   assert.match(on, /nap\.looks/);
 });
+
+test("the index lists the dashboards topic and says to read it before making one", () => {
+  const index = renderInstructions(read("index"), config());
+  assert.ok(indexTopics(index).includes("dashboards"));
+  assert.match(index, /--type dashboard/);
+  assert.match(index, /Read the `dashboards` topic before you make one/);
+  const topic = renderInstructions(read("dashboards"), config());
+  assert.match(topic, /^# Dashboards on Nap/);
+  assert.match(topic, /--type dashboard/);
+  // It works on any screen, without hover.
+  assert.match(topic, /from a phone to a large display/);
+  assert.match(topic, /Nothing that only shows on hover/);
+  // Nap ships no chart components; the topic must not pretend it does.
+  assert.match(topic, /Nap has no chart components of its own/);
+  assert.doesNotMatch(topic, /nap\.chart|<nap-chart/);
+});

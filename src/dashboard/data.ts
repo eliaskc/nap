@@ -1,6 +1,7 @@
 import * as React from "react";
 import type { Color, Shape } from "~/lib/looks";
 import { browserPlace, napLabel, napUrl } from "~/lib/nap-urls";
+import type { NapType } from "~/lib/nap-types";
 import { napConfig } from "~/nap.config";
 
 /**
@@ -12,6 +13,8 @@ export type Kind = "site" | "artifact" | "app";
 export type Site = {
   slug: string;
   kind: "site" | "artifact";
+  /** "page" or "dashboard". Repeat opens of a dashboard are not counted as visits. */
+  type: NapType;
   /** The source is in a Nap source repo. New versions come from agents, not uploads. */
   hasSource: boolean;
   title: string;
@@ -236,11 +239,17 @@ export function useItemView(items: Array<Item>) {
     KINDS,
     (value) => Array.isArray(value) && value.every((kind) => KINDS.includes(kind as Kind)),
   );
+  const [dashboardsOnly, setDashboardsOnly] = useStored<boolean>(
+    "nap:dashboards-only",
+    false,
+    (value) => typeof value === "boolean",
+  );
 
   const visible = React.useMemo(() => {
     const shown = items.filter(
       (item) =>
         kinds.includes(item.kind) &&
+        (!dashboardsOnly || item.site?.type === "dashboard") &&
         (filter === "all" || (filter === "mine" ? item.mine : !item.mine)),
     );
     const byUpdated = (a: Item, b: Item) => b.updatedAt.localeCompare(a.updatedAt);
@@ -251,7 +260,7 @@ export function useItemView(items: Array<Item>) {
       name: (a, b) => a.title.localeCompare(b.title),
     };
     return shown.sort(compare[sort]);
-  }, [items, filter, sort, kinds]);
+  }, [items, filter, sort, kinds, dashboardsOnly]);
 
   const counts = React.useMemo(
     () => ({
@@ -262,7 +271,20 @@ export function useItemView(items: Array<Item>) {
     [items],
   );
 
-  return { filter, setFilter, sort, setSort, look, setLook, kinds, setKinds, visible, counts };
+  return {
+    filter,
+    setFilter,
+    sort,
+    setSort,
+    look,
+    setLook,
+    kinds,
+    setKinds,
+    dashboardsOnly,
+    setDashboardsOnly,
+    visible,
+    counts,
+  };
 }
 
 export type ItemView = ReturnType<typeof useItemView>;

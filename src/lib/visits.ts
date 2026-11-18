@@ -12,18 +12,28 @@ const SAME_VISIT = `strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-30 minutes')`;
  * Remembers that this person opened this site or artifact, after the response. The dashboard
  * uses it to list other people's artifacts the person has seen, to sort by recent visits, to
  * count the people who have opened each one, and to show owners who they are.
+ *
+ * A dashboard (type "dashboard") is opened again and again, and often left open on a screen
+ * that reloads it, so repeat opens are not counted: its visit_count stays at 1 per person, while
+ * visited_at still moves. The rule follows the type at the time of the visit; counts already
+ * stored stay when the owner changes the type.
  */
-export const recordVisit = Effect.fn("recordVisit")(function* (email: string, slug: string) {
+export const recordVisit = Effect.fn("recordVisit")(function* (
+  email: string,
+  nap: { slug: string; type: string },
+) {
   const db = yield* Database;
+  const countsRepeats = nap.type === "dashboard" ? 0 : 1;
   yield* inBackground(
     db
       .run(
         `INSERT INTO site_visits (email, site_slug, first_visited_at) VALUES (lower(?), ?, ${NOW})
          ON CONFLICT (email, site_slug) DO UPDATE SET
-           visit_count = visit_count + (visited_at < ${SAME_VISIT}),
+           visit_count = visit_count + (? AND visited_at < ${SAME_VISIT}),
            visited_at = ${NOW}`,
         email,
-        slug,
+        nap.slug,
+        countsRepeats,
       )
       .pipe(Effect.asVoid),
     "Recording a visit failed",
