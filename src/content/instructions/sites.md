@@ -4,7 +4,7 @@ One rule: a slug gives a page its own host, and that makes it a site. Without a 
 
 ## Artifacts
 
-- URL `https://{{rootDomain}}/artifact/<id>`, with a random id. The title is the name people see, so make it clear.
+- URL `https://{{rootDomain}}/<id>`, with a random id. The title is the name people see, so make it clear.
 - It shows below a small Nap bar with the title, the owner, and a Share button for the owner. Do not add your own Share button. The page loads in a frame below the bar, so 100vh layouts and fixed elements work.
 - The frame is a sandbox with an opaque origin (`location.origin` is "null"):
   - Use relative paths: `assets/app.js`, `fetch("data.json")`. Nap fixes root paths in HTML attributes (`src="/app.js"`), but not URLs that scripts build. For Vite, set `base: "./"`.

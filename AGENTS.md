@@ -38,6 +38,7 @@ workersDev: { enabled: false, previewsEnabled: false }
 Temporary testing may enable them, but revert before deploying.
 
 - Nap has no Wrangler config. Production deployment and D1 migration history belong to Alchemy; local dev and the HTTP tests run `local*` Alchemy stages. Read the infrastructure section in `README.md` before changes to production resources. Preserve the live database and bucket; review the plan for replacements.
+- Artifacts live at `<root>/<id>`, next to Nap's own routes. A new top-level route on the root domain (a file in `src/routes`, a path in `src/worker.ts`, a folder in `public/`) must be added to `RESERVED_SLUGS` in `src/lib/uploads.ts`; `tests/reserved-names.test.mjs` checks this. Old `/artifact/<id>` links redirect.
 - Code on Access-bypassed paths (`/_nap/api/*`, `/_nap/frame/*`, `/_nap/hooks/*`) must never call `getIdentity()` or `ensureProfile()`.
 
 ## Server code (Effect)

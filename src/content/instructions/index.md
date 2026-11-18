@@ -29,7 +29,7 @@ This page covers the common case. Read a topic below when you need it.
 
 ## Artifact or site
 
-- **Artifact** (the default): one page to look at or use, such as a report, a prototype, or a one-off tool. It lives at `https://{{rootDomain}}/artifact/<random id>` below a small Nap bar with a Share button.
+- **Artifact** (the default): one page to look at or use, such as a report, a prototype, or a one-off tool. It lives at `https://{{rootDomain}}/<random id>` below a small Nap bar with a Share button.
 - **Site**: something people come back to, at `https://<slug>.{{rootDomain}}`. Make a site when the user asks for one, or when the page needs client-side routing, root-absolute URLs, or storage that lasts across reloads. Read the `sites` topic first.
 
 ## Sign in and publish

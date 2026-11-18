@@ -8,7 +8,7 @@ import { cn } from "~/lib/utils";
 import { ago, useSystemDark } from "./app";
 
 /**
- * The history button in the Nap bar on /artifact/<slug>. It lists the artifact's versions.
+ * The history button in the Nap bar on /<slug>. It lists the artifact's versions.
  * Clicking one shows it next to the live version; Restore makes it live. Nothing is deleted or
  * renumbered: Nap moves `sites.current_version`, and the next upload gets the next number.
  * The bar shows only the icon. A dot on it means an older version is live.
@@ -28,7 +28,7 @@ type Version = {
 };
 
 export type HistoryConfig = {
-  /** `/artifact/<slug>/_nap/versions`. */
+  /** `/<slug>/_nap/versions`. */
   api: string;
   frame: HTMLIFrameElement;
   slot: HTMLElement;

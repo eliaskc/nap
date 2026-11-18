@@ -10,7 +10,7 @@ import { SHARE_WIDGET_VERSION } from "~/lib/share-widget";
  * `Sec-Fetch-Dest`: `document` gets this page, `iframe` (and everything else) gets the files. One
  * host means one Access cookie, and the toolbar script can read the frame's address.
  *
- * Artifacts (`artifact` set): this page is <root>/artifact/<slug>. The iframe is sandboxed, with
+ * Artifacts (`artifact` set): this page is <root>/<slug>. The iframe is sandboxed, with
  * an opaque origin, and loads the files from <root>/_nap/frame/<token>/. The frame tells this page
  * its address with postMessage (see artifact-viewer.ts).
  */
@@ -253,7 +253,7 @@ const VIEWER_SOURCE = String.raw`(() => {
     const data = event.data;
     if (!data || data.type !== "nap:location" || typeof data.path !== "string") return;
     if (data.path.charAt(0) !== "/" || data.path.charAt(1) === "/") return;
-    // "/" and "/?q" belong to the artifact page itself: /artifact/<slug> and /artifact/<slug>?q.
+    // "/" and "/?q" belong to the artifact page itself: /<slug> and /<slug>?q.
     const rest = /^\/([?#]|$)/.test(data.path) ? data.path.slice(1) : data.path;
     const next = base + rest;
     if (next !== location.pathname + location.search + location.hash) {

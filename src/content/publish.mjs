@@ -241,7 +241,23 @@ async function nextPage(token, url) {
   return page.data;
 }
 
+/**
+ * The id in a page's URL: <root>/<id>, <id>.<root>, an old <root>/artifact/<id> link, or /s/<id>/
+ * locally.
+ */
 function idFrom(value) {
+  const root = new URL(NAP_URL).host;
+  let url;
+  try {
+    url = new URL(value);
+  } catch {
+    return value;
+  }
+  if (url.host === root) {
+    const match = url.pathname.match(/^\/(?:artifact\/|s\/)?([a-z0-9-]+)(?:\/|$)/);
+    if (match) return match[1];
+  }
+  if (url.host.endsWith(`.${root}`)) return url.host.slice(0, -root.length - 1);
   const match =
     value.match(/^https?:\/\/[^/]+\/artifact\/([a-z0-9-]+)/) ||
     value.match(/^https?:\/\/([a-z0-9-]+)\.[^/]*nap\./);

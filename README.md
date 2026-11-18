@@ -6,8 +6,8 @@ also keep its source in a Git repo on Nap, so agents can change it later.
 
 - **Dashboard:** `<root domain>`
 - **Sites:** `<slug>.<root domain>`
-- **Artifacts:** `<root domain>/artifact/<id>`
-- **Local:** `/s/<slug>/` and `/artifact/<id>`
+- **Artifacts:** `<root domain>/<id>`
+- **Local:** `/s/<slug>/` and `/<id>`
 
 The app uses TanStack Start, React, Tailwind CSS v4, and shadcn/ui with Base
 UI. A Cloudflare Worker serves it. Private R2 stores the site files, and D1
@@ -204,14 +204,21 @@ redirects.
   so sites cannot read each other's data unless one allows it (below), and they
   get real browser storage.
   They are for things that people come back to.
-- **Artifacts** are at `<root>/artifact/<id>`. The id is random, not made
-  from the title, and cannot be renamed. They are quick pages. On the
+- **Artifacts** are at `<root>/<id>`. The id is random, not made
+  from the title, and cannot be renamed. Old `<root>/artifact/<id>` links
+  redirect there permanently. They are quick pages. On the
   dashboard an artifact shows to its owner and the people it invites; one
   shared with everyone shows to others once they have opened it.
 
+An artifact's id is the first path segment on the root domain, next to Nap's
+own routes (`/api`, `/connect`, `/_nap`, ...). Those names are reserved
+(`RESERVED_SLUGS` in `src/lib/uploads.ts`): no artifact id or site slug may
+take one, and Nap's own routes always win. A test fails when a new top-level
+route is not reserved.
+
 A site that moves to Artifacts gets a random id; the R2 files and rows move
 to the new key (`src/lib/rekey.ts`). The old slug stays in `nap_redirects`.
-It only redirects, from both `<slug>.<root>` and `<root>/artifact/<slug>`,
+It only redirects, from both `<slug>.<root>` and `<root>/<slug>`,
 and is never shown. A live nap with that slug always wins over a redirect. An
 artifact that moves to Sites keeps its id as its host until the owner renames
 it.
@@ -343,7 +350,7 @@ service says so. A tap opens a page on the Nap's own domains only. Each send is 
 
 ### The artifact viewer
 
-`src/lib/artifact-viewer.ts` serves `/artifact/<slug>` behind Access. It shows
+`src/lib/artifact-viewer.ts` serves `/<slug>` behind Access. It shows
 the Nap bar and an iframe that is sandboxed without `allow-same-origin`, so
 the artifact runs in an opaque origin. It cannot read the dashboard or other
 artifacts, and the dashboard's same-origin checks refuse its requests.
@@ -356,7 +363,7 @@ access on each request. The token is the credential: it appears only in the
 frame URL and is not sent in the referrer.
 
 Tokens last 12 hours. While the page is open, the Nap bar renews its token
-through `/artifact/<slug>/_nap/frame`, which Access protects, so a dashboard
+through `/<slug>/_nap/frame`, which Access protects, so a dashboard
 left open on a screen keeps working, and someone Access no longer lets in
 loses the frame when the token runs out.
 
@@ -387,7 +394,7 @@ frame's edge when the artifact has no margin, and popovers whose theme follows
 the artifact's background. Comments live in the D1 `comments` table and are
 anchored by the quote with some text before and after it, so they survive new
 versions while the quote is still there. The API is
-`/artifact/<slug>/_nap/comments`; the bar polls it every 30 seconds.
+`/<slug>/_nap/comments`; the bar polls it every 30 seconds.
 
 Artifacts should use relative URLs. Apps that need root paths, client-side
 routing, or lasting browser storage should be sites.

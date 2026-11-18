@@ -8,7 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "~/com
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "~/components/ui/field";
 import { Input } from "~/components/ui/input";
 import { Skeleton } from "~/components/ui/skeleton";
-import { ARTIFACT_PATH, browserPlace, napLabel, napUrl } from "~/lib/nap-urls";
+import { artifactPath, browserPlace, napLabel, napUrl } from "~/lib/nap-urls";
 import { cn } from "~/lib/utils";
 import { napConfig } from "~/nap.config";
 
@@ -78,7 +78,7 @@ function ClaimPage() {
       // Reopening your own claim link goes straight to what it published.
       if (body.draft.claimedByMe && body.draft.siteSlug) {
         // The artifact page sends sites on to their own host.
-        window.location.replace(`${ARTIFACT_PATH}/${body.draft.siteSlug}`);
+        window.location.replace(artifactPath(body.draft.siteSlug));
         return;
       }
       setState({ kind: "ready", ...body });

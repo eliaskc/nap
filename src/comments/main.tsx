@@ -4,9 +4,9 @@ import { CommentsApp } from "./app";
 import { HistoryApp } from "./history";
 import css from "./comments.css?inline";
 
-// Served at /_nap/comments.js. The artifact page (/artifact/<slug>) loads it below the Nap bar:
-// <script type="module" src="/_nap/comments.js" data-nap-comments="/artifact/<slug>/_nap/comments"
-//   data-nap-versions="/artifact/<slug>/_nap/versions"></script>
+// Served at /_nap/comments.js. The artifact page (/<slug>) loads it below the Nap bar:
+// <script type="module" src="/_nap/comments.js" data-nap-comments="/<slug>/_nap/comments"
+//   data-nap-versions="/<slug>/_nap/versions"></script>
 // It also has the history button.
 const script = document.querySelector<HTMLScriptElement>("script[data-nap-comments]");
 const api = script?.dataset.napComments;

@@ -114,7 +114,7 @@ export const AgentApiAccess = Cloudflare.Access.Application(
   }),
 ).pipe(RemovalPolicy.retain());
 
-// Artifact frames. <root>/artifact/<slug> frames the artifact in a sandbox with an opaque origin,
+// Artifact frames. <root>/<slug> frames the artifact in a sandbox with an opaque origin,
 // and requests from that origin may not carry the Access cookie. The frame loads its files from
 // <root>/_nap/frame/<token>/ instead. Only the Access-protected artifact page makes tokens; the
 // Worker checks the token and the viewer's access on every request.

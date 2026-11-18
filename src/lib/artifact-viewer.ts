@@ -6,7 +6,8 @@ import { toolbarPage } from "~/lib/nap-toolbar";
 import { handleVisitorAccessRequest, visitorRequestState } from "~/lib/access-requests";
 import { noAccessHeaders, noAccessPage } from "~/lib/no-access-page";
 import { findRedirect } from "~/lib/rekey";
-import { ARTIFACT_PATH, isLocalHostname, napUrl, type NapPlace } from "~/lib/nap-urls";
+import type { ArtifactRoute } from "~/lib/artifact-routes";
+import { artifactPath, isLocalHostname, napUrl, type NapPlace } from "~/lib/nap-urls";
 import { handleNotifyRequest } from "~/lib/notifications";
 import { handleSiteAccessRequest } from "~/lib/site-access";
 import { handleSiteDataRequest } from "~/lib/site-data";
@@ -40,8 +41,11 @@ import { randomString, sha256Hex } from "~/server/tokens";
 import COMMENTS_FRAME_SOURCE from "virtual:nap-comments-frame";
 
 /**
- * Artifacts live at <root>/artifact/<id>, like Claude's artifacts. The id is random. Old URLs
- * (nap_redirects) redirect to the current one.
+ * Artifacts live at <root>/<id>. The id is random. Old URLs (nap_redirects) redirect to the
+ * current one, and so do old links to <root>/artifact/<id>.
+ *
+ * The id is the first path segment on the root domain, next to Nap's own routes, which always
+ * win (see artifact-routes.ts).
  *
  * The page there is the Nap bar with a sandboxed iframe. The sandbox has no allow-same-origin, so
  * the artifact runs in an opaque origin: it cannot read the dashboard, other artifacts, or their
@@ -54,11 +58,12 @@ import COMMENTS_FRAME_SOURCE from "virtual:nap-comments-frame";
  * request. The token is in the frame's URL only, never in the address bar.
  *
  * Paths:
- *   /artifact/<slug>[/<path>]           the page (Access)
- *   /artifact/<slug>/_nap/access        the share button's API (Access)
- *   /artifact/<slug>/_nap/comments      the comments API for the Nap bar (Access)
- *   /artifact/<slug>/_nap/versions      the history button's API (Access)
- *   /artifact/<slug>/_nap/frame         renews the frame token while the page is open (Access)
+ *   /<slug>[/<path>]                    the page (Access)
+ *   /<slug>/_nap/access                 the share button's API (Access)
+ *   /<slug>/_nap/comments               the comments API for the Nap bar (Access)
+ *   /<slug>/_nap/versions               the history button's API (Access)
+ *   /<slug>/_nap/frame                  renews the frame token while the page is open (Access)
+ *   /artifact/<slug>[/<path>]           old links: redirect to /<slug>[/<path>]
  *   /_nap/frame/<token>/<path>          the artifact's files (token)
  *   /_nap/frame/<token>/_nap/ext/<name>/<path>
  *                                       the deployment's extensions (token)
@@ -72,28 +77,21 @@ const FRAME_TOKEN_HOURS = 12;
 export const FRAME_SANDBOX =
   "allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-modals allow-downloads";
 
-const ARTIFACT_ROUTE = new RegExp(`^${ARTIFACT_PATH}/([a-z0-9-]{1,32})(/.*)?$`);
 const FRAME_ROUTE = /^\/_nap\/frame\/([A-Za-z0-9_-]{32,64})(\/.*)?$/;
 const VERSION_ROUTE = /^\/_nap\/version\/([0-9a-f-]{36})(\/.*)?$/;
-
-export function isArtifactPath(pathname: string) {
-  return pathname === ARTIFACT_PATH || pathname.startsWith(`${ARTIFACT_PATH}/`);
-}
 
 export function isFramePath(pathname: string) {
   return pathname.startsWith(FRAME_PREFIX);
 }
 
-/** <root>/artifact/<slug>[/<path>]. Access protects this path. */
+/** <root>/<slug>[/<path>] (see artifactRoute). Access protects this path. */
 export const handleArtifactPage = Effect.fn("handleArtifactPage")(function* (
   request: Request,
   place: NapPlace,
+  route: ArtifactRoute,
 ) {
   const url = new URL(request.url);
-  const match = url.pathname.match(ARTIFACT_ROUTE);
-  if (!match) return statusPage(404, "Artifact not found", "The link is wrong.", place);
-  const slug = match[1];
-  const rest = match[2] ?? "";
+  const { slug, rest, base } = route;
 
   if (rest === "/_nap/access") return yield* handleSiteAccessRequest(slug, request);
   if (rest === "/_nap/access/request" || rest === "/_nap/access/status") {
@@ -120,7 +118,7 @@ export const handleArtifactPage = Effect.fn("handleArtifactPage")(function* (
   if (access.status === "missing") {
     // An old URL of a nap that has a new key now, such as a site that moved to Artifacts.
     const moved = yield* findRedirect(slug);
-    if (moved) return redirect(`${ARTIFACT_PATH}/${moved}${rest}${url.search}`);
+    if (moved) return redirect(`${artifactPath(moved)}${rest}${url.search}`);
     return statusPage(404, "Artifact not found", "The link is wrong, or it was deleted.", place);
   }
   // It moved to its own host. Old artifact links keep working.
@@ -141,7 +139,7 @@ export const handleArtifactPage = Effect.fn("handleArtifactPage")(function* (
         dashboardUrl: place.localOrigin ? "/" : `https://${place.rootDomain}/`,
         signOutUrl: place.localOrigin ? undefined : "/cdn-cgi/access/logout",
         request: yield* visitorRequestState(slug, identity.email),
-        accessPath: `${ARTIFACT_PATH}/${slug}/_nap/access`,
+        accessPath: `${base}/_nap/access`,
         back: url.pathname + url.search,
       }),
       { status: 403, headers: noAccessHeaders },
@@ -174,19 +172,19 @@ export const handleArtifactPage = Effect.fn("handleArtifactPage")(function* (
     updatedAt: nap.updatedAt,
     isOwner,
     frameSrc: `${FRAME_PREFIX}${token}${rest || "/"}${url.search}`,
-    accessPath: `${ARTIFACT_PATH}/${slug}/_nap/access`,
+    accessPath: `${base}/_nap/access`,
     dashboardUrl: "/",
     artifact: {
       sandbox: FRAME_SANDBOX,
-      base: `${ARTIFACT_PATH}/${slug}`,
-      commentsPath: `${ARTIFACT_PATH}/${slug}/_nap/comments`,
-      versionsPath: `${ARTIFACT_PATH}/${slug}/_nap/versions`,
+      base,
+      commentsPath: `${base}/_nap/comments`,
+      versionsPath: `${base}/_nap/versions`,
     },
   });
 });
 
 /**
- * POST <root>/artifact/<slug>/_nap/frame with { token }: the viewer keeps its frame token alive.
+ * POST <root>/<slug>/_nap/frame with { token }: the viewer keeps its frame token alive.
  * Access protects this path, so only someone Access still lets in, who can still view the
  * artifact, extends their own token. 404 when it already ran out: the viewer reloads.
  */
@@ -467,7 +465,7 @@ post();})();`;
 }
 
 /**
- * /artifact/<slug>/_nap/versions, for the history button in the Nap bar (Access).
+ * /<slug>/_nap/versions, for the history button in the Nap bar (Access).
  * GET lists the versions, newest first. POST { version, expectedCurrentVersion } makes one live.
  */
 const handleArtifactVersionsRequest = Effect.fnUntraced(function* (slug: string, request: Request) {

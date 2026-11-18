@@ -32,7 +32,7 @@ Never print the token or put it in a project. In a sandbox that cannot write the
 
 ## Read and change pages
 
-- `GET /_nap/api/naps`: the user's pages and those shared with them by name: id, title, url, kind, owner, role. Pages shared with everyone are not listed but work by id. The id is in the URL: `/artifact/<id>` or `<id>.{{rootDomain}}`.
+- `GET /_nap/api/naps`: the user's pages and those shared with them by name: id, title, url, kind, owner, role. Pages shared with everyone are not listed but work by id. The id is in the URL: `{{rootDomain}}/<id>` or `<id>.{{rootDomain}}`. Old links of the form `{{rootDomain}}/artifact/<id>` still work.
 - `GET /_nap/api/naps/<id>`: one page, with currentVersion and source.
 - `GET /_nap/api/naps/<id>/files` lists the live files, and `/files/<path>` returns one. Add `?version=<version>` for an older version.
 - `GET /_nap/api/naps/<id>/versions`: history, newest first.

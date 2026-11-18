@@ -3,9 +3,11 @@
  *
  * - A site (a nap with a chosen URL) has its own host: <slug>.<root>. Real origin, real
  *   localStorage, root-absolute paths work.
- * - An artifact is at <root>/artifact/<slug>. Nap shows it in a sandboxed frame below a small bar.
+ * - An artifact is at <root>/<id>. Nap shows it in a sandboxed frame below a small bar. Its id
+ *   shares the root domain's first path segment with Nap's own routes, which are reserved
+ *   (RESERVED_SLUGS in uploads.ts) and always win.
  *
- * Local development has one host: sites are at /s/<slug>/ and artifacts at /artifact/<slug>.
+ * Local development has one host: sites are at /s/<slug>/ and artifacts at /<id>.
  * The functions here run on the server and in the browser.
  */
 
@@ -13,7 +15,13 @@ import { napConfig } from "~/nap.config";
 
 export type NapKind = "site" | "artifact";
 
-export const ARTIFACT_PATH = "/artifact";
+/** Old artifact links, <root>/artifact/<id>[/<path>], redirect to <root>/<id>[/<path>]. */
+export const LEGACY_ARTIFACT_PATH = "/artifact";
+
+/** An artifact's path on the root domain: /<id>. */
+export function artifactPath(slug: string) {
+  return `/${slug}`;
+}
 
 export type NapPlace = {
   rootDomain: string;
@@ -24,16 +32,16 @@ export type NapPlace = {
 export function napUrl(nap: { slug: string; kind: NapKind }, place: NapPlace) {
   if (nap.kind === "artifact") {
     const origin = place.localOrigin || `https://${place.rootDomain}`;
-    return `${origin}${ARTIFACT_PATH}/${nap.slug}`;
+    return `${origin}${artifactPath(nap.slug)}`;
   }
   if (place.localOrigin) return `${place.localOrigin}/s/${nap.slug}/`;
   return `https://${nap.slug}.${place.rootDomain}/`;
 }
 
-/** The URL without the scheme, for labels: elo.<root>, <root>/artifact/x. */
+/** The URL without the scheme, for labels: elo.<root>, <root>/x. */
 export function napLabel(nap: { slug: string; kind: NapKind }, rootDomain: string) {
   return nap.kind === "artifact"
-    ? `${rootDomain}${ARTIFACT_PATH}/${nap.slug}`
+    ? `${rootDomain}${artifactPath(nap.slug)}`
     : `${nap.slug}.${rootDomain}`;
 }
 

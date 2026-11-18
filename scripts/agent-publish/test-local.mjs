@@ -207,10 +207,10 @@ try {
   assert.equal(byInvitee.json.site.visibility, "selected", "access stays the owner's choice");
   assert.equal(byInvitee.json.site.title, "Report", "the name stays the owner's choice");
 
-  // Artifacts live at <root>/artifact/<slug>: the Nap bar with a sandboxed frame. The frame loads
-  // its files from /_nap/frame/<token>/, which needs no Access cookie.
+  // Artifacts live at <root>/<slug>: the Nap bar with a sandboxed frame. The frame loads its
+  // files from /_nap/frame/<token>/, which needs no Access cookie.
   const contentHost = `${artifact.slug}.${ROOT}`;
-  const artifactPath = `/artifact/${artifact.slug}`;
+  const artifactPath = `/${artifact.slug}`;
   const viewer = (email, path = artifactPath) =>
     call(path, { host: ROOT, headers: { ...signedIn(email), "sec-fetch-dest": "document" } });
   // People without a name go to the welcome page first.
@@ -244,6 +244,22 @@ try {
   );
   const deep = await viewer(OWNER, `${artifactPath}/notes/a.html?x=1`);
   assert.match(deep.text, /data-src="\/_nap\/frame\/[A-Za-z0-9_-]+\/notes\/a\.html\?x=1"/);
+
+  // Old links at /artifact/<slug> move to /<slug> for good, with their path and query.
+  const legacy = await viewer(OWNER, `/artifact/${artifact.slug}/notes/a.html?x=1`);
+  assert.equal(legacy.status, 301, legacy.text);
+  assert.equal(legacy.headers.location, `${artifactPath}/notes/a.html?x=1`);
+  const legacyPage = await viewer(OWNER, `/artifact/${artifact.slug}`);
+  assert.equal(legacyPage.status, 301);
+  assert.equal(legacyPage.headers.location, artifactPath);
+  // Nap's own routes win over names, and a name that is no nap gets the dashboard's 404.
+  const unknown = await viewer(OWNER, "/zz-no-such-nap");
+  assert.equal(unknown.status, 404, "an unknown name is not found");
+  assert.doesNotMatch(unknown.text, /data-nap-content/, "and gets no viewer");
+  assert.equal((await viewer(OWNER, "/zz-no-such-nap/_nap/access")).status, 404);
+  const connectPage = await viewer(OWNER, "/connect");
+  assert.equal(connectPage.status, 200, "Nap's own pages still load");
+  assert.doesNotMatch(connectPage.text, /data-nap-content/);
 
   // The frame needs only the token: no Access headers.
   const frame = (path, options = {}) => call(`${frameSrc}${path}`, { host: ROOT, ...options });
@@ -302,6 +318,15 @@ try {
 
   // The viewer keeps its token alive through the Access-protected artifact page.
   const token = frameSrc.split("/").pop();
+  // A bar opened before the move renews through the old path: 308 keeps the POST.
+  const oldRenew = await call(`/artifact/${artifact.slug}/_nap/frame`, {
+    host: ROOT,
+    method: "POST",
+    headers: { ...signedIn(OWNER), "content-type": "application/json" },
+    body: JSON.stringify({ token }),
+  });
+  assert.equal(oldRenew.status, 308);
+  assert.equal(oldRenew.headers.location, `${artifactPath}/_nap/frame`);
   const renew = (email, body = { token }) =>
     call(`${artifactPath}/_nap/frame`, {
       host: ROOT,
@@ -340,7 +365,7 @@ try {
     '<html><head><title>R</title></head><body><img src="/x.png"><a href="//example.com/">e</a></body></html>',
   );
   const rootedSite = (await claim(rooted.id, {})).json.site;
-  const rootedPage = await viewer(OWNER, `/artifact/${rootedSite.slug}`);
+  const rootedPage = await viewer(OWNER, `/${rootedSite.slug}`);
   const rootedFrame = rootedPage.text.match(/data-src="(\/_nap\/frame\/[A-Za-z0-9_-]+)\/"/)[1];
   const rootedHtml = (await call(`${rootedFrame}/`, { host: ROOT })).text;
   assert.ok(rootedHtml.includes(`src="${rootedFrame}/x.png"`), rootedHtml);
@@ -512,11 +537,11 @@ try {
     headers: signedIn(OWNER),
   });
   assert.equal(fromSiteHost.status, 302);
-  assert.equal(fromSiteHost.headers.location, `https://${ROOT}/artifact/${mapId}/notes/?x=1`);
-  const oldPath = await viewer(OWNER, "/artifact/team-map");
+  assert.equal(fromSiteHost.headers.location, `https://${ROOT}/${mapId}/notes/?x=1`);
+  const oldPath = await viewer(OWNER, "/team-map");
   assert.equal(oldPath.status, 302);
-  assert.equal(oldPath.headers.location, `/artifact/${mapId}`);
-  const mapPage = await viewer(OWNER, `/artifact/${mapId}`);
+  assert.equal(oldPath.headers.location, `/${mapId}`);
+  const mapPage = await viewer(OWNER, `/${mapId}`);
   assert.equal(mapPage.status, 200, mapPage.text);
   const ownSlugs = (await call("/api/sites", { headers: as(OWNER) })).json.sites.map((s) => s.slug);
   assert.ok(ownSlugs.includes(mapId) && !ownSlugs.includes("team-map"), "the slug is not shown");
@@ -532,8 +557,10 @@ try {
     ...jsonBody({ kind: "site" }),
     headers: { "content-type": "application/json", ...as(OWNER) },
   });
-  const viaOldSlug = await viewer(OWNER, "/artifact/team-map");
-  assert.equal(viaOldSlug.headers.location, `/artifact/${mapId}`);
+  const viaOldSlug = await viewer(OWNER, "/team-map");
+  assert.equal(viaOldSlug.headers.location, `/${mapId}`);
+  const viaOldLink = await viewer(OWNER, "/artifact/team-map");
+  assert.equal(viaOldLink.headers.location, "/team-map", "old links take one more step");
   const deleted = await call(`/api/sites/${mapId}`, { method: "DELETE", headers: as(OWNER) });
   assert.equal(deleted.status, 200, deleted.text);
   assert.equal(

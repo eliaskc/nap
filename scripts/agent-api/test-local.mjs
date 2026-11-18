@@ -203,7 +203,7 @@ try {
   assert.equal(created.status, 201, created.text);
   assert.equal(created.json.kind, "artifact");
   assert.match(created.json.id, /^[a-z0-9]{12}$/, "artifacts get a random id");
-  assert.equal(created.json.url, `http://localhost/artifact/${created.json.id}`);
+  assert.equal(created.json.url, `http://localhost/${created.json.id}`);
   const id = created.json.id;
   const v1 = created.json.version;
   const dashboardRow = async (email = OWNER) =>
@@ -241,7 +241,7 @@ try {
   );
   assert.equal(invited.status, 201, invited.text);
   assert.equal(await visibilityOf(invited.json.id), "selected");
-  const invitedAccess = await call(`/artifact/${invited.json.id}/_nap/access`, {
+  const invitedAccess = await call(`/${invited.json.id}/_nap/access`, {
     headers: as(OWNER),
   });
   assert.deepEqual(invitedAccess.json.viewerEmails, [OTHER]);
@@ -714,18 +714,18 @@ try {
   // Restore moves the live version. Nothing is copied.
   const restored = await postJson(`/_nap/api/naps/${id}/restore`, { version: v1 }, bearer(token));
   assert.equal(restored.status, 200, restored.text);
-  const viewer = await call(`/artifact/${id}`, { headers: as(OWNER) });
+  const viewer = await call(`/${id}`, { headers: as(OWNER) });
   const frameSrc = viewer.text.match(/data-src="([^"]+)"/)?.[1];
   assert.ok(frameSrc, viewer.text);
   const served = await call(frameSrc);
   assert.match(served.text, /^<script>.*<\/script><h1>v1<\/h1>$/s, "the restored version is live");
 
   // The history button in the Nap bar: versions, previews, and restore.
-  const barHistory = await call(`/artifact/${id}/_nap/versions`, { headers: as(OWNER) });
+  const barHistory = await call(`/${id}/_nap/versions`, { headers: as(OWNER) });
   assert.equal(barHistory.status, 200, barHistory.text);
   assert.equal(barHistory.json.versions.find((version) => version.live).number, 1);
   assert.equal(
-    (await call(`/artifact/${id}/_nap/versions`, { headers: as(OTHER) })).status,
+    (await call(`/${id}/_nap/versions`, { headers: as(OTHER) })).status,
     404,
     "only people who can view it see the history",
   );
@@ -744,7 +744,7 @@ try {
   assert.equal(
     (
       await postJson(
-        `/artifact/${id}/_nap/versions`,
+        `/${id}/_nap/versions`,
         { version: v2, expectedCurrentVersion: v1 },
         { ...as(OWNER), "sec-fetch-site": "cross-site" },
       )
@@ -752,7 +752,7 @@ try {
     403,
   );
   const barRestore = await postJson(
-    `/artifact/${id}/_nap/versions`,
+    `/${id}/_nap/versions`,
     { version: v2, expectedCurrentVersion: v1 },
     as(OWNER),
   );
@@ -786,7 +786,7 @@ try {
 
   // Comments: people who can view an artifact comment from the Nap bar. The owner's agent reads,
   // replies, and resolves.
-  const comments = `/artifact/${id}/_nap/comments`;
+  const comments = `/${id}/_nap/comments`;
   const patchJson = (path, value, headers = {}) =>
     call(path, {
       method: "PATCH",
@@ -796,13 +796,8 @@ try {
   const ask = { body: "Make the heading bigger", path: "/", quote: "v3", prefix: "", suffix: "" };
   assert.equal((await postJson(comments, ask, as(OTHER))).status, 404, "only viewers comment");
   assert.equal(
-    (
-      await patchJson(
-        `/artifact/${id}/_nap/access`,
-        { visibility: "selected", emails: [OTHER] },
-        as(OWNER),
-      )
-    ).status,
+    (await patchJson(`/${id}/_nap/access`, { visibility: "selected", emails: [OTHER] }, as(OWNER)))
+      .status,
     200,
   );
   assert.equal(

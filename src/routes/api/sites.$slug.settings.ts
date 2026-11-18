@@ -12,7 +12,7 @@ import { route } from "~/server/route";
  * PATCH /api/sites/:slug/settings — { listed?: boolean, toolbar?: boolean, kind?: "site" | "artifact" }.
  * Owner only. listed: show a site in the shared, organisation-wide list. toolbar: frame it under the
  * Nap bar (sites only; artifacts always have it). kind: move it between Sites (<slug>.<root>) and
- * Artifacts (<root>/artifact/<id>). A site that becomes an artifact gets a random id; its slug
+ * Artifacts (<root>/<id>). A site that becomes an artifact gets a random id; its slug
  * stays only as a redirect. An artifact that becomes a site keeps its id as its host until the
  * owner renames it. The old URL redirects to the new one.
  */

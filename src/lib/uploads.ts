@@ -20,8 +20,38 @@ export const MAX_DIRECT_UPLOAD_BYTES = 10 * 1024 * 1024 * 1024;
 /** One file of a direct upload is one PUT, and R2 takes at most 5 GiB in one. */
 export const MAX_DIRECT_FILE_BYTES = 4 * 1024 * 1024 * 1024;
 
-// Host labels that Nap uses itself. No site may take them.
-const RESERVED_SLUGS = new Set(["artifacts", "www", "api", "mcp", "admin", "static"]);
+/**
+ * Names that Nap uses itself. No artifact id or site slug may be one of them: a site's slug is
+ * its host label (<slug>.<root>), and an artifact's id is the first path segment on the root
+ * domain (<root>/<id>), next to Nap's own routes. tests/reserved-names.test.mjs fails when a
+ * top-level route is added without being listed here.
+ */
+export const RESERVED_SLUGS: ReadonlySet<string> = new Set([
+  // Host labels.
+  "artifacts", // the old artifact host, artifacts.<root>, which redirects
+  "www",
+  "mcp",
+  "admin",
+  "static",
+  // Top-level routes on the root domain: src/routes, src/worker.ts, the built assets.
+  "api", // src/routes/api
+  "app",
+  "apps",
+  "claim",
+  "connect",
+  "install",
+  "requests",
+  "s", // local sites, /s/<slug>/
+  "a", // old local artifact links, /a/<id>
+  "welcome",
+  "_nap",
+  "assets", // the dashboard's built JavaScript and CSS (dist/client/assets)
+  "cdn-cgi", // Cloudflare's own paths, such as /cdn-cgi/access/logout
+  "artifact", // old artifact links, /artifact/<id>, which redirect
+  // Kept for later: what pages will be called.
+  "nap",
+  "naps",
+]);
 
 export function isReservedSlug(slug: string) {
   return RESERVED_SLUGS.has(slug);
@@ -40,17 +70,21 @@ export function newNapId(length = 6) {
 const ARTIFACT_ID_LENGTH = 12;
 
 /**
- * An artifact's URL is <root>/artifact/<id>, with a random id and never a title. Lowercase
- * [a-z0-9], so the id is still a valid host label if the owner moves the artifact to Sites.
+ * An artifact's URL is <root>/<id>, with a random id and never a title or a reserved name.
+ * Lowercase [a-z0-9], so the id is still a valid host label if the owner moves the artifact to
+ * Sites.
  * 12 characters is about 62 bits: collisions are not a concern, and links are hard to guess.
  */
 export const pickArtifactId = Effect.fnUntraced(function* <E, R>(
   isTaken: (id: string) => Effect.Effect<boolean, E, R>,
 ) {
-  let id = newNapId(ARTIFACT_ID_LENGTH);
-  for (let attempt = 0; attempt < 5 && (isReservedSlug(id) || (yield* isTaken(id))); attempt++) {
-    id = newNapId(ARTIFACT_ID_LENGTH);
-  }
+  const next = () => {
+    let id = newNapId(ARTIFACT_ID_LENGTH);
+    while (isReservedSlug(id)) id = newNapId(ARTIFACT_ID_LENGTH);
+    return id;
+  };
+  let id = next();
+  for (let attempt = 0; attempt < 5 && (yield* isTaken(id)); attempt++) id = next();
   return id;
 });
 
@@ -96,10 +130,13 @@ export const pickGeneratedSlug = Effect.fnUntraced(function* <E, R>(
 ) {
   const base = titleSlug(title);
   if (base && !isReservedSlug(base) && !(yield* isTaken(base))) return base;
-  let slug = generatedSlug(title);
-  for (let attempt = 0; attempt < 5 && (yield* isTaken(slug)); attempt++) {
-    slug = generatedSlug(title);
-  }
+  const next = () => {
+    let slug = generatedSlug(title);
+    while (isReservedSlug(slug)) slug = generatedSlug(title);
+    return slug;
+  };
+  let slug = next();
+  for (let attempt = 0; attempt < 5 && (yield* isTaken(slug)); attempt++) slug = next();
   return slug;
 });
 

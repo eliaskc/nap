@@ -33,7 +33,7 @@ import type { FrameAnchor, FrameState, FromBar, FromFrame } from "./protocol";
  * highlights. The Comments button lists every thread on the page, including comments on the
  * whole page, comments whose text is gone, and resolved ones.
  *
- * This runs in the Nap bar at /artifact/<slug>. The artifact is in a sandboxed frame with an
+ * This runs in the Nap bar at /<slug>. The artifact is in a sandboxed frame with an
  * opaque origin, so this page cannot read it. The comments script in the frame (frame.ts) finds
  * the text and reports rectangles, the selection, hovers, and clicks with postMessage. Popovers
  * live here, above the frame, and only this page calls the comment API. Popovers follow the artifact's own background (light or dark); the bar button follows the
@@ -51,7 +51,7 @@ type Draft = { quote: string; prefix: string; suffix: string; path: string };
 type Open = { kind: "thread"; id: string; pinned: boolean } | { kind: "draft" } | null;
 
 export type CommentsConfig = {
-  /** `/artifact/<slug>/_nap/comments`. */
+  /** `/<slug>/_nap/comments`. */
   api: string;
   frame: HTMLIFrameElement;
   /** Where the bar button goes. */

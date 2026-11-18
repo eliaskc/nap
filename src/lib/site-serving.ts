@@ -205,7 +205,7 @@ function wantsToolbar(request: Request, normalizedPath: string) {
   return /\.html?$/i.test(name) || !name.includes(".");
 }
 
-/** Old artifact host. `artifacts.<root>/<slug>` now redirects to `<root>/artifact/<slug>`. */
+/** Old artifact host. `artifacts.<root>/<slug>` now redirects to `<root>/<slug>`. */
 export const ARTIFACTS_LABEL = "artifacts";
 
 export type HostTarget =
@@ -215,8 +215,8 @@ export type HostTarget =
   | { type: "unknown" };
 
 /**
- * <root>                       dashboard, and artifacts at /artifact/<slug>
- * <slug>.<root>                a site (one origin each); artifacts redirect to /artifact/<slug>
+ * <root>                       dashboard, and artifacts at /<slug>
+ * <slug>.<root>                a site (one origin each); artifacts redirect to <root>/<slug>
  * artifacts.<root>             old artifact links (/<slug>), redirected
  */
 export function resolveHost(host: string, rootDomain: string): HostTarget {

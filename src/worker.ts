@@ -5,14 +5,16 @@ import { handleVisitorAccessRequest } from "~/lib/access-requests";
 import { handleSlackHook } from "~/lib/access-slack";
 import { serveAccessScript } from "~/lib/no-access-page";
 import {
-  handleArtifactPage,
-  handleFrameRequest,
-  isArtifactPath,
-  isFramePath,
-} from "~/lib/artifact-viewer";
+  artifactRoute,
+  isNapName,
+  legacyArtifactRedirect,
+  legacyArtifactRoute,
+} from "~/lib/artifact-routes";
+import { handleArtifactPage, handleFrameRequest, isFramePath } from "~/lib/artifact-viewer";
 import { ensureProfile, getIdentity } from "~/lib/nap-server";
 import { serveToolbarScript, serveViewerScript } from "~/lib/nap-toolbar";
-import { ARTIFACT_PATH, type NapPlace } from "~/lib/nap-urls";
+import { artifactPath, type NapPlace } from "~/lib/nap-urls";
+import { isReservedSlug } from "~/lib/uploads";
 import { handleSiteAccessRequest } from "~/lib/site-access";
 import { handleSiteDataRequest, siteDataTarget } from "~/lib/site-data";
 import { serveClientTypes, serveSiteDataClient, serveVoiceEngine } from "~/lib/site-data-client";
@@ -116,11 +118,26 @@ const routeRequest = Effect.fn("routeRequest")(function* (
     return yield* handleSlackHook(request, place);
   }
 
-  // Artifacts: <root>/artifact/<slug>, a sandboxed frame below the Nap bar.
-  if (target.type === "dashboard" && isArtifactPath(url.pathname)) {
+  // Old artifact links: <root>/artifact/<id>[/<path>] is now <root>/<id>[/<path>]. An id that
+  // became a reserved name would have no new address, so it stays here.
+  const legacyArtifact = target.type === "dashboard" ? legacyArtifactRoute(url.pathname) : null;
+  if (legacyArtifact) {
+    if (!isReservedSlug(legacyArtifact.slug)) {
+      return legacyArtifactRedirect(request, legacyArtifact);
+    }
     const toWelcome = yield* welcome();
     if (toWelcome) return toWelcome;
-    return yield* handleArtifactPage(request, place);
+    return yield* handleArtifactPage(request, place, legacyArtifact);
+  }
+
+  // Artifacts: <root>/<id>, a sandboxed frame below the Nap bar. Nap's own routes are reserved
+  // names, so artifactRoute never matches them; the routes above are all below /_nap/. A name
+  // that is no nap goes on to the dashboard app, which answers with its 404.
+  const artifact = target.type === "dashboard" ? artifactRoute(url.pathname) : null;
+  if (artifact && (yield* isNapName(artifact.slug))) {
+    const toWelcome = yield* welcome();
+    if (toWelcome) return toWelcome;
+    return yield* handleArtifactPage(request, place, artifact);
   }
 
   if (isLocal) {
@@ -188,13 +205,13 @@ const routeRequest = Effect.fn("routeRequest")(function* (
     // Old local artifact viewer links.
     const localViewerMatch = url.pathname.match(/^\/a\/([^/]+)\/?$/);
     if (localViewerMatch && request.method === "GET") {
-      return Response.redirect(`${url.origin}${ARTIFACT_PATH}/${localViewerMatch[1]}`, 302);
+      return Response.redirect(`${url.origin}${artifactPath(localViewerMatch[1])}`, 302);
     }
   }
 
   // <slug>.<root> serves one site. Each site has its own origin, so sites cannot read each
   // other's data, except collections another site's nap.json allows them (/_nap/data/@<site>/).
-  // Artifacts redirect to <root>/artifact/<slug>.
+  // Artifacts redirect to <root>/<slug>.
   if (target.type === "site") {
     const slug = target.slug;
     // Opening a nap counts as using Nap. It keeps the person's agent tokens active.
@@ -259,16 +276,18 @@ const routeRequest = Effect.fn("routeRequest")(function* (
       napFavicon: Effect.promise(() =>
         env.ASSETS.fetch(new Request(new URL("/favicon.ico", dashboardOrigin), request)),
       ),
-      artifactUrl: (key) => `https://${rootDomain}${ARTIFACT_PATH}/${key}`,
+      artifactUrl: (key) => `https://${rootDomain}${artifactPath(key)}`,
       signOutUrl: "/cdn-cgi/access/logout",
     });
   }
 
-  // Old artifact links: artifacts.<root>/<slug> is now <root>/artifact/<slug>.
+  // Old artifact links: artifacts.<root>/<slug> is now <root>/<slug>.
   if (target.type === "artifacts") {
     const id = url.pathname.match(/^\/([a-z0-9-]{1,32})\/?$/)?.[1];
     return Response.redirect(
-      id ? `https://${rootDomain}${ARTIFACT_PATH}/${id}` : `https://${rootDomain}/`,
+      id && !isReservedSlug(id)
+        ? `https://${rootDomain}${artifactPath(id)}`
+        : `https://${rootDomain}/`,
       302,
     );
   }

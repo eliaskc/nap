@@ -54,7 +54,7 @@ export type Item = {
   title: string;
   /** Where it opens. */
   url: string;
-  /** The URL as people read it: `slug.root` or `root/artifact/id`. */
+  /** The URL as people read it: `slug.root` or `root/id`. */
   label: string;
   ownerEmail: string;
   ownerName: string;

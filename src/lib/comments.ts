@@ -13,7 +13,7 @@ import {
 } from "~/server/http";
 
 /**
- * Comments on artifacts. People use them from the Nap bar (`/artifact/<slug>/_nap/comments`);
+ * Comments on artifacts. People use them from the Nap bar (`/<slug>/_nap/comments`);
  * agents use the same calls under `/_nap/api/naps/<id>/comments`. Callers check access
  * first. Anyone who can view an artifact can comment, reply, resolve, and reopen.
  *
@@ -51,7 +51,7 @@ type CommentRow = {
 };
 
 /**
- * `/artifact/<slug>/_nap/comments[/...]`, for people signed in through Access. The comments UI in
+ * `/<slug>/_nap/comments[/...]`, for people signed in through Access. The comments UI in
  * the Nap bar calls it. The sandboxed artifact frame cannot: its requests are cross-site, and
  * responses carry no CORS headers.
  */
