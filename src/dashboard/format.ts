@@ -15,6 +15,11 @@ export function formatPeople(value: number) {
   return `${formatCount(value)} ${value === 1 ? "person" : "people"}`;
 }
 
+/** "1 view", "12 views", "1.2k views". */
+export function formatViews(value: number) {
+  return `${formatCount(value)} ${value === 1 ? "view" : "views"}`;
+}
+
 /** "just now", "5 min ago", "3 h ago", "2 d ago", then the date. */
 export function formatAgo(iso: string, now = Date.now()) {
   const minutes = Math.floor((now - new Date(iso).getTime()) / 60_000);

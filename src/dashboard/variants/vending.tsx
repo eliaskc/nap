@@ -1,7 +1,7 @@
 import * as React from "react";
 import { ItemMenu, useActions } from "~/dashboard/actions";
 import type { Item } from "~/dashboard/data";
-import { formatPeople } from "~/dashboard/format";
+import { formatViews } from "~/dashboard/format";
 import { Preview, seeded } from "~/dashboard/kinds";
 import { VendingInstallSticker } from "~/dashboard/install";
 import { isShortcut, PlayfulShell } from "~/dashboard/variants/playful-shell";
@@ -135,7 +135,7 @@ export function VendingLayout({ view, bar }: VariantProps) {
                   <br />
                   <span className="opacity-70">
                     {current.mine ? "by you" : `by ${current.ownerName}`}
-                    {current.kind !== "app" && ` · ${formatPeople(current.visitors)}`}
+                    {current.kind !== "app" && ` · ${formatViews(current.views)}`}
                   </span>
                   <br />
                   <span className="opacity-70">&gt; ENTER TO OPEN</span>

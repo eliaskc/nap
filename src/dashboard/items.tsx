@@ -1,9 +1,9 @@
-import { UsersIcon } from "lucide-react";
+import { EyeIcon } from "lucide-react";
 import * as React from "react";
 import { ItemMenu, useActions } from "~/dashboard/actions";
 import { EmptyState, LoadingRows } from "~/dashboard/chrome";
 import type { Item, ItemView } from "~/dashboard/data";
-import { formatCount, formatPeople } from "~/dashboard/format";
+import { formatCount, formatViews } from "~/dashboard/format";
 import { AccessIcon, KindIcon, KindTile, Preview, SourceIcon, TypeLabel } from "~/dashboard/kinds";
 import { cn } from "~/lib/utils";
 
@@ -85,9 +85,9 @@ export function ItemRow({ item }: { item: Item }) {
           {item.kind !== "app" && (
             <span
               className="pointer-events-none relative w-20 shrink-0 text-right text-[13px] text-muted-foreground tabular-nums"
-              title="People who have opened it"
+              title="Views by people other than the owner"
             >
-              {formatPeople(item.visitors)}
+              {formatViews(item.views)}
             </span>
           )}
         </div>
@@ -129,10 +129,10 @@ export function ItemCard({ item }: { item: Item }) {
           {item.kind !== "app" && (
             <span
               className="flex items-center gap-1 text-xs text-muted-foreground tabular-nums"
-              title={`${formatPeople(item.visitors)} opened it`}
+              title={`${formatViews(item.views)} by people other than the owner`}
             >
-              <UsersIcon className="size-3" />
-              {formatCount(item.visitors)}
+              <EyeIcon className="size-3" />
+              {formatCount(item.views)}
             </span>
           )}
         </div>
