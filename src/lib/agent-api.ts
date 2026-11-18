@@ -29,7 +29,7 @@ import {
   normalizeEmail,
   type Visibility,
 } from "~/lib/site-access";
-import { isSafePath, normalizePath, readUpload, rejectLargeBody } from "~/lib/uploads";
+import { isSafePath, napShape, normalizePath, readUpload, rejectLargeBody } from "~/lib/uploads";
 import { createSource, describeSource, mintSourceToken, SOURCE_BRANCH } from "~/lib/sources";
 import { listVersions, restoreVersion } from "~/lib/versions";
 import { handleAppsApi } from "~/lib/apps";
@@ -71,12 +71,12 @@ import { Storage } from "~/server/storage";
  * The agent API at <root>/_nap/api/*. Access bypasses this path, so every route except
  * sign-in, the instructions, and the publish script needs an agent token. A token acts as the
  * person who signed it in, with less power: it can publish new naps (private unless it sets
- * `access`), publish and restore versions of any nap that person can view, and comment on
- * artifacts they can view. On a nap someone else owns, it must send the live version it read, so
+ * `access`), publish and restore versions of any nap that person can view, and comment on naps
+ * they can view. On a nap someone else owns, it must send the live version it read, so
  * it cannot overwrite a change it has not seen. It cannot change access, rename, or delete
  * anything. The owner does that in Nap.
  *
- * Sites can keep their source in a Nap source repo (see sources.ts). The agent gets a short-lived
+ * Any nap can keep its source in a Nap source repo (see sources.ts). The agent gets a short-lived
  * Git token here, clones and pushes with Git, builds, and publishes with the commit it built.
  */
 
@@ -144,7 +144,9 @@ export const handleAgentApi = Effect.fn("handleAgentApi")(function* (request: Re
     id: row.slug,
     owner: row.createdByEmail,
     role: isSameEmail(row.createdByEmail, agent.email) ? "owner" : "editor",
+    // kind is the older field for the serving mode: "artifact" (Nap's frame) or "site" (its own host).
     kind: row.kind,
+    ownHost: row.kind === "site",
     title: row.title,
     url: napUrl(row),
     currentVersion: row.currentVersion,
@@ -376,12 +378,6 @@ export const handleAgentApi = Effect.fn("handleAgentApi")(function* (request: Re
     return json({ source: yield* describeSource(nap) }, { headers: noStore });
   }
   if (rest === "/source" && method === "POST") {
-    if (nap.kind !== "site") {
-      return yield* failNoStore(
-        400,
-        "Only sites have source repos. The owner can move an artifact to Sites.",
-      );
-    }
     if (!isSameEmail(nap.createdByEmail, agent.email)) {
       return yield* failNoStore(
         403,
@@ -389,7 +385,7 @@ export const handleAgentApi = Effect.fn("handleAgentApi")(function* (request: Re
       );
     }
     if (nap.sourceRepo) {
-      return yield* failNoStore(409, "This site already has a source repo", {
+      return yield* failNoStore(409, "This nap already has a source repo", {
         code: "source_exists",
       });
     }
@@ -419,7 +415,9 @@ export const handleAgentApi = Effect.fn("handleAgentApi")(function* (request: Re
   }
 
   if (rest === "/comments" || rest.startsWith("/comments/")) {
-    if (nap.kind !== "artifact") return yield* failNoStore(404, "Only artifacts have comments");
+    if (nap.kind !== "artifact") {
+      return yield* failNoStore(404, "Naps on their own host have no comments");
+    }
     return yield* handleComments(
       nap.slug,
       { email: agent.email, client: agent.client },
@@ -465,8 +463,10 @@ const publish = Effect.fnUntraced(function* (
 
   const { files, fields } = yield* readUpload(request, url, [
     "title",
+    "name",
     "slug",
     "kind",
+    "ownHost",
     "message",
     "expectedVersion",
     "access",
@@ -475,7 +475,7 @@ const publish = Effect.fnUntraced(function* (
   ]);
 
   const access = yield* parseAccess(fields.access, fields.emails, targetSlug);
-  const { kind, slug } = yield* napShape(fields.kind, fields.slug, targetSlug);
+  const { kind, slug } = yield* newNapShape(fields);
 
   return yield* publishFiles(agent, {
     files,
@@ -493,33 +493,28 @@ const publish = Effect.fnUntraced(function* (
   });
 });
 
-/** The kind and URL of a new nap. A slug makes a site. */
-const napShape = Effect.fnUntraced(function* (
-  rawKind: string,
-  rawSlug: string,
-  targetSlug: string | null,
-) {
-  if (rawKind && rawKind !== "site" && rawKind !== "artifact") {
-    return yield* failNoStore(400, 'kind must be "artifact" or "site"');
-  }
-  const slug = slugify(rawSlug);
-  const kind: NapKind = rawKind === "site" || (!rawKind && slug) ? "site" : "artifact";
-  if (!targetSlug && slug && kind === "artifact") {
-    return yield* failNoStore(
-      400,
-      "A slug gives a nap its own host, which makes it a site. Leave out slug for an artifact.",
-    );
-  }
-  return { kind, slug };
-});
+/** How a new nap is served and its name (napShape). Updates ignore both. */
+const newNapShape = (fields: {
+  kind: string;
+  ownHost: string | boolean | undefined;
+  name: string;
+  slug: string;
+}) => {
+  const shape = napShape({
+    ...fields,
+    name: slugify(fields.name),
+    slug: slugify(fields.slug),
+  });
+  return "error" in shape ? failNoStore(400, shape.error) : Effect.succeed(shape);
+};
 
 /** Room for MAX_DIRECT_UPLOAD_FILES entries with long paths. */
 const MAX_MANIFEST_BYTES = 32 * 1024 * 1024;
 
 /**
  * POST /_nap/api/uploads with JSON:
- * { files: [{ path, size, type? }], title?, kind?, slug?, access?, emails?, id?, expectedVersion?,
- *   message?, sourceCommit? }
+ * { files: [{ path, size, type? }], title?, name?, ownHost?, access?, emails?, id?,
+ *   expectedVersion?, message?, sourceCommit?, createSource? } (and the older kind and slug)
  * With id, a new version of that nap. Returns presigned PUT URLs for the first page of files,
  * nextPage while there are more, and the commit URL.
  */
@@ -543,7 +538,12 @@ const startUpload = Effect.fnUntraced(function* (request: Request, url: URL, age
 
   const targetSlug = slugify(field("id")) || null;
   const access = yield* parseAccess(field("access"), emails, targetSlug);
-  const shape = yield* napShape(field("kind"), field("slug"), targetSlug);
+  const shape = yield* newNapShape({
+    kind: field("kind"),
+    ownHost: Predicate.isBoolean(body.ownHost) ? body.ownHost : field("ownHost"),
+    name: field("name"),
+    slug: field("slug"),
+  });
 
   const started = yield* startDirectUpload(agent, {
     files: body.files,
@@ -623,6 +623,7 @@ function publishedBody(
   return {
     id: nap.slug,
     kind: nap.kind,
+    ownHost: nap.kind === "site",
     title: nap.title,
     url: napUrl(nap),
     version: nap.currentVersion,

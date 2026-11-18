@@ -41,14 +41,16 @@ import { randomString, sha256Hex } from "~/server/tokens";
 import COMMENTS_FRAME_SOURCE from "virtual:nap-comments-frame";
 
 /**
- * Artifacts live at <root>/<id>. The id is random. Old URLs (nap_redirects) redirect to the
- * current one, and so do old links to <root>/artifact/<id>.
+ * Naps live at <root>/<name>: a random id, or a name the owner chose. (The code calls these
+ * artifacts, the older word; naps on their own host are kind "site", see site-serving.ts.) Old
+ * names (nap_redirects) redirect to the current one, and so do old links to <root>/artifact/<id>.
  *
- * The id is the first path segment on the root domain, next to Nap's own routes, which always
+ * The name is the first path segment on the root domain, next to Nap's own routes, which always
  * win (see artifact-routes.ts).
  *
- * The page there is the Nap bar with a sandboxed iframe. The sandbox has no allow-same-origin, so
- * the artifact runs in an opaque origin: it cannot read the dashboard, other artifacts, or their
+ * The page there is the Nap bar with a sandboxed iframe, or only the iframe when the owner turned
+ * the bar off. The nap's code only ever runs in the frame. The sandbox has no allow-same-origin,
+ * so the nap runs in an opaque origin: it cannot read the dashboard, other naps, or their
  * storage, even though they share a host.
  *
  * Requests from an opaque origin may not carry the Access cookie, so the frame does not use it.
@@ -116,12 +118,12 @@ export const handleArtifactPage = Effect.fn("handleArtifactPage")(function* (
   const identity = getIdentity(request);
   const access = yield* findViewableNap(slug, identity.email);
   if (access.status === "missing") {
-    // An old URL of a nap that has a new key now, such as a site that moved to Artifacts.
+    // An old name of a nap that was renamed.
     const moved = yield* findRedirect(slug);
     if (moved) return redirect(`${artifactPath(moved)}${rest}${url.search}`);
-    return statusPage(404, "Artifact not found", "The link is wrong, or it was deleted.", place);
+    return statusPage(404, "Nap not found", "The link is wrong, or it was deleted.", place);
   }
-  // It moved to its own host. Old artifact links keep working.
+  // A nap on its own host: links to <root>/<name> go there.
   if (access.nap.kind === "site") {
     const target = napUrl(access.nap, place).replace(/\/$/, "");
     return redirect(`${target}${rest || "/"}${url.search}`);
@@ -162,7 +164,7 @@ export const handleArtifactPage = Effect.fn("handleArtifactPage")(function* (
     db
       .run("DELETE FROM artifact_frames WHERE expires_at < strftime('%Y-%m-%dT%H:%M:%fZ', 'now')")
       .pipe(Effect.asVoid),
-    "Artifact frame cleanup failed",
+    "Frame token cleanup failed",
   );
 
   const { nap, isOwner } = access;
@@ -179,6 +181,7 @@ export const handleArtifactPage = Effect.fn("handleArtifactPage")(function* (
       base,
       commentsPath: `${base}/_nap/comments`,
       versionsPath: `${base}/_nap/versions`,
+      bar: Boolean(nap.toolbar),
     },
   });
 });
@@ -199,7 +202,7 @@ const renewFrameToken = Effect.fn("renewFrameToken")(function* (slug: string, re
   if (!/^[A-Za-z0-9_-]{32,64}$/.test(token)) return yield* fail(400, "Pass the frame token");
   const identity = getIdentity(request);
   const access = yield* findViewableNap(slug, identity.email);
-  if (access.status !== "allowed") return yield* fail(404, "Artifact not found");
+  if (access.status !== "allowed") return yield* fail(404, "Nap not found");
   const db = yield* Database;
   const { changes } = yield* db.run(
     `UPDATE artifact_frames
@@ -210,7 +213,7 @@ const renewFrameToken = Effect.fn("renewFrameToken")(function* (slug: string, re
     slug,
     identity.email,
   );
-  if (!changes) return yield* fail(404, "This artifact view has expired");
+  if (!changes) return yield* fail(404, "This view has expired");
   return json({ renewed: true }, { headers: noStore });
 });
 
@@ -266,7 +269,7 @@ export const handleFrameRequest = Effect.fn("handleFrameRequest")(function* (req
   );
   if (!frame) {
     return withCors(
-      new Response("This artifact view has expired. Reload the page.", {
+      new Response("This view has expired. Reload the page.", {
         status: 404,
         headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" },
       }),

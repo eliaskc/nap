@@ -45,7 +45,7 @@ export const handleRtcRequest = Effect.fn("handleRtcRequest")(function* (
 ) {
   if (request.method !== "GET") return yield* failNoStore(405, "Method not allowed");
   if (!(yield* canViewSite(slug, identity.email))) {
-    return yield* failNoStore(404, "Site not found");
+    return yield* failNoStore(404, "Nap not found");
   }
   const { turn } = yield* Settings;
   const servers = turn

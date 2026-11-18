@@ -144,7 +144,7 @@ export function TopBar({
   );
 }
 
-/** Upload is small now: a file or a folder, published as a private artifact. */
+/** Upload is small now: a file or a folder, published as a private nap. */
 function UploadButton() {
   const actions = useActions();
   const label = actions.uploading
@@ -161,7 +161,7 @@ function UploadButton() {
       <DropdownMenuContent align="end" className="w-64">
         <DropdownMenuGroup>
           <DropdownMenuLabel className="leading-snug font-normal">
-            Publish a private artifact. Only you see it until you share it. You can also drop files
+            Publish a private nap. Only you see it until you share it. You can also drop files
             anywhere on the page.
           </DropdownMenuLabel>
         </DropdownMenuGroup>

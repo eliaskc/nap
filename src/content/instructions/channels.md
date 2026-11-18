@@ -29,7 +29,7 @@ Shared things (a ball, a timer, the deck, a game's world) need one place that de
 
 ## Channel servers
 
-When a page as host is not enough (a real-time game whose simulation must not stop when the host's tab goes to the background, a referee nobody can cheat, state that outlives the host), the site can run its own JavaScript on Nap as the channel's server. Use it for games with a shared simulation; plain presence and messages do not need it.
+When a page as host is not enough (a real-time game whose simulation must not stop when the host's tab goes to the background, a referee nobody can cheat, state that outlives the host), the nap can run its own JavaScript on Nap as the channel's server. Use it for games with a shared simulation; plain presence and messages do not need it.
 
 - Name it in `nap.json` at the root of the upload: `{ "servers": { "game-*": "server.js" } }`. Keys are channel names, with `*` for any characters; the first match wins. Values are JavaScript files in the upload. Channels without a match have no server.
 - The file is one ES module with no imports (bundle it, for example `esbuild server.ts --bundle --format=esm --outfile=dist/server.js`), up to 5 MB. It runs in a sandbox with no network (`fetch` fails) and no Nap APIs. It is served like any other file, so it is not secret.

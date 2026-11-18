@@ -1,18 +1,18 @@
 # Nap
 
 A private host for the things you and your agents make, for a small group of
-people. You upload built files. A site can
-also keep its source in a Git repo on Nap, so agents can change it later.
+people. Everything published is a nap: you upload built files, and a nap
+can also keep its source in a Git repo on Nap, so agents can change it later.
 
 - **Dashboard:** `<root domain>`
-- **Sites:** `<slug>.<root domain>`
-- **Artifacts:** `<root domain>/<id>`
-- **Local:** `/s/<slug>/` and `/<id>`
+- **Naps:** `<root domain>/<name>`, in a sandboxed frame
+- **Naps on their own host (for now):** `<name>.<root domain>`
+- **Local:** `/<name>` and `/s/<name>/`
 
 The app uses TanStack Start, React, Tailwind CSS v4, and shadcn/ui with Base
-UI. A Cloudflare Worker serves it. Private R2 stores the site files, and D1
+UI. A Cloudflare Worker serves it. Private R2 stores the naps' files, and D1
 stores the metadata and collections. Cloudflare Access protects the dashboard
-and the hosted sites.
+and the naps.
 
 This README covers the architecture, the security model, and operations. For
 UI behaviour, limits, and endpoint details, read the code.
@@ -194,34 +194,40 @@ Rules for production:
 - Alchemy owns the production migrations in `migrations/`. Do not apply them
   by hand.
 
-## Sites and artifacts
+## Naps
 
-Both are rows in `sites`, and `kind` says how each one is served. They share
-`sites.slug`, so the owner can move a nap between the two, and the old URL
-redirects.
+Every nap is a row in `sites`. Its name, `sites.slug`, is a random id or one
+the owner chose, in one namespace. `kind` says how it is served:
 
-- **Sites** have their own host, `<slug>.<root>`. Each one has its own origin,
-  so sites cannot read each other's data unless one allows it (below), and they
-  get real browser storage.
-  They are for things that people come back to.
-- **Artifacts** are at `<root>/<id>`. The id is random, not made
-  from the title, and cannot be renamed. Old `<root>/artifact/<id>` links
-  redirect there permanently. They are quick pages. On the
-  dashboard an artifact shows to its owner and the people it invites; one
-  shared with everyone shows to others once they have opened it.
+- **In Nap's frame** (`kind = 'artifact'`, the default) at `<root>/<name>`:
+  Nap's page, with the nap's code in a sandboxed frame below the Nap bar.
+  The bar is a setting (`toolbar`): off, the frame fills the window. The
+  nap's code never runs outside the frame. On the dashboard, such a nap shows
+  to its owner and the people it invites; one shared with everyone shows to
+  others once they have opened it. Old `<root>/artifact/<id>` links redirect
+  there permanently.
+- **On its own host** (`kind = 'site'`) at `<name>.<root>`: a real origin,
+  so these naps cannot read each other's data unless one allows it (below),
+  and they get lasting browser storage, service workers, and root-absolute
+  URLs. This is an interim mode for the naps that need these. It goes away
+  once frames get origins of their own on a separate content domain.
 
-An artifact's id is the first path segment on the root domain, next to Nap's
-own routes (`/api`, `/connect`, `/_nap`, ...). Those names are reserved
-(`RESERVED_SLUGS` in `src/lib/uploads.ts`): no artifact id or site slug may
-take one, and Nap's own routes always win. A test fails when a new top-level
-route is not reserved.
+A nap's name is the first path segment on the root domain, next to Nap's own
+routes (`/api`, `/connect`, `/_nap`, ...). Those names are reserved
+(`RESERVED_SLUGS` in `src/lib/uploads.ts`): no nap may take one, and Nap's
+own routes always win. A test fails when a new top-level route is not
+reserved. A nap on its own host whose name became reserved must be renamed
+before it moves into the frame.
 
-A site that moves to Artifacts gets a random id; the R2 files and rows move
-to the new key (`src/lib/rekey.ts`). The old slug stays in `nap_redirects`.
-It only redirects, from both `<slug>.<root>` and `<root>/<slug>`,
-and is never shown. A live nap with that slug always wins over a redirect. An
-artifact that moves to Sites keeps its id as its host until the owner renames
-it.
+The owner can rename a nap (a chosen name, or back to a random id) and move
+it between the frame and its own host. A move keeps the name and only changes
+`kind`: `<root>/<name>` sends a nap on its own host there, and `<name>.<root>`
+sends a nap in the frame to `<root>/<name>`. A rename moves the R2 files and
+rows to the new key (`src/lib/rekey.ts`), and the old name stays in
+`nap_redirects`. It only redirects, from both `<name>.<root>` and
+`<root>/<name>`, and is never shown. A live nap with that name always wins
+over a redirect. The agent API still says `kind: "site" | "artifact"`, next
+to the clearer `ownHost`.
 
 New naps are private. The owner can invite people or open a nap
 to everyone who can sign in; Cloudflare Access is still the outer limit.
@@ -229,9 +235,9 @@ Anyone who can view a nap can also publish new versions of it and restore
 old ones (`canViewSite` in `src/lib/site-access.ts`). Versions are immutable,
 so a bad upload is one restore away. Only the owner changes who can view it,
 its settings, its URL, or its owner, or deletes it. A transfer goes only to
-someone who has used Nap, and the previous owner stays invited. Sites
-can show an optional Nap toolbar (`src/lib/nap-toolbar.ts`). It serves the
-site in a frame on the same host, so there is only one Access cookie.
+someone who has used Nap, and the previous owner stays invited. Naps on
+their own host can show the Nap bar too (`src/lib/nap-toolbar.ts`). It serves
+the nap in a frame on the same host, so there is only one Access cookie.
 
 ### Collections
 
@@ -257,13 +263,14 @@ connected, so a missed message only delays an update.
 Files (`nap.files`, `src/lib/site-files.ts`) are what pages and apps upload that is not JSON,
 such as photos: R2 objects at `files/<slug>/<id>`, with their type, name, and uploader as the
 object's metadata, and no rows in D1. Access is the collections' rule. A file never changes, so
-it is served as immutable. A rename copies them with the versions; deleting the site deletes them.
+it is served as immutable. A rename copies them with the versions; deleting the nap deletes them.
 
-A site can let another site's pages use some of its collections, in the `nap.json` of its live
-version (`"data": { "allow": { "<other site>": ["<collection>"] } }`). Those pages call
-`/_nap/data/@<site>/<collection>` on their own host, so Access works as for their own data; Nap
-checks that the person can view the site that owns the data and that its live manifest allows the
-calling site and collection. There is no live socket for another site's collections.
+A nap can let the pages of another nap on its own host use some of its collections, in the
+`nap.json` of its live version (`"data": { "allow": { "<other nap>": ["<collection>"] } }`).
+Those pages call `/_nap/data/@<nap>/<collection>` on their own host, so Access works as for their
+own data; Nap checks that the person can view the nap that owns the data and that its live
+manifest allows the calling nap and collection. There is no live socket for another nap's
+collections.
 
 ### Channels
 
@@ -317,8 +324,8 @@ to about eight people.
 ### Fetches
 
 Pages can call public APIs on other origins through `/_nap/fetch`
-(`src/lib/site-fetch.ts`), for APIs that send no CORS headers: sites on their own host,
-artifacts below their frame token. The page lists the hosts in a `nap.json` at the root of its
+(`src/lib/site-fetch.ts`), for APIs that send no CORS headers: naps on their own host,
+naps in the frame below their frame token. The page lists the hosts in a `nap.json` at the root of its
 live version, so each publish decides what it may reach. Nap checks that the person can view
 the page, fetches only over https from those hosts (and never
 Nap's own), and checks every redirect against the list. Pages choose the method, a small body,
@@ -326,12 +333,12 @@ and headers (in `x-nap-fetch-headers`, so they stay apart from the browser's own
 nothing of the viewer's: no cookies, no Access headers. Plain GETs are cached at the edge for a
 few minutes; anything with a body or the page's own headers is not, since the cache keys on the
 URL alone. Responses are size limited and carry a sandbox CSP, because they are served from the
-site's own origin.
+nap's own origin.
 
-The same `nap.json` (`src/lib/site-manifest.ts`, cached per immutable version) can mark a site
-as a single-page app: with `"spa": true`, a page path that has no file gets the root
-`index.html`, so client-side routers work on reloads and deep links.
-Artifacts cannot use it.
+The same `nap.json` (`src/lib/site-manifest.ts`, cached per immutable version) can mark a nap
+on its own host as a single-page app: with `"spa": true`, a page path that has no file gets the
+root `index.html`, so client-side routers work on reloads and deep links.
+Naps in the frame cannot use it.
 
 ### Notifications
 
@@ -348,12 +355,13 @@ downloads and attaches it. Where they go is
 service says so. A tap opens a page on the Nap's own domains only. Each send is logged in
 `notifications`, which the per-sender and per-page rate limits count.
 
-### The artifact viewer
+### The frame
 
-`src/lib/artifact-viewer.ts` serves `/<slug>` behind Access. It shows
-the Nap bar and an iframe that is sandboxed without `allow-same-origin`, so
-the artifact runs in an opaque origin. It cannot read the dashboard or other
-artifacts, and the dashboard's same-origin checks refuse its requests.
+`src/lib/artifact-viewer.ts` serves `/<name>` behind Access. It shows
+the Nap bar (unless the owner turned it off) and an iframe that is sandboxed
+without `allow-same-origin`, so the nap runs in an opaque origin. It cannot
+read the dashboard or other naps, and the dashboard's same-origin checks
+refuse its requests.
 
 The frame cannot depend on the Access cookie. Each viewer load creates a
 short-lived frame token (only its hash is stored), and the frame loads its
@@ -396,8 +404,9 @@ anchored by the quote with some text before and after it, so they survive new
 versions while the quote is still there. The API is
 `/<slug>/_nap/comments`; the bar polls it every 30 seconds.
 
-Artifacts should use relative URLs. Apps that need root paths, client-side
-routing, or lasting browser storage should be sites.
+Naps in the frame should use relative URLs. Those that need root paths,
+client-side routing with real paths, or lasting browser storage go on their
+own host for now.
 
 ## Agent publishing
 
@@ -429,8 +438,8 @@ so agents always pass that on with the link.
   working when its owner has not used Nap through Access for some time, so
   people that Access removes lose their tokens. People disconnect their
   agents in the dashboard.
-- **Comments.** Tokens can read and write comments on artifacts their owner
-  can view:
+- **Comments.** Tokens can read and write comments on naps in the frame
+  their owner can view:
   `GET`/`POST /_nap/api/naps/<id>/comments`, `POST …/comments/<cid>/replies`,
   and `PATCH …/comments/<cid>` with `{ "resolved": true }`.
 - **Direct uploads.** Uploads through the Worker are held in memory, so they
@@ -446,7 +455,7 @@ so agents always pass that on with the link.
   (`/_nap/api/drafts`) instead of publishing. The token's owner, and only
   they, open the claim link behind Access, check the preview, and publish the
   draft. Drafts expire. Uploads without a token were removed: anyone could
-  upload one and send the link to someone who can view a site.
+  upload one and send the link to someone who can view a nap.
 
 Agents get everything they need from `GET /_nap/api/instructions`.
 
@@ -487,10 +496,11 @@ back to uploads through the Worker.
 
 ## Source repos
 
-A site can keep its source in a Cloudflare Artifacts repo, one per site, in the
-namespace bound as `SOURCES` (`nap-sites` in production). The agent
-instructions ask for one when a site has a real build step or will be worked
-on for long; plain HTML sites and artifacts do without. Nap never runs Git
+Any nap, in the frame or on its own host, can keep its source in a Cloudflare
+Artifacts repo, one per nap, in the namespace bound as `SOURCES`
+(`nap-sites` in production). The agent instructions ask for one when a nap
+has a real build step or will be worked on for long; plain HTML naps do
+without. Nap never runs Git
 and never builds anything:
 
 ```text
@@ -499,8 +509,8 @@ agent → local build → publish with sourceCommit → Nap checks the commit �
 ```
 
 - **Tokens.** The agent API mints read or write tokens for one repo that last
-  15 minutes, for anyone who can view the site. Only the owner adds a repo to
-  an existing site. A new site can get its repo with its first direct upload
+  15 minutes, for anyone who can view the nap. Only the owner adds a repo to
+  an existing nap. A new nap can get its repo with its first direct upload
   (`createSource`), so its first version is built from a commit; the upload
   holds the repo until it is committed, and an expired upload deletes it.
   Nap logs who got a token, never the token. Nobody has a lasting Git
@@ -508,16 +518,16 @@ agent → local build → publish with sourceCommit → Nap checks the commit �
   credential helper for the repo, so plain git and jj ask it for a new token
   each time; the token is never stored.
 - **Publishing.** `sites.source_repo` names the repo. A new version of such a
-  site must name its commit, which must be the head of `main` and contain the
-  live version's commit. Artifacts allows force-pushes, so this check, not
-  Git, keeps published work from being dropped. Dashboard uploads and claim
-  links are off for these sites. Nap cannot prove that a build came from its
+  nap must name its commit, which must be the head of `main` and contain the
+  live version's commit. Cloudflare Artifacts allows force-pushes, so this
+  check, not Git, keeps published work from being dropped. Dashboard uploads
+  and claim links are off for these naps. Nap cannot prove that a build came from its
   commit, the same trust as any agent upload.
 - **Restores, renames, deletes.** A restore moves the live pointer and leaves
-  the repo alone. A rename keeps the repo name. Deleting a site leaves its
-  repo, as it leaves its version files in R2.
+  the repo alone. A rename or a move keeps the repo name. Deleting a nap
+  leaves its repo, as it leaves its version files in R2.
 
-Moving a site's source in: the owner's agent publishes with
+Moving a nap's source in: the owner's agent publishes with
 `publish.mjs --update <id> --source <dir>`, which creates the repo, pushes
 the history, and publishes with the commit. For a folder of another repo it
 splits the history out (`git subtree split --prefix=<folder>`), creates the

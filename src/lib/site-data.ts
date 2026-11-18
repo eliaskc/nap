@@ -79,7 +79,7 @@ export const handleSiteDataRequest = Effect.fn("handleSiteDataRequest")(function
   const { frameIdentity, from, onChange } = options;
   const identity = frameIdentity ?? getIdentity(request);
   if (!SLUG_PATTERN.test(slug) || !(yield* canViewSite(slug, identity.email))) {
-    return yield* fail(404, "Site not found");
+    return yield* fail(404, "Nap not found");
   }
 
   if (!frameIdentity) yield* ensureProfile(identity);
@@ -103,7 +103,7 @@ export const handleSiteDataRequest = Effect.fn("handleSiteDataRequest")(function
   if (from !== undefined && !(yield* allowsSite(slug, from, collection))) {
     return yield* fail(
       403,
-      `The site "${slug}" does not let "${from}" use its collection "${collection}". ` +
+      `The nap "${slug}" does not let "${from}" use its collection "${collection}". ` +
         `Its nap.json needs { "data": { "allow": { "${from}": ["${collection}"] } } }`,
     );
   }

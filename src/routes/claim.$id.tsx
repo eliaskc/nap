@@ -77,7 +77,7 @@ function ClaimPage() {
       const body = (await response.json()) as { draft: Draft; suggestedSite: SuggestedSite | null };
       // Reopening your own claim link goes straight to what it published.
       if (body.draft.claimedByMe && body.draft.siteSlug) {
-        // The artifact page sends sites on to their own host.
+        // <root>/<name> sends naps on their own host there.
         window.location.replace(artifactPath(body.draft.siteSlug));
         return;
       }
@@ -99,23 +99,17 @@ function ClaimPage() {
 
   const draft = state.kind === "ready" ? state.draft : null;
   const suggestedSite = state.kind === "ready" ? state.suggestedSite : null;
-  // A site this person may update: their own, or one shared with them.
+  // A nap this person may update: their own, or one shared with them.
   const ownedSite = suggestedSite?.canUpdate ? suggestedSite : null;
   const updating = Boolean(replace && ownedSite);
-  // Someone else's site keeps its name and access. Only its owner changes those.
+  // Someone else's nap keeps its name and access. Only its owner changes those.
   const othersSite = updating && ownedSite && !ownedSite.isOwner ? ownedSite : null;
-  // An update keeps the kind of what it updates.
+  // An update keeps the serving mode of what it updates.
   const kind: Kind = updating && ownedSite ? ownedSite.kind : (draft?.kind ?? "artifact");
-  const noun = kind === "artifact" ? "artifact" : "site";
   const takenByOther = suggestedSite && !suggestedSite.canUpdate ? suggestedSite.slug : null;
-  // Without a URL, Nap makes one from the title. Artifacts always get a random id.
+  // Without a name, a nap gets a random id (on its own host, one made from the title).
   const finalSlug = updating && ownedSite ? ownedSite.slug : slugify(slug);
-  const titlePlaceholder =
-    updating && ownedSite
-      ? ownedSite.title
-      : kind === "artifact"
-        ? "Untitled artifact"
-        : "Untitled site";
+  const titlePlaceholder = updating && ownedSite ? ownedSite.title : "Untitled nap";
 
   async function publish() {
     if (!draft) return;
@@ -127,7 +121,7 @@ function ClaimPage() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           title: othersSite ? undefined : title.trim(),
-          slug: (kind === "site" || updating) && finalSlug ? finalSlug : undefined,
+          slug: finalSlug || undefined,
           replace: updating,
           expectedCurrentVersion: updating ? ownedSite?.currentVersion : undefined,
           ...(!othersSite && {
@@ -141,7 +135,7 @@ function ClaimPage() {
         site?: { slug: string; kind: Kind; replaced: boolean; visibility?: Visibility };
       };
       if (!response.ok || !body.site) throw new Error(body.error ?? "Could not publish");
-      // Go to the published artifact or site. Keep the button disabled while the page changes.
+      // Go to the published nap. Keep the button disabled while the page changes.
       window.location.replace(napUrl(body.site, browserPlace()));
     } catch (publishError) {
       setError(publishError instanceof Error ? publishError.message : "Could not publish");
@@ -218,7 +212,7 @@ function ClaimPage() {
           {draft && !draft.claimed && !draft.expired && (
             <>
               <CardHeader>
-                <CardTitle>{updating ? `Update ${noun}` : `Publish ${noun}`}</CardTitle>
+                <CardTitle>{updating ? "Update nap" : "Publish nap"}</CardTitle>
                 <CardDescription>
                   Your agent uploaded this draft. Check the preview, then publish it.
                 </CardDescription>
@@ -256,7 +250,7 @@ function ClaimPage() {
                       }}
                     >
                       <SparklesIcon data-icon="inline-start" />
-                      {draft.kind === "artifact" ? "New artifact" : "New site"}
+                      New nap
                     </ModeButton>
                   </div>
                 )}
@@ -284,27 +278,34 @@ function ClaimPage() {
                           : "This publishes a new version."}
                       </FieldDescription>
                     </Field>
-                  ) : kind === "site" ? (
+                  ) : (
                     <Field data-invalid={Boolean(error) || undefined}>
                       <FieldLabel htmlFor="claim-slug">URL</FieldLabel>
                       <div className="flex items-center gap-2">
+                        {kind === "artifact" && (
+                          <span className="shrink-0 text-sm text-muted-foreground">
+                            {hostSuffix()}/
+                          </span>
+                        )}
                         <Input
                           id="claim-slug"
                           value={slug}
                           placeholder="random"
                           onChange={(event) => setSlug(slugify(event.target.value))}
                         />
-                        <span className="shrink-0 text-sm text-muted-foreground">
-                          .{hostSuffix()}
-                        </span>
+                        {kind === "site" && (
+                          <span className="shrink-0 text-sm text-muted-foreground">
+                            .{hostSuffix()}
+                          </span>
+                        )}
                       </div>
                       <FieldDescription>
                         {takenByOther
-                          ? `${takenByOther} is taken. Choose a different URL, or leave it empty.`
+                          ? `${takenByOther} is taken. Choose a different name, or leave it empty.`
                           : "Optional. Leave it empty for a random URL. You can rename it later."}
                       </FieldDescription>
                     </Field>
-                  ) : null}
+                  )}
                   {!othersSite && (
                     <Field>
                       <FieldLabel>Who can view</FieldLabel>

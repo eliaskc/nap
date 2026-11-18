@@ -1,12 +1,12 @@
 #!/usr/bin/env node
-// Nap publish script. Publishes a folder or a single HTML file to Nap, for any size up to 10 GB.
+// Nap publish script. Publishes a folder or a single HTML file to Nap as a nap, up to 10 GB.
 // Nap serves this file at https://{{rootDomain}}/_nap/api/publish.mjs. Needs Node 20+.
 //
 // Usage:
 //   node publish.mjs login [--client "Claude Code on my-mac"]
 //   node publish.mjs <folder or file.html> [options]
-//   node publish.mjs source <id> [--create]     Show a site's source repo, or create it.
-//   node publish.mjs clone <id> [dir]           Clone a site's source repo with Git.
+//   node publish.mjs source <id> [--create]     Show a nap's source repo, or create it.
+//   node publish.mjs clone <id> [dir]           Clone a nap's source repo with Git.
 //   node publish.mjs setup <id> [dir]           Let plain git and jj in an existing clone reach it.
 //   node publish.mjs run <id> -- <command...>   Run git or jj with access to the source repo.
 //
@@ -28,20 +28,23 @@
 //                          next to the build, for an upload by hand.
 //
 // Options:
-//   --title "Name"         The name people see. Default: the page's <title>.
-//   --site                 Make a site instead of an artifact.
-//   --slug name            Make a site at <slug>.{{rootDomain}}.
-//   --access who           New pages only: private, everyone, or selected. Default: {{defaultAccess}}.
+//   --title "Name"         The title people see. Default: the page's <title>.
+//   --name name            New naps only: its URL, {{rootDomain}}/<name>. Default: a random id.
+//   --own-host             New naps only: serve it on its own host, <name>.{{rootDomain}}, for
+//                          the few pages that need one (see the instructions).
+//                          (--site is the same as --own-host; --slug name the same as
+//                          --name name --own-host.)
+//   --access who           New naps only: private, everyone, or selected. Default: {{defaultAccess}}.
 //   --emails a@x,b@x       With --access selected: who can view it.
-//   --update <id or URL>   Publish a new version of a page. Its URL and access stay the same.
-//   --expected-version v   With --update: the live version you read. Required on pages
+//   --update <id or URL>   Publish a new version of a nap. Its URL and access stay the same.
+//   --expected-version v   With --update: the live version you read. Required on naps
 //                          someone else owns, so you never overwrite a change you have not seen.
 //   --message "..."        What changed, for the version history.
-//   --source <dir>         Sites: the Git repo you built from (a clean working tree, usually ".").
-//                          Pushes its HEAD to main of the site's source repo on Nap and publishes
-//                          the build with that commit. Creates the repo for a new site, or for
-//                          your own site that has none. Adds the remote "nap" to <dir>.
-//   --source-commit <sha>  Sites with a source repo, when you pushed yourself: the pushed commit
+//   --source <dir>         The Git repo you built from (a clean working tree, usually ".").
+//                          Pushes its HEAD to main of the nap's source repo on Nap and publishes
+//                          the build with that commit. Creates the repo for a new nap, or for
+//                          your own nap that has none. Adds the remote "nap" to <dir>.
+//   --source-commit <sha>  Naps with a source repo, when you pushed yourself: the pushed commit
 //                          you built. It must be the head of main.
 //
 // The token is NAP_TOKEN, or the file ~/.config/nap/{{rootDomain}}/token. Next to it, nap.json
@@ -54,7 +57,7 @@
 // plain git and jj work in it: its config names this script (a copy next to the token) as the
 // Git credential helper for the repo on Nap, and git asks it for a new token when it needs one
 // (git-credential, below). Nothing is stored; without a sign-in, git fails without a prompt.
-//   node publish.mjs git-credential <site|app> <id> get   Called by git, not by you.
+//   node publish.mjs git-credential <nap|app> <id> get   Called by git, not by you.
 //
 // Exit codes: 0 published, 1 error, 3 not signed in (run login), 4 the user must open Nap first.
 
@@ -83,7 +86,7 @@ class ExitError extends Error {
 
 function parseArgs(argv) {
   const options = { _: [] };
-  const flags = new Set(["site", "create"]);
+  const flags = new Set(["site", "own-host", "create"]);
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === "--") {
@@ -242,7 +245,7 @@ async function nextPage(token, url) {
 }
 
 /**
- * The id in a page's URL: <root>/<id>, <id>.<root>, an old <root>/artifact/<id> link, or /s/<id>/
+ * The id in a nap's URL: <root>/<id>, <id>.<root>, an old <root>/artifact/<id> link, or /s/<id>/
  * locally.
  */
 function idFrom(value) {
@@ -267,16 +270,18 @@ function idFrom(value) {
 async function publish(options) {
   const [input] = options._;
   if (!input) throw new ExitError("Give a folder or an HTML file. See --help.");
-  if (options.update && (options.access || options.emails || options.slug || options.site)) {
+  const ownHost = Boolean(options["own-host"] || options.site || options.slug);
+  const name = options.name || options.slug;
+  if (options.name && options.slug && options.name !== options.slug) {
+    throw new ExitError("Use --name, not --name and --slug.");
+  }
+  if (options.update && (options.access || options.emails || name || ownHost)) {
     throw new ExitError(
-      "--update keeps the page's URL and access. Leave out --access, --emails, --slug, and --site.",
+      "--update keeps the nap's URL and access. Leave out --access, --emails, --name, and --own-host. The owner changes those in Nap.",
     );
   }
   if (options.source && options["source-commit"]) {
     throw new ExitError("Use --source or --source-commit, not both.");
-  }
-  if (options.source && !options.update && !options.site && !options.slug) {
-    throw new ExitError("Only sites keep their source on Nap. Add --site or --slug.");
   }
   const local = options.source ? localSource(options.source) : null;
   const token = await readToken();
@@ -294,12 +299,13 @@ async function publish(options) {
     if (options["expected-version"]) body.expectedVersion = options["expected-version"];
     if (options["source-commit"]) body.sourceCommit = options["source-commit"];
     if (local) {
-      await pushSource(local, await sourceForUpdate(token, body.id), { kind: "site", id: body.id });
+      await pushSource(local, await sourceForUpdate(token, body.id), { kind: "nap", id: body.id });
       body.sourceCommit = local.head;
     }
   } else {
-    if (options.site || options.slug) body.kind = "site";
-    if (options.slug) body.slug = options.slug;
+    // kind is what Nap called the serving mode before ownHost: "site" is its own host.
+    body.kind = ownHost ? "site" : "artifact";
+    if (name) body.name = name;
     if (options.access) body.access = options.access;
     if (options.emails) body.emails = options.emails;
     if (local) {
@@ -314,9 +320,9 @@ async function publish(options) {
       `Upload refused (${started.status}): ${started.data.error || JSON.stringify(started.data)}`,
     );
   const { uploadId, commitUrl } = started.data;
-  // A new site: Nap created its repo with the upload. Push before the files go up.
+  // A new nap: Nap created its repo with the upload. Push before the files go up.
   if (local && started.data.source) {
-    await pushSource(local, started.data.source, { kind: "site", id: started.data.id });
+    await pushSource(local, started.data.source, { kind: "nap", id: started.data.id });
   }
   const byPath = new Map(files.map((file) => [file.path, file]));
   let done = 0;
@@ -373,7 +379,7 @@ async function publish(options) {
   console.log(`Id (use --update ${nap.id} for the next version): ${nap.id}`);
   if (local) {
     console.log(
-      `Source: built from ${local.head.slice(0, 7)}, pushed to main of the site's repo on Nap (remote "nap" in ${local.dir}).`,
+      `Source: built from ${local.head.slice(0, 7)}, pushed to main of the nap's repo on Nap (remote "nap" in ${local.dir}).`,
     );
     console.log(
       `Next time: commit, then publish with --update ${nap.id} --source ${local.dir}. Pull first with: node publish.mjs run ${nap.id} -- git -C ${local.dir} pull nap main`,
@@ -389,7 +395,7 @@ function localSource(dir) {
   if (top.status !== 0) throw new ExitError(`${dir} is not a Git repo. Run git init and commit.`);
   if (realpathSync(top.stdout.trim()) !== realpathSync(dir)) {
     throw new ExitError(
-      `${dir} is a folder inside the Git repo at ${top.stdout.trim()}. A site's repo on Nap holds only the site's source. Give the folder a repo of its own, or split its history out (git subtree split --prefix=<folder> -b <branch>), push that branch with "node publish.mjs run", and publish with --source-commit.`,
+      `${dir} is a folder inside the Git repo at ${top.stdout.trim()}. A nap's repo on Nap holds only the nap's source. Give the folder a repo of its own, or split its history out (git subtree split --prefix=<folder> -b <branch>), push that branch with "node publish.mjs run", and publish with --source-commit.`,
     );
   }
   const status = git("status", "--porcelain");
@@ -403,7 +409,7 @@ function localSource(dir) {
   return { dir, head: head.stdout.trim() };
 }
 
-/** Write access to an existing site's repo. Creates the repo when the site has none. */
+/** Write access to an existing nap's repo. Creates the repo when the nap has none. */
 async function sourceForUpdate(token, id) {
   const path = `/naps/${encodeURIComponent(id)}`;
   const info = await api(path, { token, method: "GET" });
@@ -424,7 +430,7 @@ async function sourceForUpdate(token, id) {
   return access.data.source;
 }
 
-/** Pushes the local HEAD to main of the site's repo, and adds the remote "nap" for later. */
+/** Pushes the local HEAD to main of the nap's repo, and adds the remote "nap" for later. */
 async function pushSource(local, source, target) {
   const env = gitEnv(source);
   const pull = target.kind === "app" ? `app run ${target.id}` : `run ${target.id}`;
@@ -462,11 +468,11 @@ async function signedIn() {
 
 function napId(options) {
   const value = options._[1];
-  if (!value) throw new ExitError("Give the site's id (or URL).");
+  if (!value) throw new ExitError("Give the nap's id (or URL).");
   return encodeURIComponent(idFrom(value));
 }
 
-/** A Git token for the site's source repo, and git config that sends it. */
+/** A Git token for the nap's source repo, and git config that sends it. */
 async function sourceAccess(token, id) {
   const access = await api(`/naps/${id}/source/token`, { token, body: { access: "write" } });
   if (!access.ok) {
@@ -577,8 +583,7 @@ async function source(options) {
     }
     console.log(`Created the source repo ${created.data.source.repo}.`);
     console.log(`Remote: ${created.data.source.remote} (branch ${created.data.source.branch})`);
-    const site = decodeURIComponent(id);
-    console.log(`Next, in the clone: node publish.mjs setup ${site}`);
+    console.log(`Next, in the clone: node publish.mjs setup ${decodeURIComponent(id)}`);
     console.log("Then: git push nap HEAD:main");
     return;
   }
@@ -597,7 +602,7 @@ async function clone(options) {
   const { source, env } = await sourceAccess(token, id);
   const dir = options._[2] || decodeURIComponent(id);
   runCommand(["git", "clone", source.remote, dir], env);
-  await connectClone(dir, source.remote, { kind: "site", id: decodeURIComponent(id) });
+  await connectClone(dir, source.remote, { kind: "nap", id: decodeURIComponent(id) });
 }
 
 async function run(options) {
@@ -878,7 +883,7 @@ try {
     const token = await signedIn();
     const id = napId(options);
     const { source } = await sourceAccess(token, id);
-    await setup(source, { kind: "site", id: decodeURIComponent(id) }, options._[2] || ".");
+    await setup(source, { kind: "nap", id: decodeURIComponent(id) }, options._[2] || ".");
   } else if (options._[0] === "git-credential") {
     await gitCredential(options);
   } else if (options._[0] === "run") {

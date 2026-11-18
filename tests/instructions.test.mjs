@@ -63,11 +63,11 @@ test("channel servers show in the index and the channels topic only where they a
 
 test("the default access decides what the index says about sharing", () => {
   const privately = renderInstructions(read("index"), config());
-  assert.match(privately, /New pages are private/);
-  assert.doesNotMatch(privately, /New pages are shared with everyone/);
+  assert.match(privately, /New naps are private/);
+  assert.doesNotMatch(privately, /New naps are shared with everyone/);
   const openly = renderInstructions(read("index"), config({ defaultAccess: "everyone" }));
-  assert.match(openly, /New pages are shared with everyone at Example/);
-  assert.doesNotMatch(openly, /New pages are private/);
+  assert.match(openly, /New naps are shared with everyone at Example/);
+  assert.doesNotMatch(openly, /New naps are private/);
 });
 
 test("every page fills in the deployment and leaves no markers", () => {

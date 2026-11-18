@@ -121,7 +121,7 @@ function RequestCard({
 }) {
   const name = request.requesterName?.trim() || request.requesterEmail;
   const first = request.requesterName?.trim().split(/\s+/)[0] || request.requesterEmail;
-  const what = request.kind === "artifact" ? "artifact" : "site";
+  const what = "nap";
   const napLink = (
     <a
       className="font-medium text-foreground underline-offset-4 hover:underline"

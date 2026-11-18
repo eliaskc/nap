@@ -1,10 +1,10 @@
 # Nap Development Guidelines
 
-Instructions for agents working on the Nap platform codebase itself. Not for agents creating sites hosted on Nap.
+Instructions for agents working on the Nap platform codebase itself. Not for agents making naps hosted on Nap.
 
 ## Context
 
-Nap is a TanStack Start app on Cloudflare Workers. It provides a private dashboard for uploading static sites. Files live in R2; metadata, profiles, and live version pointers live in D1.
+Nap is a TanStack Start app on Cloudflare Workers. It provides a private dashboard for publishing static pages, called naps. Files live in R2; metadata, profiles, and live version pointers live in D1.
 
 ## Stack
 
@@ -13,7 +13,7 @@ Nap is a TanStack Start app on Cloudflare Workers. It provides a private dashboa
 - Runtime: Cloudflare Workers
 - UI: React, Tailwind CSS v4, shadcn/ui with Base UI
 - Infrastructure: `alchemy.run.ts`, with pinned Alchemy and Effect versions
-- Bindings: `DB` = D1, `SITES` = R2, `LIVE` = Durable Object for live collection updates, `CHANNELS` = Durable Object per multiplayer channel, `LOADER` = Worker Loader that runs a site's channel server (its own JavaScript, named in nap.json) as a sandboxed facet of the channel object, only with `channelServers` on, `SOURCES` = Cloudflare Artifacts namespace with one Git repo per site that keeps its source in Nap (sites with a build step; never artifacts) and one per app, `SIGNER` = Cloudflare Container (`containers/signer`) that signs iOS builds for TestFlight and Android bundles for Google Play, inferred from `NapWorker`
+- Bindings: `DB` = D1, `SITES` = R2, `LIVE` = Durable Object for live collection updates, `CHANNELS` = Durable Object per multiplayer channel, `LOADER` = Worker Loader that runs a nap's channel server (its own JavaScript, named in nap.json) as a sandboxed facet of the channel object, only with `channelServers` on, `SOURCES` = Cloudflare Artifacts namespace with one Git repo per nap that keeps its source in Nap (naps with a build step) and one per app, `SIGNER` = Cloudflare Container (`containers/signer`) that signs iOS builds for TestFlight and Android bundles for Google Play, inferred from `NapWorker`
 
 ## Rules
 
@@ -28,7 +28,7 @@ sites/<slug>/versions/<version_id>/<path>
 - Serve from D1 `sites.current_version`; never overwrite live files in place.
 - Use email as the stable identity key.
 - Nap never builds apps either: agents upload unsigned iOS builds and Android bundles with their commit, and only the `SIGNER` container holds the signing certificate and the Play upload key. Never sign on a laptop or in CI. Nap uploads TestFlight builds to App Store Connect and Android bundles to Google Play itself. Templates for app repos are in `templates/app`.
-- Nap never runs Git or builds sites. Agents push source to a site's Artifacts repo and publish the build with its commit; `src/lib/sources.ts` checks that commit. Use the `cf` CLI to inspect or clean up Artifacts repos.
+- Nap never runs Git or builds naps. Agents push source to a nap's Artifacts repo and publish the build with its commit; `src/lib/sources.ts` checks that commit. Use the `cf` CLI to inspect or clean up Artifacts repos.
 - Keep production private. `workers_dev` and `preview_urls` are bypass URLs that can avoid Cloudflare Access. They must be `false` in production:
 
 ```ts
@@ -38,14 +38,15 @@ workersDev: { enabled: false, previewsEnabled: false }
 Temporary testing may enable them, but revert before deploying.
 
 - Nap has no Wrangler config. Production deployment and D1 migration history belong to Alchemy; local dev and the HTTP tests run `local*` Alchemy stages. Read the infrastructure section in `README.md` before changes to production resources. Preserve the live database and bucket; review the plan for replacements.
-- Artifacts live at `<root>/<id>`, next to Nap's own routes. A new top-level route on the root domain (a file in `src/routes`, a path in `src/worker.ts`, a folder in `public/`) must be added to `RESERVED_SLUGS` in `src/lib/uploads.ts`; `tests/reserved-names.test.mjs` checks this. Old `/artifact/<id>` links redirect.
+- Naps are what users and agents call everything published. In the code and the database they are rows in `sites`, where `kind` is the serving mode: `artifact` is Nap's sandboxed frame at `<root>/<name>` (the default), `site` a nap on its own host at `<name>.<root>`, an interim mode that will go away. Keep `kind: "site" | "artifact"` working in the agent API, next to `ownHost`. Say "nap" in everything users and agents read; "Cloudflare Artifacts" is only the Git hosting behind source repos.
+- Naps live at `<root>/<name>`, next to Nap's own routes. A new top-level route on the root domain (a file in `src/routes`, a path in `src/worker.ts`, a folder in `public/`) must be added to `RESERVED_SLUGS` in `src/lib/uploads.ts`; `tests/reserved-names.test.mjs` checks this. Old `/artifact/<id>` links redirect.
 - Code on Access-bypassed paths (`/_nap/api/*`, `/_nap/frame/*`, `/_nap/hooks/*`) must never call `getIdentity()` or `ensureProfile()`.
 
 ## Server code (Effect)
 
 Server code is written with Effect 4 (`effect@4.1.x`, the version Alchemy uses). Effect's own
 guide ships in `node_modules/effect/AGENTS.md` and `node_modules/effect/ai-docs/`; read it rather
-than older Effect 2/3 docs. The UI and the small scripts Nap serves to sites as source
+than older Effect 2/3 docs. The UI and the small scripts Nap serves to naps as source
 (`share-widget.ts`, `nap-toolbar.ts`, `src/comments/`) are not Effect code.
 
 - `src/server/` holds the infrastructure: services for the bindings (`Database` for D1, `Storage`
@@ -71,10 +72,10 @@ T` unions: fail instead. Infrastructure errors (`DatabaseError`, `StorageError`,
   `src/routes/api` with `route(effect)` from `src/server/route.ts`; tests with `runNap` or
   `respond` and fake bindings.
 
-## The site client (src/client)
+## The nap client (src/client)
 
-`src/client/` is `window.nap`, the script every site loads from `/_nap/client.js`: collections,
-channels, voice, `nap.fetch`, `nap.me`. It runs in visitors' browsers, on every site.
+`src/client/` is `window.nap`, the script every nap loads from `/_nap/client.js`: collections,
+channels, voice, `nap.fetch`, `nap.me`. It runs in visitors' browsers, on every nap.
 
 - It is TypeScript, bundled by `scripts/lib/client-bundle.ts` into one classic script that the
   Worker serves (the `virtual:nap-client` module in `vite.config.ts`). Pages call it as plain
@@ -120,7 +121,7 @@ pnpm run build
 
 ## Product notes
 
-- Store site order, not absolute tile positions.
+- Store nap order, not absolute tile positions.
 - Collections are live through the `LIVE` Durable Object; D1 stays the only store. Elsewhere, polling is enough for near-realtime until proven otherwise.
 - Add more Durable Objects/WebSockets only when needed.
 - Keep Nap simple and private-first.

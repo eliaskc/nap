@@ -1,13 +1,15 @@
 /**
- * Where a nap lives. One rule:
+ * Where a nap lives. Its name is a random id or one the owner chose.
  *
- * - A site (a nap with a chosen URL) has its own host: <slug>.<root>. Real origin, real
- *   localStorage, root-absolute paths work.
- * - An artifact is at <root>/<id>. Nap shows it in a sandboxed frame below a small bar. Its id
- *   shares the root domain's first path segment with Nap's own routes, which are reserved
- *   (RESERVED_SLUGS in uploads.ts) and always win.
+ * - By default (kind "artifact") at <root>/<name>. Nap shows it in a sandboxed frame, below a
+ *   small bar unless the owner turned the bar off. The name shares the root domain's first path
+ *   segment with Nap's own routes, which are reserved (RESERVED_SLUGS in uploads.ts) and always
+ *   win.
+ * - On its own host (kind "site"): <name>.<root>. Real origin, lasting storage, root-absolute
+ *   paths work. An interim mode for the naps that need these, until frames get origins of their
+ *   own.
  *
- * Local development has one host: sites are at /s/<slug>/ and artifacts at /<id>.
+ * Local development has one host: naps on their own host are at /s/<name>/, the rest at /<name>.
  * The functions here run on the server and in the browser.
  */
 

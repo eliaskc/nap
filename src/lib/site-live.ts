@@ -96,7 +96,7 @@ export const handleLiveRequest = Effect.fn("handleLiveRequest")(function* (
   }
   const live = yield* LiveBinding;
   if (!live) return yield* fail(503, "Live updates are unavailable");
-  if (!(yield* canViewSite(slug, identity.email))) return yield* fail(404, "Site not found");
+  if (!(yield* canViewSite(slug, identity.email))) return yield* fail(404, "Nap not found");
   const headers = new Headers({ upgrade: "websocket", "x-nap-email": identity.email });
   if (expiresAt) headers.set("x-nap-expires-at", expiresAt);
   return yield* Effect.promise(() => live.getByName(slug).fetch("https://live/", { headers }));

@@ -10,6 +10,7 @@ import {
   pickGeneratedSlug,
   nextSortOrder,
   randomTheme,
+  UNTITLED_NAP,
   type IncomingFile,
   type SiteKind,
 } from "~/lib/uploads";
@@ -26,7 +27,7 @@ export type PublishInput = PublishTargetInput & {
   source: VersionSource;
   client?: string;
   message?: string;
-  /** Sites with a source repo: the commit these files were built from. */
+  /** Naps with a source repo: the commit these files were built from. */
   sourceCommit?: string | null;
 };
 
@@ -75,9 +76,12 @@ export type PublishTargetInput = {
   requireExpectedVersion?: boolean;
   /** Refuse the update if the live version is no longer this one. */
   expectedCurrentVersion?: string | null;
-  /** New naps only. */
+  /** New naps only: how it is served. */
   kind?: SiteKind;
-  /** New sites only: a chosen URL. Without it, Nap makes one from the title. Artifacts get a random id. */
+  /**
+   * New naps only: a chosen name. Without it, a nap in the frame gets a random id, and one on its
+   * own host a name made from the title.
+   */
   slug?: string;
   title?: string;
 };
@@ -126,7 +130,7 @@ export const resolvePublishTarget = Effect.fn("resolvePublishTarget")(function* 
       return yield* changedMeanwhile();
     }
     slug = existing.slug;
-  } else if (input.slug && input.kind !== "artifact") {
+  } else if (input.slug) {
     if (isReservedSlug(input.slug)) return yield* fail(409, "That URL is reserved");
     const taken = yield* getNap(input.slug);
     if (taken || (yield* isReserved(input.slug))) {
@@ -137,11 +141,8 @@ export const resolvePublishTarget = Effect.fn("resolvePublishTarget")(function* 
 
   const kind: SiteKind = existing?.kind ?? input.kind ?? "site";
   const title =
-    input.title?.trim().slice(0, 120) ||
-    existing?.title ||
-    (yield* pageTitle) ||
-    (kind === "artifact" ? "Untitled artifact" : "Untitled site");
-  // Artifacts get a random id. Sites without a chosen URL get one made from the title.
+    input.title?.trim().slice(0, 120) || existing?.title || (yield* pageTitle) || UNTITLED_NAP;
+  // Without a chosen name: a random id in the frame, one made from the title on its own host.
   const isTaken = (candidate: string) =>
     Effect.gen(function* () {
       return Boolean(yield* getNap(candidate)) || (yield* isReserved(candidate));
@@ -153,7 +154,7 @@ export const resolvePublishTarget = Effect.fn("resolvePublishTarget")(function* 
 
 /**
  * Stores the files as a new immutable version and makes it live. New naps are unlisted and
- * private unless `access` says otherwise; artifacts get the Nap toolbar. The caller checks who
+ * private unless `access` says otherwise; naps in the frame get the Nap bar. The caller checks who
  * the person is; this checks what they may change.
  */
 export const publishFiles = Effect.fn("publishFiles")(function* (
@@ -210,7 +211,7 @@ export const recordVersion = Effect.fn("recordVersion")(function* (
     client?: string;
     message?: string;
     sourceCommit?: string | null;
-    /** New sites only: the source repo created with the first upload. */
+    /** New naps only: the source repo created with the first upload. */
     sourceRepo?: string | null;
   },
 ) {

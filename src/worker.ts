@@ -86,7 +86,7 @@ const routeRequest = Effect.fn("routeRequest")(function* (
   if (url.pathname === "/_nap/access.js" && request.method === "GET") {
     return serveAccessScript();
   }
-  // The comments UI for the Nap bar on artifact pages, built from src/comments into the assets.
+  // The comments UI for the Nap bar on naps in the frame, built from src/comments into the assets.
   if (
     target.type === "dashboard" &&
     url.pathname === "/_nap/comments.js" &&
@@ -130,7 +130,7 @@ const routeRequest = Effect.fn("routeRequest")(function* (
     return yield* handleArtifactPage(request, place, legacyArtifact);
   }
 
-  // Artifacts: <root>/<id>, a sandboxed frame below the Nap bar. Nap's own routes are reserved
+  // Naps: <root>/<name>, a sandboxed frame below the Nap bar. Nap's own routes are reserved
   // names, so artifactRoute never matches them; the routes above are all below /_nap/. A name
   // that is no nap goes on to the dashboard app, which answers with its 404.
   const artifact = target.type === "dashboard" ? artifactRoute(url.pathname) : null;
@@ -209,9 +209,9 @@ const routeRequest = Effect.fn("routeRequest")(function* (
     }
   }
 
-  // <slug>.<root> serves one site. Each site has its own origin, so sites cannot read each
-  // other's data, except collections another site's nap.json allows them (/_nap/data/@<site>/).
-  // Artifacts redirect to <root>/<slug>.
+  // <name>.<root> serves one nap on its own host. Each has its own origin, so they cannot read
+  // each other's data, except collections another nap's nap.json allows them
+  // (/_nap/data/@<name>/). Naps in the frame redirect to <root>/<name>.
   if (target.type === "site") {
     const slug = target.slug;
     // Opening a nap counts as using Nap. It keeps the person's agent tokens active.

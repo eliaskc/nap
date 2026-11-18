@@ -26,7 +26,7 @@ import { inBackground, Settings } from "~/server/platform";
 
 export const notificationsOn = () => napConfig.notifications === true;
 
-/** What a notification came from: a site or artifact, or the app itself (NapKit, no site). */
+/** What a notification came from: a nap, or the app itself (NapKit, no nap). */
 export type NotificationSource =
   | { kind: "site"; slug: string; title: string; napKind: NapKind; place: NapPlace }
   | { kind: "app"; app: string | null; place: NapPlace };
@@ -493,11 +493,11 @@ export const sendNotification = Effect.fn("sendNotification")(function* (
   if (imageId && source.kind !== "site") {
     return yield* failNoStore(
       400,
-      "image is a file of a site: send the notification as that site (/_nap/api/naps/<id>/notify)",
+      "image is a file of a nap: send the notification as that nap (/_nap/api/naps/<id>/notify)",
     );
   }
   if (input.image !== undefined && input.image !== null && typeof input.image !== "string") {
-    return yield* failNoStore(400, "image must be the id of an image file of this site");
+    return yield* failNoStore(400, "image must be the id of an image file of this nap");
   }
   const image =
     imageId && source.kind === "site"

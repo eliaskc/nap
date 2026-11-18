@@ -17,7 +17,7 @@ export const Route = createRootRoute({
       { name: "viewport", content: "width=device-width, initial-scale=1" },
       ...seo({
         title: "Nap",
-        description: `Drag, drop, and share internal static sites at ${napConfig.orgName}.`,
+        description: `Drag, drop, and share naps: internal pages and tools at ${napConfig.orgName}.`,
       }),
     ],
     links: [

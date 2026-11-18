@@ -27,6 +27,7 @@ test("title slugs are short, readable DNS labels", () => {
   assert.equal(titleSlug("  --  "), "");
   assert.equal(titleSlug("Untitled artifact"), "");
   assert.equal(titleSlug("Untitled site"), "");
+  assert.equal(titleSlug("Untitled nap"), "");
   assert.equal(titleSlug(undefined), "");
   assert.equal(
     titleSlug("A very long title about weekly sleep metrics"),
@@ -65,4 +66,33 @@ test("artifact ids are random, not made from the title", async () => {
   const takenOnce = async () => calls++ === 0;
   assert.match(await pickArtifactId(takenOnce), /^[a-z0-9]{12}$/);
   assert.equal(calls, 2, "a taken id is retried");
+});
+
+test("a new nap is in the frame by default, with a chosen name or a random id", () => {
+  const { napShape } = uploads;
+  const shape = (fields) =>
+    napShape({ kind: "", ownHost: undefined, name: "", slug: "", ...fields });
+  assert.deepEqual(shape({}), { kind: "artifact", slug: "" });
+  assert.deepEqual(shape({ name: "elo" }), { kind: "artifact", slug: "elo" });
+  assert.deepEqual(shape({ name: "elo", ownHost: "true" }), { kind: "site", slug: "elo" });
+  assert.deepEqual(shape({ name: "elo", ownHost: true }), { kind: "site", slug: "elo" });
+  assert.deepEqual(shape({ ownHost: "false" }), { kind: "artifact", slug: "" });
+  assert.deepEqual(shape({ ownHost: "maybe" }), { error: "ownHost must be true or false" });
+});
+
+test("the older kind and slug fields mean what they always did", () => {
+  const { napShape } = uploads;
+  const shape = (fields) =>
+    napShape({ kind: "", ownHost: undefined, name: "", slug: "", ...fields });
+  assert.deepEqual(shape({ kind: "artifact" }), { kind: "artifact", slug: "" });
+  assert.deepEqual(shape({ kind: "site" }), { kind: "site", slug: "" });
+  // A slug alone has always meant its own host.
+  assert.deepEqual(shape({ slug: "map" }), { kind: "site", slug: "map" });
+  assert.deepEqual(shape({ kind: "site", slug: "map" }), { kind: "site", slug: "map" });
+  // Which used to be refused, and is a chosen name in the frame now.
+  assert.deepEqual(shape({ kind: "artifact", slug: "map" }), { kind: "artifact", slug: "map" });
+  assert.deepEqual(shape({ kind: "page" }), { error: 'kind must be "artifact" or "site"' });
+  assert.ok("error" in shape({ kind: "site", ownHost: false }), "kind and ownHost must agree");
+  assert.ok("error" in shape({ name: "a", slug: "b" }), "one name");
+  assert.deepEqual(shape({ kind: "artifact", ownHost: "false" }), { kind: "artifact", slug: "" });
 });

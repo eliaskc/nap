@@ -206,8 +206,8 @@ function RequestCard({
         </div>
         <CardTitle>Connect {request.clientName}?</CardTitle>
         <CardDescription>
-          The agent can publish new private sites and artifacts as you, and update the ones you own.
-          It cannot share, list, or delete anything.
+          The agent can publish new private naps as you, and update the ones you own. It cannot
+          share, list, or delete anything.
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-5">

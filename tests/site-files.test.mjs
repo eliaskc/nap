@@ -227,7 +227,7 @@ test("notification images: presigned for 7 days, only image files of the site", 
   assert.equal(await runNap(env, notificationImageUrl("quiz", image, null)), null);
   for (const id of [text, "b".repeat(24), "../x"]) {
     await assert.rejects(runNap(signing, notificationImageUrl("quiz", id, null)), (error) =>
-      /image file of this site/.test(error.body?.error),
+      /image file of this nap/.test(error.body?.error),
     );
   }
 });

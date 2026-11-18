@@ -142,7 +142,7 @@ export class ChannelServerRunner {
     if (!loader || !bucket) return this.fail("Channel servers are off on this Nap");
     const worker = loader.get(`${code.slug}/${code.version}/${code.path}`, async () => {
       const object = await bucket.get(objectKey(code.slug, code.version, code.path));
-      if (!object) throw new Error(`${code.path} is not in the site's live version`);
+      if (!object) throw new Error(`${code.path} is not in the nap's live version`);
       if (object.size > MAX_SERVER_BYTES) throw new Error(`${code.path} is over 5 MB`);
       return {
         compatibilityDate: COMPATIBILITY_DATE,

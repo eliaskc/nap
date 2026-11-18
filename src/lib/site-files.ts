@@ -122,7 +122,7 @@ export const handleSiteFilesRequest = Effect.fn("handleSiteFilesRequest")(functi
 ) {
   const identity = options.identity ?? getIdentity(request);
   if (!SLUG_PATTERN.test(slug) || !(yield* canViewSite(slug, identity.email))) {
-    return yield* fail(404, "Site not found");
+    return yield* fail(404, "Nap not found");
   }
   if (!options.identity) yield* ensureProfile(identity);
   const method = request.method;
@@ -216,7 +216,7 @@ export const notificationImageUrl = Effect.fn("notificationImageUrl")(function* 
   id: string,
   localOrigin: string | null,
 ) {
-  const problem = `image must be the id of an image file of this site (nap.files.upload)`;
+  const problem = `image must be the id of an image file of this nap (nap.files.upload)`;
   if (!FILE_ID_PATTERN.test(id)) return yield* fail(400, problem);
   const storage = yield* Storage;
   const object = yield* storage.head(fileKey(slug, id));

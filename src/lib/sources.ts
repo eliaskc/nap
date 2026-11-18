@@ -4,13 +4,13 @@ import { Database } from "~/server/database";
 import { failNoStore } from "~/server/http";
 
 /**
- * Source repos: a site's source in a Cloudflare Artifacts repo, one repo per site.
+ * Source repos: a nap's source in a Cloudflare Artifacts repo, one repo per nap (and per app).
  *
  * Nap never runs Git. Agents clone and push with plain Git over HTTPS, using short-lived tokens
  * scoped to one repo that Nap mints after it checks the agent's Nap token. Agents build locally
  * and publish the static output as usual, naming the commit they built. Nap accepts that build
  * only if the commit is the head of the repo's main branch and contains the live version's commit,
- * so the live site always matches the source and nobody publishes over work they have not pulled.
+ * so the live nap always matches the source and nobody publishes over work they have not pulled.
  * A force-push that drops published commits therefore cannot go live.
  */
 
@@ -119,26 +119,26 @@ const liveCommitOf = Effect.fnUntraced(function* (versionId: string) {
 
 /**
  * Checks the commit a new version says it was built from.
- * - A site without a source repo takes no commit.
- * - A site with one needs the head of main, and that commit must contain the live one.
+ * - A nap without a source repo takes no commit.
+ * - A nap with one needs the head of main, and that commit must contain the live one.
  * Succeeds when the version may go live.
  */
 export const checkSourceCommit = Effect.fn("checkSourceCommit")(function* (
-  /** currentVersion is null for a new site whose repo was created with its first upload. */
+  /** currentVersion is null for a new nap whose repo was created with its first upload. */
   site: { slug: string; sourceRepo: string | null; currentVersion: string | null } | null,
   sourceCommit: string | null | undefined,
 ) {
   const commit = (sourceCommit ?? "").trim().toLowerCase();
   if (!site?.sourceRepo) {
     if (!commit) return;
-    return yield* failNoStore(400, "sourceCommit only works for a site with a source repo", {
+    return yield* failNoStore(400, "sourceCommit only works for a nap with a source repo", {
       code: "no_source_repo",
     });
   }
   if (!commit) {
     return yield* failNoStore(
       409,
-      `This site's source is in a Nap source repo. Push your change to its ${SOURCE_BRANCH} branch, build that commit, and publish with sourceCommit set to it. Upload in the dashboard is off for this site.`,
+      `This nap's source is in a Nap source repo. Push your change to its ${SOURCE_BRANCH} branch, build that commit, and publish with sourceCommit set to it. Upload in the dashboard is off for this nap.`,
       { code: "source_commit_required" },
     );
   }
@@ -148,7 +148,7 @@ export const checkSourceCommit = Effect.fn("checkSourceCommit")(function* (
 
 /**
  * The commit rules, for any repo: `commit` must be the head of main and contain `liveCommit`, the
- * commit of whatever is live now. Sites pass their live version's commit; apps pass the live
+ * commit of whatever is live now. Naps pass their live version's commit; apps pass the live
  * build's commit of the target being published. Succeeds when the commit may go live.
  */
 export const checkRepoCommit = Effect.fn("checkRepoCommit")(function* (
@@ -265,8 +265,8 @@ export const mintSourceToken = Effect.fn("mintSourceToken")(function* (
 });
 
 /**
- * Creates the source repo for a site and returns a write token for the first push. The repo is
- * named after the site; a suffix is added when an old repo has that name.
+ * Creates the source repo for a nap and returns a write token for the first push. The repo is
+ * named after the nap; a suffix is added when an old repo has that name.
  */
 export const createSource = Effect.fn("createSource")(function* (site: {
   slug: string;
@@ -289,8 +289,8 @@ export const createSource = Effect.fn("createSource")(function* (site: {
 });
 
 /**
- * Creates the source repo for a site that does not exist yet: its first upload holds the URL.
- * The upload records the repo, and the site gets it when the upload is committed. Returns a
+ * Creates the source repo for a nap that does not exist yet: its first upload holds the name.
+ * The upload records the repo, and the nap gets it when the upload is committed. Returns a
  * write token for the first push.
  */
 export const createUploadSource = Effect.fn("createUploadSource")(function* (site: {
@@ -302,7 +302,7 @@ export const createUploadSource = Effect.fn("createUploadSource")(function* (sit
   return yield* mintSourceToken(created, "write");
 });
 
-/** Creates an empty repo for something other than a site (an app). Returns its name. */
+/** Creates an empty repo for something other than a nap (an app). Returns its name. */
 export const createNamedRepo = Effect.fn("createNamedRepo")(function* (
   name: string,
   description: string,
@@ -311,13 +311,13 @@ export const createNamedRepo = Effect.fn("createNamedRepo")(function* (
   return yield* createRepo(ns, { slug: name, title: description });
 });
 
-/** Deletes a repo that no site uses, such as the repo of an upload that never went live. */
+/** Deletes a repo that no nap uses, such as the repo of an upload that never went live. */
 export const deleteSourceRepo = Effect.fn("deleteSourceRepo")(function* (name: string) {
   const ns = yield* SourceNamespaceBinding;
   if (ns) yield* Effect.ignore(tryRepo(() => ns.delete(name)));
 });
 
-/** Creates an empty repo named after the site and returns its name. */
+/** Creates an empty repo named after the nap and returns its name. */
 const createRepo = Effect.fnUntraced(function* (
   ns: SourceNamespace,
   site: { slug: string; title: string },

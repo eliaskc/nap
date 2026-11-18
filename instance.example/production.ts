@@ -5,7 +5,7 @@ const root = napConfig.rootDomain;
 
 /**
  * The production Cloudflare resources of this deployment: account, zone, DNS, and the Access
- * application that protects the dashboard and every site. The domain is napConfig.rootDomain.
+ * application that protects the dashboard and every nap. The domain is napConfig.rootDomain.
  *
  */
 export const production: ProductionSettings = {
@@ -20,7 +20,7 @@ export const production: ProductionSettings = {
     content: "100::",
     proxied: true,
     ttl: 1,
-    comment: "Nap: the dashboard and its sites, served by the nap Worker.",
+    comment: "Nap: the dashboard and its naps, served by the nap Worker.",
   })),
   // Emails, and "@example.com" for everyone at a domain.
   people: ["you@example.com"],

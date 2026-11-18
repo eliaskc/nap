@@ -24,6 +24,7 @@ import {
   MAX_DIRECT_UPLOAD_BYTES,
   MAX_DIRECT_UPLOAD_FILES,
   normalizePath,
+  UNTITLED_NAP,
   type SiteKind,
 } from "~/lib/uploads";
 import { Database } from "~/server/database";
@@ -51,9 +52,9 @@ import { Storage, tryStorage } from "~/server/storage";
  * paths does not fit. Uncommitted uploads expire a day after they last signed URLs. Nap
  * deletes their files when the next upload starts.
  *
- * A new site can get its source repo with its first upload (`createSource`). Start creates the
+ * A new nap can get its source repo with its first upload (`createSource`). Start creates the
  * repo and returns a write token; the client pushes the commit it built, then commits the upload.
- * Commit checks that the commit is the head of main and gives the site the repo. Until then the
+ * Commit checks that the commit is the head of main and gives the nap the repo. Until then the
  * upload holds the repo, and an upload that expires deletes it.
  */
 
@@ -71,9 +72,9 @@ export type StartDirectUploadInput = {
   source: DirectUploadSource;
   client?: string;
   message?: string;
-  /** Sites with a source repo: the commit these files were built from. */
+  /** Naps with a source repo: the commit these files were built from. */
   sourceCommit?: string | null;
-  /** New sites only: create the source repo with this upload. Needs sourceCommit. */
+  /** New naps only: create the source repo with this upload. Needs sourceCommit. */
   createSource?: boolean;
 };
 
@@ -254,12 +255,10 @@ export const startDirectUpload = Effect.fn("startDirectUpload")(function* (
   let sourceCommit: string | null = null;
   let sourceAccess: SourceAccess | null = null;
   if (input.createSource) {
-    if (target.existing || target.kind !== "site") {
+    if (target.existing) {
       return yield* failNoStore(
         400,
-        target.existing
-          ? "createSource is for new sites. The owner adds a repo to an existing site with POST /_nap/api/naps/<id>/source."
-          : "Only sites have source repos",
+        "createSource is for new naps. The owner adds a repo to an existing nap with POST /_nap/api/naps/<id>/source.",
         { code: "create_source_new_sites_only" },
       );
     }
@@ -439,10 +438,7 @@ export const commitDirectUpload = Effect.fn("commitDirectUpload")(function* (
 
   let created: PublishTarget | null = null;
   if (row.creates) {
-    const title =
-      row.title ||
-      (yield* pageTitle) ||
-      (row.kind === "artifact" ? "Untitled artifact" : "Untitled site");
+    const title = row.title || (yield* pageTitle) || UNTITLED_NAP;
     created = { slug: row.siteSlug, kind: row.kind, title, existing: null };
     if (row.sourceRepo) {
       yield* checkSourceCommit(

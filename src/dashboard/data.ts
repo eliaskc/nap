@@ -3,7 +3,10 @@ import type { Color, Shape } from "~/lib/looks";
 import { browserPlace, napLabel, napUrl } from "~/lib/nap-urls";
 import { napConfig } from "~/nap.config";
 
-/** What the dashboard lists. Apps are their own records; sites and artifacts share one table. */
+/**
+ * What the dashboard lists. Apps are their own records; naps are rows in `sites`, where `kind`
+ * says how each is served: "artifact" in Nap's frame, "site" on its own host.
+ */
 export type Kind = "site" | "artifact" | "app";
 
 export type Site = {
@@ -25,7 +28,7 @@ export type Site = {
   listed: boolean;
   toolbar: boolean;
   invited: boolean;
-  /** When you last opened it. Other people's artifacts are listed only once you have. */
+  /** When you last opened it. Other people's naps in the frame are listed only once you have. */
   visitedAt: string | null;
 };
 
@@ -46,7 +49,7 @@ export type Profile = {
   color?: Color;
 };
 
-/** One thing on the dashboard: a site, an artifact, or an app. */
+/** One thing on the dashboard: a nap or an app. */
 export type Item = {
   key: string;
   kind: Kind;
@@ -54,7 +57,7 @@ export type Item = {
   title: string;
   /** Where it opens. */
   url: string;
-  /** The URL as people read it: `slug.root` or `root/id`. */
+  /** The URL as people read it: `root/name`, or `name.root` on its own host. */
   label: string;
   ownerEmail: string;
   ownerName: string;
@@ -67,11 +70,12 @@ export type Item = {
   app?: App;
 };
 
-export const KINDS: Array<Kind> = ["site", "artifact", "app"];
+export const KINDS: Array<Kind> = ["artifact", "site", "app"];
 
+/** Everything published is a nap. A few still have their own host, for now. */
 export const KIND_LABEL: Record<Kind, { one: string; many: string }> = {
-  site: { one: "Site", many: "Sites" },
-  artifact: { one: "Artifact", many: "Artifacts" },
+  artifact: { one: "Nap", many: "Naps" },
+  site: { one: "Nap on its own host", many: "Naps on their own host" },
   app: { one: "App", many: "Apps" },
 };
 

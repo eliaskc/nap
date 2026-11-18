@@ -395,7 +395,7 @@ export const handleChannelRequest = Effect.fn("handleChannelRequest")(function* 
   }
   const channels = yield* ChannelsBinding;
   if (!channels) return yield* fail(503, "Channels are unavailable");
-  if (!(yield* canViewSite(slug, identity.email))) return yield* fail(404, "Site not found");
+  if (!(yield* canViewSite(slug, identity.email))) return yield* fail(404, "Nap not found");
   const person = yield* findPerson(identity.email, identity.name);
   const server = yield* liveServer(slug, name);
   const headers = new Headers({

@@ -68,7 +68,7 @@ export const handleSiteFetch = Effect.fn("handleSiteFetch")(function* (
     slug,
   );
   if (!site?.currentVersion || site.kind !== (options.frame ? "artifact" : "site")) {
-    return yield* failNoStore(404, options.frame ? "Artifact not found" : "Site not found");
+    return yield* failNoStore(404, "Nap not found");
   }
   if (!(yield* canViewSite(slug, email))) return yield* failNoStore(403, "Forbidden");
 
@@ -217,7 +217,7 @@ function checkTarget(target: URL, hosts: string[], rootDomain: string) {
     return "Nap's own hosts cannot be fetched";
   }
   if (!hosts.some((allowed) => hostMatches(host, allowed))) {
-    return `${host} is not in this site's ${MANIFEST_PATH} fetch list`;
+    return `${host} is not in this nap's ${MANIFEST_PATH} fetch list`;
   }
   return null;
 }

@@ -213,18 +213,64 @@ try {
   assert.equal(row.listed, false);
   assert.equal(row.toolbar, true);
 
+  assert.equal(created.json.ownHost, false, "naps are in Nap's frame by default");
+
+  // Its own token, so the upload rate limit does not reach the checks below.
+  const shapes = await signIn(OWNER, "Shapes");
+  // A chosen name: still in the frame, at <root>/<name>.
+  const named = await html("/_nap/api/naps?name=agent-board", shapes, "<title>Board</title>b");
+  assert.equal(named.status, 201, named.text);
+  assert.equal(named.json.id, "agent-board");
+  assert.equal(named.json.kind, "artifact");
+  assert.equal(named.json.ownHost, false);
+  assert.equal(named.json.url, "http://localhost/agent-board");
+  assert.equal(
+    (await html("/_nap/api/naps?name=agent-board", shapes, "x")).status,
+    409,
+    "names are taken once",
+  );
+  assert.equal((await html("/_nap/api/naps?name=api", shapes, "x")).status, 409, "reserved");
+  const ownHost = await html("/_nap/api/naps?name=agent-host&ownHost=true", shapes, "h");
+  assert.equal(ownHost.status, 201, ownHost.text);
+  assert.equal(ownHost.json.kind, "site", "kind still says how it is served");
+  assert.equal(ownHost.json.ownHost, true);
+  assert.equal(ownHost.json.url, "http://localhost/s/agent-host/");
+
+  // The older fields still work: a slug alone gives a nap its own host, as it always did, and
+  // kind=artifact with a slug, refused before, is a chosen name in the frame.
   const site = await html("/_nap/api/naps?slug=agent-site", token, "<title>Map</title>map");
   assert.equal(site.status, 201, site.text);
-  assert.equal(site.json.kind, "site", "a slug makes a site");
+  assert.equal(site.json.kind, "site", "a slug alone means its own host");
   assert.equal(site.json.access, napConfig.defaultAccess, "new naps get the default access");
   assert.equal(site.json.id, "agent-site");
   assert.equal(site.json.title, "Map", "title from <title>");
-  assert.equal(
-    (await html("/_nap/api/naps?slug=other&kind=artifact", token, "x")).status,
-    400,
-    "a slug means a site",
-  );
-  assert.equal((await html("/_nap/api/naps?slug=api", token, "x")).status, 409, "reserved");
+  const kindArtifact = await html("/_nap/api/naps?slug=other&kind=artifact", shapes, "x");
+  assert.equal(kindArtifact.status, 201, kindArtifact.text);
+  assert.equal(kindArtifact.json.kind, "artifact");
+  assert.equal(kindArtifact.json.id, "other");
+  const kindSite = await html("/_nap/api/naps?kind=site&title=Old%20style", shapes, "x");
+  assert.equal(kindSite.json.kind, "site", "kind=site still makes a nap on its own host");
+  assert.equal(kindSite.json.id, "old-style", "named from the title");
+  assert.equal((await html("/_nap/api/naps?kind=page", shapes, "x")).status, 400);
+  assert.equal((await html("/_nap/api/naps?kind=site&ownHost=false", shapes, "x")).status, 400);
+  assert.equal((await html("/_nap/api/naps?slug=api", shapes, "x")).status, 409, "reserved");
+  const listedNaps = (await call("/_nap/api/naps", { headers: bearer(shapes) })).json.naps;
+  const describedHost = listedNaps.find((nap) => nap.id === "agent-host");
+  assert.equal(describedHost.kind, "site");
+  assert.equal(describedHost.ownHost, true);
+
+  // Any nap can have a source repo, in the frame too. This stage has no source repos, so the
+  // request gets as far as creating it.
+  const frameSource = await call(`/_nap/api/naps/agent-board/source`, {
+    method: "POST",
+    headers: bearer(shapes),
+  });
+  assert.notEqual(frameSource.status, 400, frameSource.text);
+  assert.doesNotMatch(frameSource.text, /Only sites/);
+  const shapesId = (await call("/api/tokens", { headers: as(OWNER) })).json.tokens.find(
+    (item) => item.clientName === "Shapes",
+  ).id;
+  await call(`/api/tokens/${shapesId}`, { method: "DELETE", headers: as(OWNER) });
 
   // Access on create: everyone, or selected people. Never on updates.
   const visibilityOf = async (slug) =>
@@ -847,7 +893,7 @@ try {
   assert.equal(
     (await call("/_nap/api/naps/agent-site/comments", { headers: bearer(token) })).status,
     404,
-    "only artifacts have comments",
+    "naps on their own host have no comments",
   );
 
   // Dashboard uploads record their source too.
@@ -882,7 +928,9 @@ try {
   const list = await call("/_nap/api/naps", { headers: bearer(token) });
   assert.deepEqual(
     list.json.naps.map((nap) => nap.id).sort(),
-    ["agent-site", id, everyone.json.id, invited.json.id, direct.id, dashboardSlug].sort(),
+    ["agent-site", "agent-board", "agent-host", "other", "old-style"]
+      .concat([id, everyone.json.id, invited.json.id, direct.id, dashboardSlug])
+      .sort(),
   );
 
   // Shared editing: `id` is shared with OTHER now. They see its history and update it, but only

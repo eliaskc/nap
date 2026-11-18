@@ -404,15 +404,44 @@ test("a new site gets its source repo with its first upload, built from a commit
   );
 });
 
-test("createSource is only for new sites, with a commit", async () => {
+test("createSource is only for new naps, with a commit", async () => {
   const { env, SOURCES } = uploadEnv();
   let result = await startNewSite(env, { sourceCommit: "" });
   assert.equal((await result.json()).code, "invalid_source_commit");
-  result = await startNewSite(env, { kind: "artifact", slug: "" });
-  assert.equal((await result.json()).code, "create_source_new_sites_only");
   result = await startNewSite(env, { targetSlug: "elo", kind: undefined, slug: "" });
   assert.equal((await result.json()).code, "create_source_new_sites_only");
   assert.equal(SOURCES.repos.size, 0);
+});
+
+test("a nap in the frame gets its source repo with its first upload too", async () => {
+  const { env, sqlite, SOURCES, objects } = uploadEnv();
+  // A chosen name in the frame: <root>/elo-board.
+  const named = await startNewSite(env, { kind: "artifact", slug: "elo-board" });
+  assert.equal(named.id, "elo-board");
+  assert.equal(named.kind, "artifact");
+  assert.equal(named.source.repo, "elo-board");
+  // Without a name, a random id, and the repo is named after it.
+  const random = await startNewSite(env, { kind: "artifact", slug: "", sourceCommit: sha(2) });
+  assert.match(random.id, /^[a-z0-9]{12}$/);
+  assert.equal(random.source.repo, random.id);
+
+  const [{ version_id: versionId }] = sqlite
+    .prepare("SELECT version_id FROM uploads WHERE site_slug = 'elo-board'")
+    .all();
+  objects.set(`sites/elo-board/versions/${versionId}/index.html`, 18);
+  SOURCES.commit("elo-board", sha(1));
+  const published = await call(
+    env,
+    commitDirectUpload({ email: OWNER, name: "" }, named.uploadId, "agent"),
+  );
+  assert.equal(published.created, true);
+  assert.equal(published.kind, "artifact");
+  assert.equal(site(sqlite, "elo-board").sourceRepo, "elo-board");
+  assert.equal(
+    sqlite.prepare("SELECT toolbar FROM sites WHERE slug = 'elo-board'").get().toolbar,
+    1,
+    "with the Nap bar",
+  );
 });
 
 test("an expired upload deletes the repo it created", async () => {

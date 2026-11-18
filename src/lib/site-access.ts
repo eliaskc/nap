@@ -87,9 +87,9 @@ export const updateSiteAccess = Effect.fn("updateSiteAccess")(function* (
   )(body.visibility);
 
   const site = yield* getSiteOwner(slug);
-  if (!site) return yield* fail(404, "Site not found");
+  if (!site) return yield* fail(404, "Nap not found");
   if (!isSameEmail(site.createdByEmail, identity.email)) {
-    return yield* fail(403, "Only the site owner can change access");
+    return yield* fail(403, "Only the owner can change access");
   }
 
   const emails = normalizeEmails(body.emails);
@@ -130,7 +130,7 @@ export const transferOwnership = Effect.fn("transferOwnership")(function* (
   if (!email) return yield* fail(400, "Enter an email address");
 
   const site = yield* getSiteOwner(slug);
-  if (!site) return yield* fail(404, "Site not found");
+  if (!site) return yield* fail(404, "Nap not found");
   if (!isSameEmail(site.createdByEmail, identity.email)) {
     return yield* fail(403, "Only the owner can transfer it");
   }
@@ -197,7 +197,7 @@ export const handleSiteAccessRequest = Effect.fn("handleSiteAccessRequest")(func
 ) {
   const identity = getIdentity(request);
   const site = yield* getSiteOwner(slug);
-  if (!site) return yield* fail(404, "Site not found", {}, noStore);
+  if (!site) return yield* fail(404, "Nap not found", {}, noStore);
 
   const isOwner = isSameEmail(site.createdByEmail, identity.email);
 

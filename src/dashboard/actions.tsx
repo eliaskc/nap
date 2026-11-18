@@ -4,6 +4,7 @@ import {
   EditIcon,
   EyeIcon,
   FileIcon,
+  PanelTopIcon,
   FolderArchiveIcon,
   HistoryIcon,
   LinkIcon,
@@ -68,9 +69,12 @@ export type Actions = {
   visitors: (site: Site) => void;
   transfer: (site: Site) => void;
   rename: (site: Site) => void;
+  /** Between Nap's frame (<root>/<name>) and its own host (<name>.<root>). Keeps the name. */
   toggleKind: (site: Site) => void;
+  /** The Nap bar above a nap in the frame, on or off. */
+  toggleBar: (site: Site) => void;
   remove: (site: Site) => void;
-  /** Pick files for a new version of this site, or for something new without one. */
+  /** Pick files for a new version of this nap, or for something new without one. */
   pickFiles: (target?: Site) => void;
   pickFolder: (target?: Site) => void;
   /** Files dropped on the page, or on an item (a new version, after asking). */
@@ -115,6 +119,7 @@ export function DashboardActions({
   const [renamingSite, setRenamingSite] = React.useState<Site | null>(null);
   const [renameTitle, setRenameTitle] = React.useState("");
   const [renameSlug, setRenameSlug] = React.useState("");
+  const [renameRandom, setRenameRandom] = React.useState(false);
   const [renameError, setRenameError] = React.useState("");
   const [transferSite, setTransferSite] = React.useState<Site | null>(null);
   const [transferEmail, setTransferEmail] = React.useState("");
@@ -139,7 +144,7 @@ export function DashboardActions({
     target?: Site,
     onProgress: (fraction: number) => void = () => {},
   ) {
-    // New uploads from the dashboard start as artifacts, like an agent's first publish.
+    // New uploads from the dashboard are naps in the frame with a random id, like an agent's.
     const fields: Record<string, string> = target
       ? { targetSlug: target.slug, expectedCurrentVersion: target.currentVersion }
       : { kind: "artifact" };
@@ -216,7 +221,11 @@ export function DashboardActions({
     const response = await fetch(`/api/sites/${renamingSite.slug}`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ title: renameTitle, slug: slugify(renameSlug) }),
+      body: JSON.stringify(
+        renameRandom
+          ? { title: renameTitle, randomName: true }
+          : { title: renameTitle, slug: slugify(renameSlug) },
+      ),
     });
     if (!response.ok) {
       const body = (await response.json().catch(() => ({}))) as { error?: string };
@@ -282,18 +291,19 @@ export function DashboardActions({
       });
   }
 
-  async function toggleKind(site: Site) {
-    const kind = site.kind === "site" ? "artifact" : "site";
-    onSiteChange(site.slug, { kind });
+  async function saveSettings(site: Site, change: Partial<Site>) {
+    onSiteChange(site.slug, change);
     try {
       const response = await fetch(`/api/sites/${site.slug}/settings`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ kind }),
+        body: JSON.stringify(
+          change.kind ? { ownHost: change.kind === "site" } : { toolbar: change.toolbar },
+        ),
       });
       if (!response.ok) {
         const body = (await response.json().catch(() => ({}))) as { error?: string };
-        throw new Error(body.error ?? "Could not save the setting");
+        setUploadError(body.error ?? "Could not save the setting");
       }
     } finally {
       await refresh(true);
@@ -324,9 +334,12 @@ export function DashboardActions({
       setRenamingSite(site);
       setRenameTitle(site.title);
       setRenameSlug(site.slug);
+      setRenameRandom(false);
       setRenameError("");
     },
-    toggleKind: (site) => void toggleKind(site),
+    toggleKind: (site) =>
+      void saveSettings(site, { kind: site.kind === "site" ? "artifact" : "site" }),
+    toggleBar: (site) => void saveSettings(site, { toolbar: !site.toolbar }),
     remove: setDeletingSite,
     pickFiles: (target) => {
       pickTarget.current = target;
@@ -404,13 +417,9 @@ export function DashboardActions({
       <Dialog open={Boolean(renamingSite)} onOpenChange={(open) => !open && setRenamingSite(null)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>
-              Rename {renamingSite?.kind === "artifact" ? "artifact" : "site"}
-            </DialogTitle>
+            <DialogTitle>Rename nap</DialogTitle>
             <DialogDescription>
-              {renamingSite?.kind === "artifact"
-                ? "Change the name. The URL stays the same."
-                : "Change the name and the URL. The old URL stops working."}
+              Change its name and its URL. The old URL keeps working and leads to the new one.
             </DialogDescription>
           </DialogHeader>
           <FieldGroup>
@@ -422,19 +431,35 @@ export function DashboardActions({
                 onChange={(event) => setRenameTitle(event.target.value)}
               />
             </Field>
-            {renamingSite?.kind !== "artifact" && (
-              <Field>
-                <FieldLabel htmlFor="rename-slug">URL</FieldLabel>
-                <div className="flex items-center gap-2">
-                  <Input
-                    id="rename-slug"
-                    value={renameSlug}
-                    onChange={(event) => setRenameSlug(slugify(event.target.value))}
-                  />
+            <Field>
+              <FieldLabel htmlFor="rename-slug">URL</FieldLabel>
+              <div className="flex items-center gap-2">
+                {renamingSite?.kind === "artifact" && (
+                  <span className="shrink-0 text-sm text-muted-foreground">{hostSuffix}/</span>
+                )}
+                <Input
+                  id="rename-slug"
+                  value={renameRandom ? "" : renameSlug}
+                  placeholder={renameRandom ? "a new random id" : undefined}
+                  onChange={(event) => {
+                    setRenameRandom(false);
+                    setRenameSlug(slugify(event.target.value));
+                  }}
+                />
+                {renamingSite?.kind === "site" && (
                   <span className="shrink-0 text-sm text-muted-foreground">.{hostSuffix}</span>
-                </div>
-              </Field>
-            )}
+                )}
+                <Button
+                  variant={renameRandom ? "secondary" : "outline"}
+                  type="button"
+                  title="Give it a new random id"
+                  aria-pressed={renameRandom}
+                  onClick={() => setRenameRandom(!renameRandom)}
+                >
+                  Random
+                </Button>
+              </div>
+            </Field>
           </FieldGroup>
           {renameError && <p className="text-sm text-destructive">{renameError}</p>}
           <DialogFooter>
@@ -501,9 +526,7 @@ export function DashboardActions({
       <Dialog open={Boolean(deletingSite)} onOpenChange={(open) => !open && setDeletingSite(null)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>
-              Delete {deletingSite?.kind === "artifact" ? "artifact" : "site"}?
-            </DialogTitle>
+            <DialogTitle>Delete nap?</DialogTitle>
             <DialogDescription>
               {deletingSite
                 ? `This removes ${napLabel(deletingSite, hostSuffix)} from Nap. Uploaded files may be cleaned up later.`
@@ -610,12 +633,20 @@ export function ItemMenu({
                 <EditIcon data-icon="inline-start" />
                 Rename
               </ContextMenuItem>
-              {!site.hasSource && (
-                <ContextMenuItem onClick={() => actions.toggleKind(site)}>
-                  <ArrowRightLeftIcon data-icon="inline-start" />
-                  {site.kind === "site" ? "Make it an artifact" : "Make it a site"}
+              {site.kind === "artifact" && (
+                <ContextMenuItem onClick={() => actions.toggleBar(site)}>
+                  <PanelTopIcon data-icon="inline-start" />
+                  {site.toolbar ? "Hide the Nap bar" : "Show the Nap bar"}
                 </ContextMenuItem>
               )}
+              <ContextMenuItem onClick={() => actions.toggleKind(site)}>
+                <ArrowRightLeftIcon data-icon="inline-start" />
+                Move to{" "}
+                {napLabel(
+                  { slug: site.slug, kind: site.kind === "site" ? "artifact" : "site" },
+                  napConfig.rootDomain,
+                )}
+              </ContextMenuItem>
             </ContextMenuGroup>
             <ContextMenuSeparator />
             <ContextMenuGroup>
@@ -641,7 +672,7 @@ type Visitor = {
   visits: number;
 };
 
-/** Who has opened one of your sites or artifacts, most recent first. You are left out. */
+/** Who has opened one of your naps, most recent first. You are left out. */
 function VisitorsDialog({ site, onClose }: { site: Site | null; onClose: () => void }) {
   const [visitors, setVisitors] = React.useState<Array<Visitor> | null>(null);
   const [error, setError] = React.useState("");

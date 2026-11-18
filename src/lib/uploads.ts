@@ -2,8 +2,51 @@ import { Effect } from "effect";
 import { Database } from "~/server/database";
 import { HttpError } from "~/server/http";
 
-/** Artifacts: quick pages, shared by link, only in the owner's Artifacts list. Sites: everything else. */
+/**
+ * How a nap is served. "artifact": in Nap's sandboxed frame at <root>/<name>, the default.
+ * "site": on its own host, <name>.<root>, for the few naps that still need one. The values are
+ * older than the word "nap" and stay in the database and the agent API.
+ */
 export type SiteKind = "site" | "artifact";
+
+/** The title of a nap that has none. */
+export const UNTITLED_NAP = "Untitled nap";
+
+/**
+ * The serving mode and the name of a new nap, from what an agent sent. Names come slugified.
+ * - name: a chosen name: <root>/<name>, or <name>.<root> on its own host. Without one, the nap
+ *   gets a random id (one made from the title on its own host).
+ * - ownHost: true serves it on its own host. The default is Nap's frame.
+ * - kind: the older way to say the same: "site" is its own host, "artifact" the frame.
+ * - slug: the older name field. Without kind or ownHost it means its own host, as it always did,
+ *   so agents and scripts written for it keep working.
+ */
+export function napShape(fields: {
+  kind: string;
+  ownHost: string | boolean | undefined;
+  name: string;
+  slug: string;
+}): { kind: SiteKind; slug: string } | { error: string } {
+  const { kind, name, slug } = fields;
+  if (kind && kind !== "site" && kind !== "artifact") {
+    return { error: 'kind must be "artifact" or "site"' };
+  }
+  const ownHost = parseBoolean(fields.ownHost);
+  if (ownHost === "invalid") return { error: "ownHost must be true or false" };
+  if (kind && ownHost !== undefined && (kind === "site") !== ownHost) {
+    return { error: "kind and ownHost disagree. Send only ownHost." };
+  }
+  if (name && slug && name !== slug) return { error: "Send name or slug, not both" };
+  const onOwnHost = ownHost ?? (kind ? kind === "site" : !name && Boolean(slug));
+  return { kind: onOwnHost ? "site" : "artifact", slug: name || slug };
+}
+
+function parseBoolean(value: string | boolean | undefined) {
+  if (value === undefined || value === "") return undefined;
+  if (value === true || value === "true" || value === "1") return true;
+  if (value === false || value === "false" || value === "0") return false;
+  return "invalid" as const;
+}
 
 /**
  * Uploads that pass through the Worker. It holds them in memory and writes each file to R2
@@ -21,9 +64,9 @@ export const MAX_DIRECT_UPLOAD_BYTES = 10 * 1024 * 1024 * 1024;
 export const MAX_DIRECT_FILE_BYTES = 4 * 1024 * 1024 * 1024;
 
 /**
- * Names that Nap uses itself. No artifact id or site slug may be one of them: a site's slug is
- * its host label (<slug>.<root>), and an artifact's id is the first path segment on the root
- * domain (<root>/<id>), next to Nap's own routes. tests/reserved-names.test.mjs fails when a
+ * Names that Nap uses itself. No nap may take one: a nap's name is the first path segment on
+ * the root domain (<root>/<name>), next to Nap's own routes, and the host label of a nap on its
+ * own host (<name>.<root>). tests/reserved-names.test.mjs fails when a
  * top-level route is added without being listed here.
  */
 export const RESERVED_SLUGS: ReadonlySet<string> = new Set([
@@ -70,9 +113,9 @@ export function newNapId(length = 6) {
 const ARTIFACT_ID_LENGTH = 12;
 
 /**
- * An artifact's URL is <root>/<id>, with a random id and never a title or a reserved name.
- * Lowercase [a-z0-9], so the id is still a valid host label if the owner moves the artifact to
- * Sites.
+ * A nap without a chosen name gets a random id, never a title or a reserved name: <root>/<id>.
+ * Lowercase [a-z0-9], so the id is still a valid host label if the owner moves the nap to its
+ * own host.
  * 12 characters is about 62 bits: collisions are not a concern, and links are hard to guess.
  */
 export const pickArtifactId = Effect.fnUntraced(function* <E, R>(
@@ -89,7 +132,7 @@ export const pickArtifactId = Effect.fnUntraced(function* <E, R>(
 });
 
 const TITLE_SLUG_MAX = 24;
-const DEFAULT_TITLES = new Set(["untitled", "untitled-artifact", "untitled-site"]);
+const DEFAULT_TITLES = new Set(["untitled", "untitled-nap", "untitled-artifact", "untitled-site"]);
 
 /** "Sleep report: Q3 (draft)" -> "sleep-report-q3-draft". Empty for default titles. */
 export function titleSlug(title: string | null | undefined) {
@@ -111,7 +154,7 @@ export function titleSlug(title: string | null | undefined) {
 }
 
 /**
- * A fallback URL for a nap without a chosen slug: "<title>-<4 chars>", or 6 random characters
+ * A fallback name for a nap on its own host without a chosen one: "<title>-<4 chars>", or 6 random characters
  * without a title.
  */
 export function generatedSlug(title: string | null | undefined) {
@@ -120,9 +163,9 @@ export function generatedSlug(title: string | null | undefined) {
 }
 
 /**
- * A URL for a nap without a chosen slug. First the plain title ("q3-report"), then, if that is
- * taken or reserved, the title with a random suffix. Generated slugs share the host namespace
- * with chosen slugs. Never take one in use.
+ * A name for a nap on its own host without a chosen one. First the plain title ("q3-report"),
+ * then, if that is taken or reserved, the title with a random suffix. Generated names share the
+ * one namespace with chosen names and random ids. Never take one in use.
  */
 export const pickGeneratedSlug = Effect.fnUntraced(function* <E, R>(
   title: string | null | undefined,

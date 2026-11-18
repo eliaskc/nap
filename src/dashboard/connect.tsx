@@ -29,8 +29,8 @@ export const EXAMPLES = (napConfig.examples?.length ? napConfig.examples : DEFAU
 );
 
 const ASK: Record<Kind, string> = {
-  site: "Make me a site",
-  artifact: "Make me an artifact",
+  site: "Make me a nap",
+  artifact: "Make me a nap",
   app: "Make me an app",
 };
 
@@ -83,7 +83,7 @@ function balancedLines(text: string, font: string, letterSpacing: number, width:
 }
 
 /**
- * One example: "Make me a site" on its own line in the kind's colour, the rest below it. Text
+ * One example: "Make me a nap" on its own line in the kind's colour, the rest below it. Text
  * morphs from one example to the next (torph). Torph does not wrap, so pretext breaks the rest
  * into balanced lines at the current width.
  *

@@ -4,7 +4,7 @@ import { signedIn, slugify } from "~/lib/nap-server";
 import { rekeyNap } from "~/lib/rekey";
 import { isSameEmail } from "~/lib/site-access";
 import { deleteSiteFiles } from "~/lib/site-files";
-import { isReservedSlug } from "~/lib/uploads";
+import { isReservedSlug, pickArtifactId } from "~/lib/uploads";
 import { Database, sql } from "~/server/database";
 import { fail, json } from "~/server/http";
 import { inBackground } from "~/server/platform";
@@ -13,6 +13,12 @@ import { route } from "~/server/route";
 export const Route = createFileRoute("/api/sites/$slug")({
   server: {
     handlers: {
+      /**
+       * PATCH /api/sites/:slug — { title, slug?, randomName? }. Owner only. Renames a nap: its
+       * title, and its name (the path in <root>/<name>, or the host of a nap on its own host).
+       * randomName: true gives it a new random id instead of a chosen name. The old name stays
+       * as a redirect (nap_redirects), so old links keep working.
+       */
       PATCH: ({ params, request }) =>
         route(
           Effect.gen(function* () {
@@ -20,37 +26,43 @@ export const Route = createFileRoute("/api/sites/$slug")({
             const body = (yield* Effect.promise(() => request.json())) as {
               title?: string;
               slug?: string;
+              randomName?: boolean;
             };
             const currentSlug = slugify(params.slug);
-            const nextSlug = slugify(body.slug ?? currentSlug);
             const title = body.title?.trim().slice(0, 120) ?? "";
 
-            if (!currentSlug) return yield* fail(400, "Missing site slug");
-            if (!nextSlug) return yield* fail(400, "Missing new slug");
+            if (!currentSlug) return yield* fail(400, "Missing name");
             if (!title) return yield* fail(400, "Missing title");
 
             const db = yield* Database;
+            const isTaken = (slug: string) =>
+              db.first("SELECT 1 FROM sites WHERE slug = ?", slug).pipe(Effect.map(Boolean));
+            const nextSlug =
+              body.randomName === true
+                ? yield* pickArtifactId(isTaken)
+                : slugify(body.slug ?? currentSlug);
+            if (!nextSlug) return yield* fail(400, "Missing new name");
+
             const site = yield* db.first<{ createdByEmail: string; kind: string }>(
               "SELECT created_by_email AS createdByEmail, kind FROM sites WHERE slug = ?",
               currentSlug,
             );
 
-            if (!site) return yield* fail(404, "Site not found");
+            if (!site) return yield* fail(404, "Nap not found");
             if (!isSameEmail(site.createdByEmail, identity.email))
               return yield* fail(403, "Only the owner can rename it");
 
-            // An artifact's id is random, not a name. Move it to Sites to choose a URL.
-            if (nextSlug !== currentSlug && site.kind === "artifact")
-              return yield* fail(400, "An artifact's URL cannot be changed");
-
             if (nextSlug !== currentSlug && isReservedSlug(nextSlug))
-              return yield* fail(409, "That URL is reserved");
+              return yield* fail(409, "That name is reserved");
 
             if (nextSlug !== currentSlug) {
-              const taken = yield* db.first("SELECT slug FROM sites WHERE slug = ?", nextSlug);
-              if (taken) return yield* fail(409, "Slug is already taken");
+              if (yield* isTaken(nextSlug)) return yield* fail(409, "That name is already taken");
 
-              yield* rekeyNap(currentSlug, nextSlug, { email: identity.email, title });
+              yield* rekeyNap(currentSlug, nextSlug, {
+                email: identity.email,
+                title,
+                redirect: true,
+              });
             } else {
               const updated = yield* db.run(
                 `UPDATE sites
@@ -60,7 +72,7 @@ export const Route = createFileRoute("/api/sites/$slug")({
                 identity.email,
                 currentSlug,
               );
-              if (updated.changes === 0) return yield* fail(404, "Site not found");
+              if (updated.changes === 0) return yield* fail(404, "Nap not found");
             }
 
             return json({ ok: true, site: { slug: nextSlug, title } });
@@ -71,18 +83,18 @@ export const Route = createFileRoute("/api/sites/$slug")({
           Effect.gen(function* () {
             const identity = yield* signedIn(request);
             const slug = slugify(params.slug);
-            if (!slug) return yield* fail(400, "Missing site slug");
+            if (!slug) return yield* fail(400, "Missing name");
 
             const db = yield* Database;
             const site = yield* db.first<{ createdByEmail: string }>(
               "SELECT created_by_email AS createdByEmail FROM sites WHERE slug = ?",
               slug,
             );
-            if (!site) return yield* fail(404, "Site not found");
+            if (!site) return yield* fail(404, "Nap not found");
             if (!isSameEmail(site.createdByEmail, identity.email))
               return yield* fail(403, "Only the owner can delete it");
 
-            // One transaction. A source repo stays in Artifacts, like the version files in R2.
+            // One transaction. A source repo stays in Cloudflare Artifacts, like the version files in R2.
             const results = yield* db.batch([
               sql("DELETE FROM site_documents WHERE site_slug = ?", slug),
               sql("DELETE FROM comments WHERE site_slug = ?", slug),
@@ -91,9 +103,9 @@ export const Route = createFileRoute("/api/sites/$slug")({
               sql("DELETE FROM sites WHERE slug = ?", slug),
               sql("DELETE FROM nap_redirects WHERE site_slug = ?", slug),
             ]);
-            if (results[4].changes === 0) return yield* fail(404, "Site not found");
+            if (results[4].changes === 0) return yield* fail(404, "Nap not found");
             // Its files (nap.files) go with it; the version files stay, as they always have.
-            yield* inBackground(deleteSiteFiles(slug), "Deleting a site's files failed");
+            yield* inBackground(deleteSiteFiles(slug), "Deleting a nap's files failed");
 
             return json({ ok: true });
           }),

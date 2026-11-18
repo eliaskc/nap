@@ -14,6 +14,7 @@ import {
   contentTypeForPath,
   isReservedSlug,
   isSafePath,
+  napShape,
   pickArtifactId,
   pickGeneratedSlug,
   nextSortOrder,
@@ -21,6 +22,7 @@ import {
   randomTheme,
   readUpload,
   rejectLargeBody,
+  UNTITLED_NAP,
   type SiteKind,
 } from "~/lib/uploads";
 import { insertVersion } from "~/lib/versions";
@@ -31,8 +33,6 @@ import { objectHeaders, Storage } from "~/server/storage";
 export const DRAFT_TTL_HOURS = 24;
 const DRAFT_ID_PATTERN = /^[A-Za-z0-9_-]{24}$/;
 const MAX_REPLACES_CHAIN = 20;
-const UNTITLED_ARTIFACT = "Untitled artifact";
-const UNTITLED_SITE = "Untitled site";
 
 type DraftRow = {
   id: string;
@@ -100,9 +100,10 @@ const NOT_YOURS = "Only the person whose agent uploaded this draft can open it."
  * uploaded here is served until they claim it. The caller rate-limits the token.
  *
  * Inputs (query string or form fields):
- * - kind: "artifact" (default without slug) or "site" (default with slug)
- * - title: suggested name
- * - slug: suggested subdomain for a site
+ * - title: suggested title
+ * - name: suggested name, <root>/<name> (or <name>.<root> on its own host)
+ * - ownHost: "true" for a nap on its own host; the default is Nap's frame
+ * - kind, slug: the older fields (see napShape)
  * - replaces: claim id (or URL) of an earlier draft; publishing can update what it became
  */
 export const handleCreateDraft = Effect.fn("handleCreateDraft")(function* (
@@ -112,11 +113,25 @@ export const handleCreateDraft = Effect.fn("handleCreateDraft")(function* (
   yield* rejectLargeBody(request);
 
   const url = new URL(request.url);
-  const parsed = yield* readUpload(request, url, ["title", "slug", "kind", "replaces"]);
+  const parsed = yield* readUpload(request, url, [
+    "title",
+    "name",
+    "slug",
+    "kind",
+    "ownHost",
+    "replaces",
+  ]);
   const { files } = parsed;
   const title = parsed.fields.title.slice(0, 120);
-  const slug = slugify(parsed.fields.slug);
   const fields = parsed.fields;
+  const shape = napShape({
+    kind: fields.kind,
+    ownHost: fields.ownHost,
+    name: slugify(fields.name),
+    slug: slugify(fields.slug),
+  });
+  if ("error" in shape) return yield* fail(400, shape.error);
+  const slug = shape.slug;
 
   const { totalBytes } = yield* checkFiles(files);
 
@@ -128,14 +143,10 @@ export const handleCreateDraft = Effect.fn("handleCreateDraft")(function* (
     if (!replaced || !isUploader(replaced, agent)) {
       return yield* fail(404, "replaces: draft not found");
     }
-    // An update keeps the kind of what it updates.
+    // An update keeps the serving mode of what it updates.
     kind = replaced.kind;
-  } else if (fields.kind === "site" || fields.kind === "artifact") {
-    kind = fields.kind;
-  } else if (fields.kind) {
-    return yield* fail(400, 'kind must be "artifact" or "site"');
   } else {
-    kind = slug ? "site" : "artifact";
+    kind = shape.kind;
   }
 
   const storage = yield* Storage;
@@ -158,7 +169,7 @@ export const handleCreateDraft = Effect.fn("handleCreateDraft")(function* (
       id,
       kind,
       title,
-      kind === "site" ? slug : "",
+      slug,
       replacesDraftId,
       files.length,
       totalBytes,
@@ -172,6 +183,7 @@ export const handleCreateDraft = Effect.fn("handleCreateDraft")(function* (
       ok: true,
       id,
       kind,
+      ownHost: kind === "site",
       claimUrl: `${url.origin}/claim/${id}`,
       expiresAt,
       fileCount: files.length,
@@ -223,16 +235,16 @@ const resolveReplacedSite = Effect.fnUntraced(function* (draft: DraftRow) {
   return null;
 });
 
-/** The site this draft would update: from `replaces`, or for sites, an existing slug. */
+/** The nap this draft would update: from `replaces`, or the nap with its suggested name. */
 const findTargetSite = Effect.fnUntraced(function* (draft: DraftRow) {
   const replaced = yield* resolveReplacedSite(draft);
   if (replaced) return replaced;
-  if (draft.kind === "site" && draft.slug) return yield* getTargetSite(draft.slug);
+  if (draft.slug) return yield* getTargetSite(draft.slug);
   return null;
 });
 
 /**
- * Anyone who can view a nap may publish a new version of it. Not from a claim link when the site
+ * Anyone who can view a nap may publish a new version of it. Not from a claim link when the nap
  * has a source repo: its versions must come from a pushed commit.
  */
 const canUpdate = Effect.fnUntraced(function* (site: TargetSite, identity: Identity) {
@@ -286,11 +298,11 @@ export const describeDraft = Effect.fn("describeDraft")(function* (identity: Ide
           viewerEmails: viewers.map((row) => row.email),
         }),
       };
-    } else if (site && site.kind === "site" && draft.kind === "site") {
-      // The suggested subdomain is taken. Say nothing else about a site they may not see.
+    } else if (site && draft.slug) {
+      // The suggested name is taken. Say nothing else about a nap they may not see.
       suggestedSite = {
         slug: site.slug,
-        kind: "site",
+        kind: site.kind,
         title: "",
         currentVersion: "",
         canUpdate: false,
@@ -312,6 +324,7 @@ export const describeDraft = Effect.fn("describeDraft")(function* (identity: Ide
       draft: {
         id: draft.id,
         kind: draft.kind,
+        ownHost: draft.kind === "site",
         title: draft.title,
         slug: draft.slug,
         fileCount: draft.fileCount,
@@ -364,10 +377,10 @@ export const serveDraftFile = Effect.fn("serveDraftFile")(function* (
 
 /**
  * POST /api/drafts/:id — publishes a draft.
- * - replace: true publishes a new version of a site or artifact the person can view. Only the
- *   owner may change its name or who can view it at the same time.
- * - Otherwise it creates a new site (chosen slug, or one made from the title) or a new
- *   artifact (always a random id).
+ * - replace: true publishes a new version of a nap the person can view. Only the owner may
+ *   change its title or who can view it at the same time.
+ * - Otherwise it creates a new nap, at a chosen name (`slug`) or else a random id in the frame,
+ *   or a name made from the title on its own host.
  */
 export const claimDraft = Effect.fn("claimDraft")(function* (
   identity: Identity,
@@ -394,7 +407,7 @@ export const claimDraft = Effect.fn("claimDraft")(function* (
     ? body.expectedCurrentVersion
     : null;
 
-  // New sites and artifacts get the default access. For updates, no visibility means "keep it".
+  // New naps get the default access. For updates, no visibility means "keep it".
   let visibility: Visibility | null = isVisibility(body.visibility)
     ? body.visibility
     : replace
@@ -416,8 +429,8 @@ export const claimDraft = Effect.fn("claimDraft")(function* (
       return yield* fail(
         403,
         existing?.sourceRepo
-          ? "This site's source is in a Nap source repo. Ask the agent to push and publish instead."
-          : "You can only update sites you can view",
+          ? "This nap's source is in a Nap source repo. Ask the agent to push and publish instead."
+          : "You can only update naps you can view",
       );
     }
     if (!isSameEmail(existing.createdByEmail, identity.email)) {
@@ -430,22 +443,18 @@ export const claimDraft = Effect.fn("claimDraft")(function* (
     }
     slug = existing.slug;
     kind = existing.kind;
-  } else if (draft.kind === "artifact" || !requestedSlug) {
-    // Artifacts get a random id, and sites without a chosen URL one made from the title, below.
+  } else if (!requestedSlug) {
+    // No chosen name: a random id in the frame, or one made from the title on its own host, below.
     slug = null;
     kind = draft.kind;
   } else {
     if (isReservedSlug(requestedSlug)) return yield* fail(409, "That URL is reserved");
     if (yield* getTargetSite(requestedSlug)) return yield* fail(409, "That URL is already taken");
     slug = requestedSlug;
-    kind = "site";
+    kind = draft.kind;
   }
 
-  const title =
-    requestedTitle ||
-    existing?.title ||
-    draft.title ||
-    (kind === "artifact" ? UNTITLED_ARTIFACT : UNTITLED_SITE);
+  const title = requestedTitle || existing?.title || draft.title || UNTITLED_NAP;
   const isTaken = (candidate: string) => getTargetSite(candidate).pipe(Effect.map(Boolean));
   slug ??=
     kind === "artifact" ? yield* pickArtifactId(isTaken) : yield* pickGeneratedSlug(title, isTaken);
@@ -520,7 +529,7 @@ export const claimDraft = Effect.fn("claimDraft")(function* (
       const sortOrder = yield* nextSortOrder;
       yield* db.batch([
         sql(
-          // Private and unlisted. Artifacts get the Nap toolbar; sites can turn it on.
+          // Private and unlisted. Naps in the frame get the Nap bar; on their own host it is off.
           `INSERT INTO sites (slug, kind, title, created_by_email, updated_by_email, current_version,
                               sort_order, theme_json, visibility, listed, toolbar)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'private', 0, ?)`,
@@ -554,6 +563,7 @@ export const claimDraft = Effect.fn("claimDraft")(function* (
     site: {
       slug: target,
       kind,
+      ownHost: kind === "site",
       title,
       currentVersion: version,
       visibility: visibility ?? existing?.visibility,

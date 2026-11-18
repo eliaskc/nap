@@ -86,7 +86,7 @@ function Dashboard({ data }: { data: ReturnType<typeof useDashboardData> }) {
   );
 }
 
-/** Files dropped anywhere publish a new private artifact. Items take drops for new versions. */
+/** Files dropped anywhere publish a new private nap. Items take drops for new versions. */
 function DropZone({ children }: { children: React.ReactNode }) {
   const actions = useActions();
   const depth = React.useRef(0);
@@ -123,7 +123,7 @@ function DropZone({ children }: { children: React.ReactNode }) {
         <div className="text-center">
           <p className="text-2xl font-semibold tracking-tight">Drop to publish</p>
           <p className="text-sm text-muted-foreground">
-            It becomes a private artifact. Drop on one of yours to replace it.
+            It becomes a private nap. Drop on one of yours to replace it.
           </p>
         </div>
       </div>

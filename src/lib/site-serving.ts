@@ -51,8 +51,9 @@ export const findViewableNap = Effect.fn("findViewableNap")(function* (
 });
 
 /**
- * Serves a site at <slug>.<root> (or /s/<slug>/ locally). Artifacts are not served here: a visit
- * redirects to the artifact page, so old links keep working.
+ * Serves a nap on its own host, <name>.<root> (or /s/<name>/ locally): kind "site", an interim
+ * mode for the naps that need a real origin. Naps in the frame are not served here: a visit
+ * redirects to <root>/<name>, so links from before a move keep working.
  */
 export const serveUploadedSite = Effect.fn("serveUploadedSite")(function* (
   slug: string,
@@ -75,15 +76,15 @@ export const serveUploadedSite = Effect.fn("serveUploadedSite")(function* (
   const toArtifact = (key: string) =>
     redirect(`${options.artifactUrl(key)}${rest ? `/${rest}` : ""}${url.search}`);
   if (access.status === "missing") {
-    // A site that moved to Artifacts has a new id. The artifact page sends sites to their host.
+    // An old name of a renamed nap. <root>/<name> sends naps on their own host back to it.
     const moved = yield* findRedirect(slug);
     if (moved) return toArtifact(moved);
-    return yield* failText(404, "Site not found");
+    return yield* failText(404, "Nap not found");
   }
 
   if (access.nap.kind === "artifact") return toArtifact(slug);
   if (access.status === "denied") {
-    if (!wantsHtml(request)) return yield* failText(403, "You do not have access to this site");
+    if (!wantsHtml(request)) return yield* failText(403, "You do not have access to this nap");
     const { nap } = access;
     return yield* failText(
       403,
@@ -215,8 +216,9 @@ export type HostTarget =
   | { type: "unknown" };
 
 /**
- * <root>                       dashboard, and artifacts at /<slug>
- * <slug>.<root>                a site (one origin each); artifacts redirect to <root>/<slug>
+ * <root>                       dashboard, and naps in the frame at /<name>
+ * <name>.<root>                a nap on its own host (one origin each); naps in the frame
+ *                              redirect to <root>/<name>
  * artifacts.<root>             old artifact links (/<slug>), redirected
  */
 export function resolveHost(host: string, rootDomain: string): HostTarget {

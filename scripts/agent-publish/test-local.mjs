@@ -127,9 +127,10 @@ try {
   assert.equal(tokenless.status, 410, tokenless.text);
   assert.match(tokenless.json.error, /_nap\/api\/drafts/);
 
-  // A draft without a slug is an artifact: a random id, private, unlisted, with the toolbar.
+  // A draft is a nap in Nap's frame: a random id, private, unlisted, with the Nap bar.
   const first = await uploadDraft("?title=Report", "<h1>v1</h1>");
-  assert.equal(first.kind, "artifact", "no slug means artifact");
+  assert.equal(first.kind, "artifact", "in the frame by default");
+  assert.equal(first.ownHost, false);
   const preview = await call(`/api/drafts/${first.id}/preview/`, { headers: as(OWNER) });
   assert.match(preview.headers["content-security-policy"], /sandbox/, "preview is sandboxed");
   // Only the uploader sees or publishes a draft, so a claim link sent to someone else does nothing.
@@ -415,9 +416,12 @@ try {
   assert.equal(listing.json?.listed, true, listing.text);
   assert.equal(await listed("x@example.com"), undefined, "a listed artifact stays off lists");
 
-  // Move it to Sites. It moves to its own host, and the artifact URL redirects there. Now invited
-  // people and, once listed, everyone see it.
-  assert.equal((await settings({ kind: "site" })).json.kind, "site");
+  // Move it to its own host, with the older kind field. It keeps its name, and <root>/<name>
+  // redirects to the host. Now invited people and, once listed, everyone see it.
+  const toHost = await settings({ kind: "site" });
+  assert.equal(toHost.json.kind, "site");
+  assert.equal(toHost.json.ownHost, true);
+  assert.equal(toHost.json.slug, artifact.slug, "the name stays");
   const moved = await viewer(OWNER, `${artifactPath}/notes/`);
   assert.equal(moved.status, 302);
   assert.equal(moved.headers.location, `https://${contentHost}/notes/`);
@@ -457,7 +461,7 @@ try {
 
   assert.equal((await call("/", { host: `a.b.${ROOT}`, headers: signedIn(OWNER) })).status, 404);
 
-  // A slug makes a site. Reserved slugs are refused.
+  // A slug alone still means its own host, as it always did. Reserved names are refused.
   const reserved = await uploadDraft("?slug=artifacts", "<h1>x</h1>");
   assert.equal(reserved.kind, "site");
   assert.equal((await claim(reserved.id, { title: "x", slug: "artifacts" })).status, 409);
@@ -471,7 +475,49 @@ try {
   assert.equal(unnamed.status, 200, unnamed.text);
   assert.equal(unnamed.json.site.kind, "site");
   assert.match(unnamed.json.site.slug, /^[a-z0-9]{6}$/, "no title: a short random id");
-  assert.equal(unnamed.json.site.title, "Untitled site");
+  assert.equal(unnamed.json.site.title, "Untitled nap");
+  // A nap on its own host whose name Nap now uses for its own pages cannot move into the frame
+  // until it is renamed.
+  await nap.sql(
+    `INSERT INTO sites (slug, kind, title, created_by_email, updated_by_email, current_version,
+                        sort_order)
+     VALUES ('install', 'site', 'Old', ?1, ?1, 'none', 0)`,
+    OWNER,
+  );
+  const reservedMove = await call("/api/sites/install/settings", {
+    method: "PATCH",
+    ...jsonBody({ ownHost: false }),
+    headers: { "content-type": "application/json", ...as(OWNER) },
+  });
+  assert.equal(reservedMove.status, 409, reservedMove.text);
+  await nap.sql("DELETE FROM sites WHERE slug = 'install'");
+
+  // A draft with a chosen name: a nap in the frame at <root>/<name>.
+  const namedDraft = await uploadDraft("?name=quiz-board&title=Quiz", "<h1>quiz</h1>");
+  assert.equal(namedDraft.kind, "artifact");
+  assert.equal(namedDraft.ownHost, false);
+  const namedClaim = await claim(namedDraft.id, { slug: "quiz-board" });
+  assert.equal(namedClaim.status, 200, namedClaim.text);
+  assert.equal(namedClaim.json.site.slug, "quiz-board");
+  assert.equal(namedClaim.json.site.kind, "artifact");
+  const namedPage = await viewer(OWNER, "/quiz-board");
+  assert.equal(namedPage.status, 200, namedPage.text);
+  assert.match(namedPage.text, /data-src="\/_nap\/frame\//, "served in the frame");
+  assert.match(namedPage.text, /<header>/, "with the bar");
+  // A later draft with the same name suggests an update of it.
+  const namedAgain = await uploadDraft("?name=quiz-board", "<h1>quiz 2</h1>");
+  const namedAgainInfo = await call(`/api/drafts/${namedAgain.id}`, { headers: as(OWNER) });
+  assert.equal(namedAgainInfo.json.suggestedSite.slug, "quiz-board");
+  assert.equal(namedAgainInfo.json.suggestedSite.canUpdate, true);
+  assert.equal(
+    (await claim(namedAgain.id, { slug: "quiz-board" })).status,
+    409,
+    "a new nap cannot take the name",
+  );
+  // The older kind=artifact with a slug is a chosen name too.
+  const legacyNamed = await uploadDraft("?kind=artifact&slug=quiz-old", "<h1>q</h1>");
+  assert.equal(legacyNamed.kind, "artifact");
+  assert.equal((await claim(legacyNamed.id, { slug: "quiz-old" })).json.site.slug, "quiz-old");
   const site = await uploadDraft("?slug=team-map&title=Team%20map", "<h1>map</h1>");
   const siteClaim = await claim(site.id, {
     title: "Team map",
@@ -511,7 +557,7 @@ try {
       headers: { ...signedIn(email), ...extra },
     });
   assert.equal((await siteFetch("https://example.com/")).status, 403, "unlisted host");
-  assert.match((await siteFetch("https://example.com/")).json.error, /not in this site/);
+  assert.match((await siteFetch("https://example.com/")).json.error, /not in this nap/);
   assert.equal((await siteFetch("http://api.example.com/")).status, 403, "https only");
   assert.equal((await siteFetch(`https://x.${ROOT}/`)).status, 403, "never Nap's own hosts");
   assert.equal((await siteFetch("https://api.example.com/", OTHER)).status, 403, "viewers only");
@@ -522,41 +568,88 @@ try {
   );
   assert.equal((await siteFetch("not a url")).status, 400);
 
-  // A site that moves to Artifacts gets a random id. Its slug only redirects.
-  const toArtifact = await call("/api/sites/team-map/settings", {
-    method: "PATCH",
-    ...jsonBody({ kind: "artifact" }),
-    headers: { "content-type": "application/json", ...as(OWNER) },
-  });
-  assert.equal(toArtifact.status, 200, toArtifact.text);
-  const mapId = toArtifact.json.slug;
-  assert.match(mapId, /^[a-z0-9]{12}$/, "a random id");
-  assert.equal(toArtifact.json.kind, "artifact");
+  // A nap on its own host moves into Nap's frame and keeps its name: team-map.<root> becomes
+  // <root>/team-map, and the old host redirects there.
+  const mapSettings = (slug, value) =>
+    call(`/api/sites/${slug}/settings`, {
+      method: "PATCH",
+      ...jsonBody(value),
+      headers: { "content-type": "application/json", ...as(OWNER) },
+    });
+  const toFrame = await mapSettings("team-map", { ownHost: false });
+  assert.equal(toFrame.status, 200, toFrame.text);
+  assert.equal(toFrame.json.slug, "team-map", "the name stays");
+  assert.equal(toFrame.json.kind, "artifact");
+  assert.equal(toFrame.json.ownHost, false);
   const fromSiteHost = await call("/notes/?x=1", {
     host: `team-map.${ROOT}`,
     headers: signedIn(OWNER),
   });
   assert.equal(fromSiteHost.status, 302);
-  assert.equal(fromSiteHost.headers.location, `https://${ROOT}/${mapId}/notes/?x=1`);
-  const oldPath = await viewer(OWNER, "/team-map");
+  assert.equal(fromSiteHost.headers.location, `https://${ROOT}/team-map/notes/?x=1`);
+
+  // It had no bar on its own host, and has none in the frame: only the frame, filling the
+  // window, with no comments and no Share. The viewer script still renews the frame token.
+  const barless = await viewer(OWNER, "/team-map");
+  assert.equal(barless.status, 200, barless.text);
+  assert.match(barless.text, /<iframe data-nap-content data-src="\/_nap\/frame\//);
+  assert.match(barless.text, /sandbox="allow-scripts/, "still sandboxed");
+  assert.match(barless.text, /_nap\/viewer\.js/, "the viewer script runs");
+  assert.doesNotMatch(barless.text, /<header>/, "no bar");
+  assert.doesNotMatch(barless.text, /comments\.js/, "no comments");
+  assert.doesNotMatch(barless.text, /share\.js/, "no Share");
+  const barlessToken = barless.text.match(/data-src="\/_nap\/frame\/([A-Za-z0-9_-]+)\//)[1];
+  const barlessRenew = await call("/team-map/_nap/frame", {
+    host: ROOT,
+    method: "POST",
+    headers: { ...signedIn(OWNER), "content-type": "application/json" },
+    body: JSON.stringify({ token: barlessToken }),
+  });
+  assert.equal(barlessRenew.status, 200, barlessRenew.text);
+  assert.match((await call(`/_nap/frame/${barlessToken}/`, { host: ROOT })).text, /map/);
+  // The owner turns the bar on from the dashboard.
+  assert.equal((await mapSettings("team-map", { toolbar: true })).json.toolbar, true);
+  const withBar = await viewer(OWNER, "/team-map");
+  assert.match(withBar.text, /<header>/, "the bar is back");
+  assert.match(withBar.text, /comments\.js/);
+  assert.match(withBar.text, /share\.js/);
+  assert.equal((await mapSettings("team-map", { toolbar: false })).json.toolbar, false);
+
+  // Renaming a nap in the frame: a chosen name, and the old one redirects.
+  const rename = (slug, value) =>
+    call(`/api/sites/${slug}`, {
+      method: "PATCH",
+      ...jsonBody({ title: "Team map", ...value }),
+      headers: { "content-type": "application/json", ...as(OWNER) },
+    });
+  assert.equal((await rename("team-map", { slug: "connect" })).status, 409, "reserved");
+  assert.equal((await rename("team-map", { slug: "quiz-board" })).status, 409, "taken");
+  const renamed = await rename("team-map", { slug: "team-board" });
+  assert.equal(renamed.status, 200, renamed.text);
+  assert.equal(renamed.json.site.slug, "team-board");
+  const oldPath = await viewer(OWNER, "/team-map/notes/");
   assert.equal(oldPath.status, 302);
-  assert.equal(oldPath.headers.location, `/${mapId}`);
+  assert.equal(oldPath.headers.location, "/team-board/notes/");
+  assert.equal((await viewer(OWNER, "/team-board")).status, 200);
+  // Back to a random id. Every old name follows it.
+  const randomized = await rename("team-board", { randomName: true });
+  assert.equal(randomized.status, 200, randomized.text);
+  const mapId = randomized.json.site.slug;
+  assert.match(mapId, /^[a-z0-9]{12}$/, "a random id");
+  assert.equal((await viewer(OWNER, "/team-board")).headers.location, `/${mapId}`);
+  assert.equal((await viewer(OWNER, "/team-map")).headers.location, `/${mapId}`);
   const mapPage = await viewer(OWNER, `/${mapId}`);
   assert.equal(mapPage.status, 200, mapPage.text);
   const ownSlugs = (await call("/api/sites", { headers: as(OWNER) })).json.sites.map((s) => s.slug);
-  assert.ok(ownSlugs.includes(mapId) && !ownSlugs.includes("team-map"), "the slug is not shown");
-  const renameArtifact = await call(`/api/sites/${mapId}`, {
-    method: "PATCH",
-    ...jsonBody({ title: "Team map", slug: "team-map-2" }),
-    headers: { "content-type": "application/json", ...as(OWNER) },
-  });
-  assert.equal(renameArtifact.status, 400, "an artifact's id cannot be renamed");
-  // Back to Sites: it keeps its id as its host. The old slug still finds it.
-  await call(`/api/sites/${mapId}/settings`, {
-    method: "PATCH",
-    ...jsonBody({ kind: "site" }),
-    headers: { "content-type": "application/json", ...as(OWNER) },
-  });
+  assert.ok(ownSlugs.includes(mapId) && !ownSlugs.includes("team-map"), "old names are not shown");
+
+  // And back to its own host: it keeps its name, and <root>/<name> sends people there.
+  const backToHost = await mapSettings(mapId, { ownHost: true });
+  assert.equal(backToHost.json.slug, mapId);
+  assert.equal(backToHost.json.kind, "site");
+  const toOwnHost = await viewer(OWNER, `/${mapId}/notes/`);
+  assert.equal(toOwnHost.status, 302);
+  assert.equal(toOwnHost.headers.location, `https://${mapId}.${ROOT}/notes/`);
   const viaOldSlug = await viewer(OWNER, "/team-map");
   assert.equal(viaOldSlug.headers.location, `/${mapId}`);
   const viaOldLink = await viewer(OWNER, "/artifact/team-map");
@@ -570,7 +663,7 @@ try {
   );
 
   console.log(
-    "Agent publish HTTP checks passed: drafts, claims, replaces, sites, artifacts, and hosts.",
+    "Agent publish HTTP checks passed: drafts, claims, replaces, names, moves, the bar, and hosts.",
   );
 } finally {
   await nap?.stop();

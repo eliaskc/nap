@@ -27,7 +27,7 @@ export function noAccessPage(options: {
 }) {
   const owner = options.ownerName?.trim() || options.ownerEmail;
   const firstName = options.ownerName?.trim().split(/\s+/)[0] || options.ownerEmail;
-  const what = options.kind === "artifact" ? "artifact" : "site";
+  const what = "nap";
   const request = options.request;
 
   const lead =

@@ -65,7 +65,7 @@ const firstName = (request: AccessRequestInfo) =>
   request.requesterName?.trim().split(/\s+/)[0] || request.requesterEmail;
 
 function pendingBlocks(request: AccessRequestInfo) {
-  const what = request.kind === "artifact" ? "artifact" : "site";
+  const what = "nap";
   const who = request.requesterName
     ? `*${esc(request.requesterName)}* (${esc(request.requesterEmail)})`
     : `*${esc(request.requesterEmail)}*`;

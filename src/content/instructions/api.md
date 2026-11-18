@@ -11,34 +11,35 @@ Everything the publish script does, with curl. All paths are under `https://{{ro
    `mkdir -p ~/.config/nap/{{rootDomain}} && (umask 077 && printf '%s' '<token>' > ~/.config/nap/{{rootDomain}}/token)`, and
    `{"url":"https://{{rootDomain}}","org":"{{orgName}}","email":"<email>"}` in `~/.config/nap/{{rootDomain}}/nap.json`.
 
-Never print the token or put it in a project. In a sandbox that cannot write there, ask the user to set NAP_TOKEN. The token publishes as the user: it creates pages, chooses access for new ones, publishes versions of pages the user can view, and comments. It cannot change access, rename, or delete. A 401 with code `invalid_token` means it was disconnected: delete it and sign in again. Code `inactive` means the user must open https://{{rootDomain}} first.
+Never print the token or put it in a project. In a sandbox that cannot write there, ask the user to set NAP_TOKEN. The token publishes as the user: it creates naps, chooses access for new ones, publishes versions of naps the user can view, and comments. It cannot change access or settings, rename, or delete. A 401 with code `invalid_token` means it was disconnected: delete it and sign in again. Code `inactive` means the user must open https://{{rootDomain}} first.
 
 ## Publish
 
 - One HTML file: `curl -sS https://{{rootDomain}}/_nap/api/naps -H "authorization: Bearer $TOKEN" -H 'content-type: text/html' --data-binary @bundle.html --url-query 'title=Q3 report'`
-- A site: add `--url-query slug=team-map`, or `kind=site` for a slug made from the title.
-- Several files: multipart, each file with its path: `-F 'title=Team map' -F kind=site -F 'files=@dist/index.html;filename=index.html' -F 'files=@dist/assets/app.js;filename=assets/app.js'`
-- Access for a new page: `access=private`, `access=everyone`, or `access=selected` with `emails=a@x.com,b@x.com`. Without it the page gets the default ({{defaultAccess}}).
-- New version: send the same to `/_nap/api/naps/<id>/versions` with `message=What changed`. URL, access, and settings stay. On someone else's page, send `expectedVersion=<currentVersion>` from `GET /_nap/api/naps/<id>`. Without it Nap answers `expected_version_required`; a 409 means someone published in between, so read the page again and merge.
-- The response has id, url, version, access, and a message that says who can see it. Tell the user who can see it.
+- A name: add `--url-query name=team-map` for `{{rootDomain}}/team-map`. Without one, the nap gets a random id.
+- Its own host, only for the needs in the `sites` topic: add `ownHost=true`, for `<name>.{{rootDomain}}`. (The older fields still work: `kind=site` is `ownHost=true`, `kind=artifact` the frame, and `slug` alone a name on its own host.)
+- Several files: multipart, each file with its path: `-F 'title=Team map' -F name=team-map -F 'files=@dist/index.html;filename=index.html' -F 'files=@dist/assets/app.js;filename=assets/app.js'`
+- Access for a new nap: `access=private`, `access=everyone`, or `access=selected` with `emails=a@x.com,b@x.com`. Without it the nap gets the default ({{defaultAccess}}).
+- New version: send the same to `/_nap/api/naps/<id>/versions` with `message=What changed`. URL, access, and settings stay. On someone else's nap, send `expectedVersion=<currentVersion>` from `GET /_nap/api/naps/<id>`. Without it Nap answers `expected_version_required`; a 409 means someone published in between, so read the nap again and merge.
+- The response has id, url, ownHost, version, access, and a message that says who can see it. Tell the user who can see it.
 - Uploads through Nap take up to 25 MB. Larger, or more than a few files: direct uploads, below.
 
 ## Direct uploads (up to 10 GB and 100,000 files)
 
-1. `POST /_nap/api/uploads` with JSON `{"files":[{"path":"index.html","size":1234}],"title":"..."}` listing every file (exact sizes in bytes), plus kind, slug, access, and emails for a new page, or `"id"` and `"message"` for a new version. Each file can be up to 4 GB. The response has uploadId, commitUrl, and a url and headers for each file of the first page (up to 1,000 files or 256 MB).
+1. `POST /_nap/api/uploads` with JSON `{"files":[{"path":"index.html","size":1234}],"title":"..."}` listing every file (exact sizes in bytes), plus name, ownHost, access, and emails for a new nap, or `"id"` and `"message"` for a new version. Each file can be up to 4 GB. The response has uploadId, commitUrl, and a url and headers for each file of the first page (up to 1,000 files or 256 MB).
 2. PUT each file to its url with exactly those headers: `curl -sS --fail -X PUT -T img/a.png -H 'content-type: image/png' '<url>'`. The URLs last an hour. Do not send the token to them.
 3. While the response has a `nextPage` URL, GET it with the token when you have started the last file of the page, not before (URLs last an hour): it has the next page of `files` and its own `nextPage` (null after the last page).
 4. POST to commitUrl with the token. If it says files are missing, PUT them again and POST again.
 
-## Read and change pages
+## Read and change naps
 
-- `GET /_nap/api/naps`: the user's pages and those shared with them by name: id, title, url, kind, owner, role. Pages shared with everyone are not listed but work by id. The id is in the URL: `{{rootDomain}}/<id>` or `<id>.{{rootDomain}}`. Old links of the form `{{rootDomain}}/artifact/<id>` still work.
-- `GET /_nap/api/naps/<id>`: one page, with currentVersion and source.
+- `GET /_nap/api/naps`: the user's naps and those shared with them by name: id, title, url, ownHost, owner, role. Naps shared with everyone are not listed but work by id. The id is the name in the URL: `{{rootDomain}}/<id>`, or `<id>.{{rootDomain}}` on its own host. Old links of the form `{{rootDomain}}/artifact/<id>` still work.
+- `GET /_nap/api/naps/<id>`: one nap, with currentVersion and source.
 - `GET /_nap/api/naps/<id>/files` lists the live files, and `/files/<path>` returns one. Add `?version=<version>` for an older version.
 - `GET /_nap/api/naps/<id>/versions`: history, newest first.
-- `POST /_nap/api/naps/<id>/restore` with `{"version":"..."}`: only when the user asks. On someone else's page, also send `"expectedCurrentVersion"`.
+- `POST /_nap/api/naps/<id>/restore` with `{"version":"..."}`: only when the user asks. On someone else's nap, also send `"expectedCurrentVersion"`.
 
-## Comments (artifacts)
+## Comments (naps in the frame)
 
 - `GET /_nap/api/naps/<id>/comments?status=open`: each with its quote (selected text), body, author, and replies. Read them when the user asks you to address feedback.
 - `POST .../comments` with `{"body":"...","quote":"exact text","path":"/"}`; leave out quote for the whole page. `POST .../comments/<comment id>/replies` with `{"body":"..."}`.

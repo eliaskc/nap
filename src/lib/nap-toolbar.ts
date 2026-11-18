@@ -10,9 +10,12 @@ import { SHARE_WIDGET_VERSION } from "~/lib/share-widget";
  * `Sec-Fetch-Dest`: `document` gets this page, `iframe` (and everything else) gets the files. One
  * host means one Access cookie, and the toolbar script can read the frame's address.
  *
- * Artifacts (`artifact` set): this page is <root>/<slug>. The iframe is sandboxed, with
- * an opaque origin, and loads the files from <root>/_nap/frame/<token>/. The frame tells this page
- * its address with postMessage (see artifact-viewer.ts).
+ * Naps in Nap's frame (`artifact` set): this page is <root>/<name>. The iframe is sandboxed,
+ * with an opaque origin, and loads the files from <root>/_nap/frame/<token>/. The frame tells this
+ * page its address with postMessage (see artifact-viewer.ts). With the bar off (`artifact.bar`
+ * false), the page is only the frame, filling the window: no bar, no comments, no Share. The
+ * viewer script still runs, so the address bar follows the frame and the frame token renews. The
+ * owner changes settings in the dashboard.
  */
 export function toolbarPage(options: {
   title: string;
@@ -22,22 +25,36 @@ export function toolbarPage(options: {
   frameSrc: string;
   accessPath: string;
   dashboardUrl: string;
-  /** Artifact viewer: the sandbox flags, the page URL that frame paths map to, and comments. */
-  artifact?: { sandbox: string; base: string; commentsPath: string; versionsPath: string };
+  /**
+   * The viewer of a nap in Nap's frame: the sandbox flags, the page URL that frame paths map to,
+   * comments, and whether the bar shows.
+   */
+  artifact?: {
+    sandbox: string;
+    base: string;
+    commentsPath: string;
+    versionsPath: string;
+    bar: boolean;
+  };
 }) {
   const { title, owner, artifact } = options;
+  const bar = !artifact || artifact.bar;
   const frame = artifact
     ? `<iframe data-nap-content data-src="${attr(options.frameSrc)}" data-base="${attr(artifact.base)}"
       sandbox="${attr(artifact.sandbox)}" title="${attr(title)}"
       allow="clipboard-read *; clipboard-write *; fullscreen *; autoplay *; camera *; microphone *; geolocation *; web-share *"
       allowfullscreen></iframe>
-    <script src="/_nap/viewer.js?v=${VIEWER_SCRIPT_VERSION}" defer></script>
+    <script src="/_nap/viewer.js?v=${VIEWER_SCRIPT_VERSION}" defer></script>${
+      bar
+        ? `
     <script type="module" src="/_nap/comments.js" data-nap-comments="${attr(artifact.commentsPath)}" data-nap-versions="${attr(artifact.versionsPath)}"></script>`
+        : ""
+    }`
     : `<iframe data-nap-content src="${attr(options.frameSrc)}" title="${attr(title)}"
       allow="clipboard-read; clipboard-write; fullscreen; autoplay; camera; microphone; geolocation; web-share"
       allowfullscreen></iframe>
     <script src="/_nap/toolbar.js?v=${TOOLBAR_SCRIPT_VERSION}" defer></script>`;
-  const body = `
+  const header = `
     <header>
       <a class="home" href="${attr(options.dashboardUrl)}" title="Nap" aria-label="Go to Nap">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8"/><path d="M3 10a2 2 0 0 1 .709-1.528l7-5.999a2 2 0 0 1 2.582 0l7 5.999A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
@@ -46,10 +63,11 @@ export function toolbarPage(options: {
         ${text(title)}<span class="owner"> · ${text(owner)}</span>
       </h1>
       <div class="actions"><span id="nap-history-slot"></span><span id="nap-comments-slot"></span><span id="nap-share-slot"></span></div>
-    </header>
+    </header>`;
+  const body = `${bar ? header : ""}
     <main>${frame}</main>
     ${
-      options.isOwner
+      bar && options.isOwner
         ? `<script src="/_nap/share.js?v=${SHARE_WIDGET_VERSION}" data-access="${attr(options.accessPath)}" data-mount="#nap-share-slot" defer></script>`
         : ""
     }`;
@@ -61,16 +79,16 @@ export function toolbarPage(options: {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${text(title)}</title>${
-    // Artifacts get Nap's icon. Sites get their /favicon.ico (Nap's when they have none), and
-    // the toolbar script copies the icon links of the framed page.
-    // The viewer swaps the icon links for the artifact's own, if it names one.
-    artifact
-      ? `
+      // Artifacts get Nap's icon. Sites get their /favicon.ico (Nap's when they have none), and
+      // the toolbar script copies the icon links of the framed page.
+      // The viewer swaps the icon links for the artifact's own, if it names one.
+      artifact
+        ? `
 <link rel="icon" type="image/svg+xml" href="${attr(iconUrl("favicon.svg"))}" data-nap-icon>
 <link rel="icon" type="image/png" sizes="32x32" href="${attr(iconUrl("favicon-32x32.png"))}" data-nap-icon>
 <link rel="apple-touch-icon" href="${attr(iconUrl("apple-touch-icon.png"))}">`
-      : ""
-  }
+        : ""
+    }
 <style>
   :root { color-scheme: light dark; --nap-bg: #fff; --nap-fg: #18181b; --nap-muted: #71717a; --nap-line: #e4e4e7; --nap-hover: #f4f4f5; }
   @media (prefers-color-scheme: dark) { :root { --nap-bg: #18181b; --nap-fg: #fafafa; --nap-muted: #a1a1aa; --nap-line: #3f3f46; --nap-hover: #27272a; } }

@@ -27,10 +27,12 @@ This page covers the common case. Read a topic below when you need it.
 - The one exception is a multiplayer channel's server, which Nap runs itself (`channels` topic).
 <!-- /if -->
 
-## Artifact or site
+## Naps
 
-- **Artifact** (the default): one page to look at or use, such as a report, a prototype, or a one-off tool. It lives at `https://{{rootDomain}}/<random id>` below a small Nap bar with a Share button.
-- **Site**: something people come back to, at `https://<slug>.{{rootDomain}}`. Make a site when the user asks for one, or when the page needs client-side routing, root-absolute URLs, or storage that lasts across reloads. Read the `sites` topic first.
+Everything you publish is a nap: "make me a nap", "I sent you a nap".
+
+- A nap lives at `https://{{rootDomain}}/<random id>`, or at a name you choose with `--name`: `https://{{rootDomain}}/team-map`. It runs in a sandboxed frame below a small Nap bar with the title and a Share button. Use this for everything: reports, prototypes, tools, dashboards, games, things people come back to.
+- Only a nap that needs one of these gets its own host, `https://<name>.{{rootDomain}}` (`--own-host`): localStorage or IndexedDB that lasts across reloads, cookies, service workers, client-side routing with real paths, root-absolute URLs that scripts build, or pointer lock. Read the `sites` topic first.
 
 ## Sign in and publish
 
@@ -38,29 +40,29 @@ Use the publish script. It needs Node 20 or newer; without Node, read the `api` 
 
     curl -fsSL https://{{rootDomain}}/_nap/api/publish.mjs -o /tmp/nap-publish.mjs
     node /tmp/nap-publish.mjs login                          # once per machine
-    node /tmp/nap-publish.mjs bundle.html --title "Q3 report"  # artifact: one HTML file or a folder with index.html
-    node /tmp/nap-publish.mjs dist --title "Team map" --slug team-map   # site
+    node /tmp/nap-publish.mjs bundle.html --title "Q3 report"  # one HTML file, or a folder with index.html
+    node /tmp/nap-publish.mjs dist --title "Team map" --name team-map   # at {{rootDomain}}/team-map
     node /tmp/nap-publish.mjs dist --update <id> --message "Add the weekly chart"
 
 - `login` prints a link and a code. Give both to the user and ask them to approve. It waits up to 10 minutes, so use a long timeout. It saves the token in `~/.config/nap/{{rootDomain}}/token`. Never print the token or put it in a project. Exit code 3 means you need to sign in, and 4 means the user must open https://{{rootDomain}} first.
-- A site with a build step (React, Vite, TypeScript, a bundler) keeps its source in a repo on Nap. Publish it with `--source <repo dir>`, and read the `source` topic first.
-- Keep the id from the output. New versions go to the same URL. Nap keeps every version, and nothing changes in place.
-- Before you change a page you did not make in this session, read its live files first (`api` topic). On a page someone else owns, add `--expected-version <its current version>` so you do not overwrite their changes.
+- A nap with a build step (React, Vite, TypeScript, a bundler) keeps its source in a repo on Nap. Publish it with `--source <repo dir>`, and read the `source` topic first.
+- Keep the id from the output: it is the name in the URL. New versions go to the same URL. Nap keeps every version, and nothing changes in place.
+- Before you change a nap you did not make in this session, read its live files first (`api` topic). On a nap someone else owns, add `--expected-version <its current version>` so you do not overwrite their changes.
 
 ## Who can see it
 
 <!-- if private -->
 
-New pages are private: only the owner sees them. Add `--access everyone` (everyone at {{orgName}}) or `--access selected --emails a@x.com,b@x.com` when the user wants others to see it. If they want to send the link to someone, they must share it first.
+New naps are private: only the owner sees them. Add `--access everyone` (everyone at {{orgName}}) or `--access selected --emails a@x.com,b@x.com` when the user wants others to see it. If they want to send the link to someone, they must share it first.
 
 <!-- /if -->
 <!-- if everyone -->
 
-New pages are shared with everyone at {{orgName}}. Use `--access selected --emails a@x.com,b@x.com`, or `--access private` for only the owner, when the user wants that.
+New naps are shared with everyone at {{orgName}}. Use `--access selected --emails a@x.com,b@x.com`, or `--access private` for only the owner, when the user wants that.
 
 <!-- /if -->
 
-Access only applies when you create a page. After that, only the owner changes it, with the Share button.
+Access only applies when you create a nap. After that, only the owner changes it, with the Share button or in Nap.
 
 **Every time you hand over a link, say who can see it**, from the "Who can see it" line of the output. If only the owner can see it, tell the user to share it with the Share button before they send the link.
 
@@ -68,8 +70,8 @@ Access only applies when you create a page. After that, only the owner changes i
 
 Read one with `curl -fsSL https://{{rootDomain}}/_nap/api/instructions/<topic>`.
 
-- `sites`: sites in detail, how artifacts run in their frame, and the Share button.
-- `source`: source repos for sites with a build step, and changing a site that has one.
+- `sites`: how a nap runs in its frame, names, the Nap bar and Share button, and naps on their own host.
+- `source`: source repos for naps with a build step, and changing a nap that has one.
 - `data`: collections that save JSON documents, with live updates (`nap.db`), and files such as photos (`nap.files`).
 - `channels`: multiplayer, presence, and messages between the people on a page (`nap.channel`).
 - `voice`: a live audio call between the people on a page (`nap.voice`).

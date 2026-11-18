@@ -1,22 +1,22 @@
 # Source repos on Nap
 
-A site can keep its source in a Git repo on Nap, one repo per site. The next agent, or a teammate's agent, changes the site there, with history. No GitHub account is needed: Nap gives Git tokens that last 15 minutes. You commit and push with git or jj, build on your machine, and publish the build with the commit you built. In the commands, `nap-publish.mjs` is `/tmp/nap-publish.mjs` (see the main instructions).
+A nap can keep its source in a Git repo on Nap, one repo per nap. The next agent, or a teammate's agent, changes the nap there, with history. No GitHub account is needed: Nap gives Git tokens that last 15 minutes. You commit and push with git or jj, build on your machine, and publish the build with the commit you built. In the commands, `nap-publish.mjs` is `/tmp/nap-publish.mjs` (see the main instructions).
 
 ## When
 
-- Give a new site a repo when its build is more than copying files (React, Vite, a framework, a bundler, TypeScript), or when it will live long or several people will work on it.
-- Plain HTML/CSS/JS never needs one: the published files are the source. Artifacts do not have repos.
+- Give a new nap a repo when its build is more than copying files (React, Vite, a framework, a bundler, TypeScript), or when it will live long or several people will work on it. In the frame or on its own host, it works the same.
+- Plain HTML/CSS/JS never needs one: the published files are the source.
 
 ## Publish with a repo
 
-- New site: keep the source in a Git repo of its own, commit, build, then
-  `node nap-publish.mjs dist --title "Team map" --slug team-map --source .`
+- New nap: keep the source in a Git repo of its own, commit, build, then
+  `node nap-publish.mjs dist --title "Team map" --name team-map --source .`
   It creates the repo, adds the remote "nap", pushes HEAD to main, and publishes the build with that commit. The working tree must be clean, with build output in .gitignore.
 - Next change: commit, build, `node nap-publish.mjs dist --update <id> --source . --message "What changed"`. It pushes HEAD to main (never forced) and publishes.
-- A site you own that has no repo: `--update <id> --source .` creates one. Only the owner can.
-- Nap only takes builds of the head of main, and that head must contain the live version's commit. Dashboard uploads and claim links are off for sites with a repo.
+- A nap you own that has no repo: `--update <id> --source .` creates one. Only the owner can.
+- Nap only takes builds of the head of main, and that head must contain the live version's commit. Dashboard uploads and claim links are off for naps with a repo.
 
-## Change a site that has a repo
+## Change a nap that has a repo
 
 `GET /_nap/api/naps/<id>` has `"source": {"branch":"main"}` when there is a repo. Then never edit or upload its built files. Instead:
 
@@ -35,7 +35,7 @@ In a clone that `clone` made, or that publishing with `--source` pushed from, us
 ## Rules
 
 - Keep the repo self-contained: a lockfile, the build command in package.json, a .gitignore for node_modules and build output, and a short README that says how to build.
-- Never commit secrets or .env files. Everyone who can view the site can read and push to the repo.
+- Never commit secrets or .env files. Everyone who can view the nap can read and push to the repo.
 - Restoring an old version in Nap does not change the repo. To undo for good, revert in the repo and publish.
 - A source folder inside a bigger repo: split it out (`git subtree split --prefix=<folder> -b <branch>`), create the repo with `node nap-publish.mjs source <id> --create`, run `setup <id>` in the repo, push the branch to main, and publish with `--source-commit`.
 
@@ -43,4 +43,4 @@ In a clone that `clone` made, or that publishing with `--source` pushed from, us
 
 - `POST /_nap/api/naps/<id>/source/token` with `{"access":"write"}` (or "read") returns `source.remote` and `source.token`. Send the token as a header, never in the URL or a file:
   `git -c http.extraHeader="Authorization: Bearer <token>" -c credential.helper= clone <remote>`
-- A new site gets its repo with its first direct upload: add `"createSource": true` and `"sourceCommit"` to `POST /_nap/api/uploads`. The response has `source.remote` and `source.token`; push the commit to main, PUT the files, and POST to commitUrl. Send `sourceCommit` as a field with every publish.
+- A new nap gets its repo with its first direct upload: add `"createSource": true` and `"sourceCommit"` to `POST /_nap/api/uploads`. The response has `source.remote` and `source.token`; push the commit to main, PUT the files, and POST to commitUrl. Send `sourceCommit` as a field with every publish.

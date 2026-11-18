@@ -1,24 +1,25 @@
-# Sites and artifacts on Nap
+# Naps: the frame, names, and their own host
 
-One rule: a slug gives a page its own host, and that makes it a site. Without a slug it is an artifact.
+Every nap has a name: a random id, or one chosen with `--name` (lowercase letters, numbers, and hyphens, up to 32 characters; Nap's own paths such as `api` or `connect` are taken). The owner can rename it later; the old URL redirects. By default a nap runs in Nap's frame at `https://{{rootDomain}}/<name>`. A few run on their own host instead.
 
-## Artifacts
+## In the frame (the default)
 
-- URL `https://{{rootDomain}}/<id>`, with a random id. The title is the name people see, so make it clear.
-- It shows below a small Nap bar with the title, the owner, and a Share button for the owner. Do not add your own Share button. The page loads in a frame below the bar, so 100vh layouts and fixed elements work.
+- URL `https://{{rootDomain}}/<name>`. The title is what people see, so make it clear.
+- It shows below a small Nap bar with the title, the owner, and a Share button for the owner. Do not add your own Share button. The owner can turn the bar off in Nap; then the nap fills the window. Either way it loads in a frame, so 100vh layouts and fixed elements work.
 - The frame is a sandbox with an opaque origin (`location.origin` is "null"):
   - Use relative paths: `assets/app.js`, `fetch("data.json")`. Nap fixes root paths in HTML attributes (`src="/app.js"`), but not URLs that scripts build. For Vite, set `base: "./"`.
   - localStorage and sessionStorage are cleared on reload. Use collections (`data` topic) for anything that must last.
-  - Cookies, service workers, and IndexedDB do not work.
-  - Scripts, modules, fetch of the artifact's own files, `nap.fetch`, forms, popups, downloads, clipboard, and fullscreen all work.
+  - Cookies, service workers, IndexedDB, and pointer lock do not work. Client-side routing works with hash URLs (`#/games/mini`), not with real paths.
+  - Scripts, modules, fetch of the nap's own files, `nap.fetch`, forms, popups, downloads, clipboard, and fullscreen all work.
+- People comment on it from the Nap bar (`api` topic).
 
-## Sites
+## On its own host
 
-- URL `https://<slug>.{{rootDomain}}`. Slugs are lowercase letters, numbers, and hyphens, up to 32 characters. `--site` without `--slug` makes one from the title; the owner can rename it later.
-- Use a site for client-side routing, root-absolute URLs, service workers, storage that lasts, or anything people come back to.
+- URL `https://<name>.{{rootDomain}}`: a real origin. Publish with `--own-host`, with or without `--name`; without one, Nap makes one from the title.
+- Use it only when the nap needs what the frame cannot do: localStorage or IndexedDB that lasts, cookies, service workers, client-side routing with real paths, root-absolute URLs that scripts build, or pointer lock. This is for now: later every nap will run in a frame with its own origin.
 - Client-side routing (React Router, TanStack Router): put `{ "spa": true }` in `nap.json` at the root of the upload. Then a page path without a file, such as `/games/mini`, gets the root `index.html` and your router shows the page; missing files with an extension (`/assets/x.js`) stay 404. Use root-absolute asset paths (Vite's default `base: "/"`), so they also load on deep paths. Navigating inside the app keeps the page, so channels, voice calls, and live data stay connected.
-- Add the Share button before `</body>`: `<script src="/_nap/share.js" defer></script>`. Only the owner sees it. `data-position="bottom-left"`, `"top-right"`, or `"top-left"` moves it (default bottom-right). Inside a frame it shows nothing, so it is safe to keep.
-- A site with a build step keeps its source in a repo on Nap (`source` topic).
+- It has no Nap bar unless the owner turns it on. Add the Share button before `</body>`: `<script src="/_nap/share.js" defer></script>`. Only the owner sees it. `data-position="bottom-left"`, `"top-right"`, or `"top-left"` moves it (default bottom-right). In the frame it shows nothing, so it is safe to keep.
+- No comments.
 
 ## People
 
@@ -43,8 +44,9 @@ Everyone on Nap has a name they chose. Show people by that name instead of inven
 
 ## Both
 
-- Anyone who can view a page can publish new versions and restore old ones. Only the owner changes who can view it, renames, moves, transfers, or deletes it. The owner can move an artifact to Sites or back; the old URL redirects.
+- Anyone who can view a nap can publish new versions and restore old ones. Only the owner changes who can view it, renames it, moves it between the frame and its own host, turns the bar on or off, transfers, or deletes it. A move keeps the name, and the old URL redirects.
+- A nap with a build step keeps its source in a repo on Nap (`source` topic).
 - Links that leave Nap should open in a new tab (`target="_blank"`); many sites refuse to load in a frame.
 - If you bundle to one HTML file, add the `/_nap/` script tags after bundling. Bundlers fail on `/_nap/client.js` and `/_nap/share.js`, because those files only exist on Nap.
 - In TypeScript, use Nap's own types for `window.nap` instead of declaring them: `curl -fsSL https://{{rootDomain}}/_nap/api/client.d.ts -o src/nap.d.ts`.
-- A page that needs its own backend: publish only the static frontend, host the backend elsewhere, and point the frontend at its public URL.
+- A nap that needs its own backend: publish only the static frontend, host the backend elsewhere, and point the frontend at its public URL.

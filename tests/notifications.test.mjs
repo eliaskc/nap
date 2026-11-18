@@ -581,7 +581,7 @@ test("an image file of the page goes to every device as a presigned URL", async 
       try {
         await failsWith(
           runNap(env, sendNotification(SITE("quiz"), ME, { title: "Hi", image: "t".repeat(24) })),
-          /image file of this site/,
+          /image file of this nap/,
         );
         await failsWith(
           runNap(
@@ -591,7 +591,7 @@ test("an image file of the page goes to every device as a presigned URL", async 
               image: id,
             }),
           ),
-          /file of a site/,
+          /file of a nap/,
         );
         assert.equal(pushes.sent.length, 0);
         await runNap(env, sendNotification(SITE("quiz"), ME, { title: "Quiz night", image: id }));
