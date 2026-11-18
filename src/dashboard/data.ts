@@ -24,6 +24,8 @@ export type Site = {
   updatedAt: string;
   /** How many people other than the owner have opened it. */
   visitorCount: number;
+  /** Visits by people other than the owner; what Most popular ranks by. */
+  viewCount: number;
   authorDisplayName: string | null;
   authorUsername: string | null;
   visibility: "everyone" | "private" | "selected";
@@ -67,6 +69,8 @@ export type Item = {
   mine: boolean;
   /** People other than the owner who have opened it. */
   visitors: number;
+  /** Visits by people other than the owner; what Most popular ranks by. */
+  views: number;
   updatedAt: string;
   visitedAt: string | null;
   site?: Site;
@@ -146,6 +150,7 @@ export function useDashboardData() {
         ownerName: site.authorDisplayName ?? site.createdByEmail,
         mine: myEmail !== null && site.createdByEmail.toLowerCase() === myEmail,
         visitors: site.visitorCount,
+        views: site.viewCount,
         updatedAt: site.updatedAt,
         visitedAt: site.visitedAt,
         site,
@@ -163,6 +168,7 @@ export function useDashboardData() {
         ownerName: app.createdBy.split("@")[0] ?? app.createdBy,
         mine: myEmail !== null && app.createdBy.toLowerCase() === myEmail,
         visitors: 0,
+        views: 0,
         updatedAt: app.updatedAt,
         visitedAt: null,
         app,
@@ -254,7 +260,7 @@ export function useItemView(items: Array<Item>) {
     );
     const byUpdated = (a: Item, b: Item) => b.updatedAt.localeCompare(a.updatedAt);
     const compare: Record<Sort, (a: Item, b: Item) => number> = {
-      popular: (a, b) => b.visitors - a.visitors || byUpdated(a, b),
+      popular: (a, b) => b.views - a.views || byUpdated(a, b),
       updated: byUpdated,
       visited: (a, b) => (b.visitedAt ?? "").localeCompare(a.visitedAt ?? "") || byUpdated(a, b),
       name: (a, b) => a.title.localeCompare(b.title),

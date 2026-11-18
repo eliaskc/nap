@@ -24,6 +24,11 @@ export type SiteRecord = {
   updatedAt: string;
   /** How many people other than the owner have opened it. */
   visitorCount: number;
+  /**
+   * Visits by people other than the owner (opens within 30 minutes count once, a dashboard once
+   * per person). Most popular on the dashboard ranks by this.
+   */
+  viewCount: number;
   authorDisplayName: string | null;
   authorUsername: string | null;
   visibility: "everyone" | "private" | "selected";
@@ -102,6 +107,7 @@ export const listSites = Effect.fn("listSites")(function* (identity: Identity) {
     createdAt: string;
     updatedAt: string;
     visitorCount: number;
+    viewCount: number;
     authorDisplayName: string | null;
     authorUsername: string | null;
     visibility: "everyone" | "private" | "selected";
@@ -133,6 +139,9 @@ export const listSites = Effect.fn("listSites")(function* (identity: Identity) {
         (SELECT count(*) FROM site_visits
          WHERE site_visits.site_slug = sites.slug
            AND site_visits.email <> lower(sites.created_by_email)) AS visitorCount,
+        (SELECT coalesce(sum(visit_count), 0) FROM site_visits
+         WHERE site_visits.site_slug = sites.slug
+           AND site_visits.email <> lower(sites.created_by_email)) AS viewCount,
         profiles.display_name AS authorDisplayName,
         profiles.username AS authorUsername,
         sites.visibility,
@@ -168,6 +177,7 @@ export const listSites = Effect.fn("listSites")(function* (identity: Identity) {
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
       visitorCount: row.visitorCount,
+      viewCount: row.viewCount,
       authorDisplayName: row.authorDisplayName,
       authorUsername: row.authorUsername,
       visibility: row.visibility,

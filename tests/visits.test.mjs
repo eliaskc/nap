@@ -86,17 +86,22 @@ test("opens within 30 minutes are one visit; later ones count again", async () =
   assert.notEqual(anna.visitedAt, anna.firstVisitedAt);
 });
 
-test("the owner is left out of the visitors and the count", async () => {
-  const { env } = setup();
+test("the owner is left out of the visitors, the count, and the views", async () => {
+  const { sqlite, env } = setup();
   await visit(env, OWNER);
   await visit(env, ANNA);
   await visit(env, BO);
+  sqlite.exec(`UPDATE site_visits SET visited_at = '2020-01-01T00:00:00.000Z'`);
+  await visit(env, OWNER);
+  await visit(env, ANNA);
   const visitors = await runNap(env, listVisitors("quiz", OWNER));
   assert.deepEqual(visitors.map((v) => v.email).sort(), [ANNA, BO]);
   assert.equal(visitors.find((v) => v.email === BO).name, "Bo");
 
   const [site] = await runNap(env, listSites({ email: ANNA, name: "Anna" }));
   assert.equal(site.visitorCount, 2);
+  // Most popular ranks by views: every visit by people other than the owner.
+  assert.equal(site.viewCount, 3);
 });
 
 test("a dashboard counts each person once, but still remembers when they opened it", async () => {
@@ -111,6 +116,7 @@ test("a dashboard counts each person once, but still remembers when they opened 
   assert.notEqual(anna.visitedAt, OLD);
   const [site] = await runNap(env, listSites({ email: ANNA, name: "Anna" }));
   assert.equal(site.visitorCount, 1);
+  assert.equal(site.viewCount, 1);
   assert.ok(site.visitedAt, "it shows as visited");
 
   // Counts already stored stay when the type changes.

@@ -38,7 +38,8 @@ export function RingsLayout({ view, bar, items }: VariantProps) {
   const index = useExample();
   const shown = view.visible;
 
-  // Fill the rings from the inside, most popular first. Repeat when there are few things.
+  // Fill the rings from the inside in the chosen order (most popular first by default). Repeat
+  // when there are few things.
   const rings = React.useMemo(() => {
     let next = 0;
     return RINGS.map((ring) => {
