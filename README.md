@@ -219,6 +219,14 @@ People open a dashboard again and again, or leave it open on a screen that
 reloads it, so Nap remembers that someone opened it (for their lists and the
 owner's list of visitors) but does not count repeat opens as visits.
 
+Nap keeps three numbers per nap (`src/lib/visits.ts`). **People** is how many
+people other than the owner have opened it. **Views** is the sum of their
+visits, where opens within 30 minutes count once and a dashboard once per
+person; Most popular ranks by views, and the dashboard shows them. **Loads**
+(`sites.view_count`) counts every load of the nap's page by anyone, the owner
+too, reloads included, and shows how heavily it is used. Only the owner sees
+loads, next to people and views in Visitors.
+
 A nap's name is the first path segment on the root domain, next to Nap's own
 routes (`/api`, `/connect`, `/_nap`, ...). Those names are reserved
 (`RESERVED_SLUGS` in `src/lib/uploads.ts`): no nap may take one, and Nap's

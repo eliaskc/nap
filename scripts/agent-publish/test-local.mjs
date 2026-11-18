@@ -757,7 +757,107 @@ try {
   await nap.sql("DELETE FROM site_visits WHERE site_slug = ?", board);
   assert.equal((await openTwice(board, onHost)).count, 1, "a dashboard on its own host too");
 
-  for (const slug of [board, plain]) {
+  // Loads (sites.view_count): every load of a nap's page by anyone, the owner and repeat opens
+  // included, for every type, in the frame and on its own host. Not files, Nap's own routes,
+  // token renewals, HEAD, or the access-denied page. Only the owner sees them, in Visitors.
+  const loadsOf = async (slug, expected) => {
+    // Loads are written after the response.
+    for (let attempt = 0; ; attempt++) {
+      const [row] = await sqlRows("SELECT view_count AS loads FROM sites WHERE slug = ?", slug);
+      if (row.loads === expected || attempt === 50) return row.loads;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+  };
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 300));
+  const loadNaps = [];
+  for (const type of ["page", "dashboard"]) {
+    const draft = await uploadDraft(`?type=${type}&title=Loads`, "<h1>loads</h1>");
+    const made = await claim(draft.id, { visibility: "everyone" });
+    assert.equal(made.status, 200, made.text);
+    const slug = made.json.site.slug;
+    loadNaps.push(slug);
+    await nap.put(`sites/${slug}/versions/${made.json.site.currentVersion}/app.js`, "1");
+    await nap.sql("UPDATE sites SET view_count = 0 WHERE slug = ?", slug);
+
+    // In the frame: the Nap page alone is not a load; the frame getting the page is.
+    const open = async (email) => {
+      const outer = await viewer(email, `/${slug}`);
+      assert.equal(outer.status, 200, outer.text);
+      const token = outer.text.match(/data-src="\/_nap\/frame\/([A-Za-z0-9_-]+)\//)[1];
+      return {
+        token,
+        frame: (path, options = {}) =>
+          call(`/_nap/frame/${token}${path}`, { host: ROOT, ...options }),
+      };
+    };
+    const first = await open(OTHER);
+    await settle();
+    assert.equal(await loadsOf(slug, 0), 0, `${type}: the Nap page alone is not a load`);
+    assert.match((await first.frame("/")).text, /loads/);
+    assert.equal(await loadsOf(slug, 1), 1, `${type}: the frame's page is a load`);
+    await first.frame("/");
+    assert.equal(await loadsOf(slug, 2), 2, `${type}: the page reloading itself counts`);
+    await (await open(OWNER)).frame("/");
+    assert.equal(await loadsOf(slug, 3), 3, `${type}: the owner's loads count`);
+    await (await open(OTHER)).frame("/");
+    assert.equal(await loadsOf(slug, 4), 4, `${type}: repeat opens within 30 minutes count`);
+    assert.equal((await first.frame("/app.js")).status, 200);
+    assert.equal((await first.frame("/missing.js")).status, 404);
+    assert.equal((await first.frame("/_nap/client.js")).status, 200);
+    assert.equal((await first.frame("/_nap/me")).status, 200);
+    assert.equal((await first.frame("/", { method: "HEAD" })).status, 200);
+    const renewed = await call(`/${slug}/_nap/frame`, {
+      host: ROOT,
+      method: "POST",
+      headers: { ...signedIn(OTHER), "content-type": "application/json" },
+      body: JSON.stringify({ token: first.token }),
+    });
+    assert.equal(renewed.status, 200, renewed.text);
+    await settle();
+    assert.equal(await loadsOf(slug, 4), 4, `${type}: files, routes, and renewals are not loads`);
+
+    // On its own host, with the bar: the bar page is not a load; its frame getting the page is.
+    assert.equal((await typeSettings(slug, { ownHost: true, toolbar: true })).status, 200);
+    const hosted = (email, path, dest) =>
+      call(path, {
+        host: `${slug}.${ROOT}`,
+        headers: { ...signedIn(email), "sec-fetch-dest": dest },
+      });
+    assert.match((await hosted(OTHER, "/", "document")).text, /data-nap-content/);
+    await settle();
+    assert.equal(await loadsOf(slug, 4), 4, `${type}: the bar page is not a load`);
+    assert.match((await hosted(OTHER, "/", "iframe")).text, /loads/);
+    assert.equal(await loadsOf(slug, 5), 5, `${type}: a load on its own host`);
+    await hosted(OTHER, "/", "iframe");
+    assert.equal(await loadsOf(slug, 6), 6, `${type}: and again`);
+    await hosted(OWNER, "/", "iframe");
+    assert.equal(await loadsOf(slug, 7), 7, `${type}: the owner's too`);
+    assert.equal((await hosted(OTHER, "/app.js", "script")).status, 200);
+    // Nobody else may open it now: the access-denied page is not a load.
+    await nap.sql("UPDATE sites SET visibility = 'private' WHERE slug = ?", slug);
+    assert.equal((await hosted(OTHER, "/", "document")).status, 403);
+    assert.equal((await hosted(OTHER, "/", "iframe")).status, 403);
+    await settle();
+    assert.equal(await loadsOf(slug, 7), 7, `${type}: assets and denied opens are not loads`);
+    await nap.sql("UPDATE sites SET visibility = 'everyone' WHERE slug = ?", slug);
+
+    // The owner sees the three numbers; views is the number the dashboard shows.
+    const counted = await call(`/api/sites/${slug}/visitors`, { headers: as(OWNER) });
+    assert.equal(counted.status, 200, counted.text);
+    const shown = (await call("/api/sites", { headers: as(OWNER) })).json.sites.find(
+      (site) => site.slug === slug,
+    );
+    assert.equal(counted.json.people, 1, `${type}: one person other than the owner`);
+    assert.equal(counted.json.views, shown.viewCount, `${type}: the views the item shows`);
+    assert.equal(counted.json.views, 1, `${type}: opens within 30 minutes are one view`);
+    assert.equal(counted.json.loads, 7, `${type}: every load`);
+    assert.equal("loads" in shown, false, "loads are not in the dashboard's list");
+    const refused = await call(`/api/sites/${slug}/visitors`, { headers: as(OTHER) });
+    assert.equal(refused.status, 403, "only the owner sees visitors and loads");
+    assert.equal(refused.json.loads, undefined);
+  }
+
+  for (const slug of [board, plain, ...loadNaps]) {
     const removed = await call(`/api/sites/${slug}`, { method: "DELETE", headers: as(OWNER) });
     assert.equal(removed.status, 200, removed.text);
   }

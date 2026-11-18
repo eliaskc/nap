@@ -50,7 +50,7 @@ import {
   formatBytes,
   formatDate,
   formatDateTime,
-  formatPeople,
+  formatTally,
   slugify,
 } from "~/dashboard/format";
 import { KindIcon } from "~/dashboard/kinds";
@@ -708,26 +708,35 @@ type Visitor = {
   visits: number;
 };
 
+/** The three counts (src/lib/visits.ts). Views is the number the item shows. */
+type VisitCounts = { people: number; views: number; loads: number };
+
 /** Who has opened one of your naps, most recent first. You are left out. */
 function VisitorsDialog({ site, onClose }: { site: Site | null; onClose: () => void }) {
   const [visitors, setVisitors] = React.useState<Array<Visitor> | null>(null);
+  const [counts, setCounts] = React.useState<VisitCounts | null>(null);
   const [error, setError] = React.useState("");
   const slug = site?.slug;
 
   React.useEffect(() => {
     setVisitors(null);
+    setCounts(null);
     setError("");
     if (!slug) return;
     let current = true;
     void (async () => {
       const response = await fetch(`/api/sites/${slug}/visitors`);
-      const body = (await response.json().catch(() => ({}))) as {
+      const body = (await response.json().catch(() => ({}))) as Partial<VisitCounts> & {
         visitors?: Array<Visitor>;
         error?: string;
       };
       if (!current) return;
-      if (!response.ok) setError(body.error ?? "Could not load the visitors");
-      else setVisitors(body.visitors ?? []);
+      if (!response.ok) {
+        setError(body.error ?? "Could not load the visitors");
+        return;
+      }
+      setVisitors(body.visitors ?? []);
+      setCounts({ people: body.people ?? 0, views: body.views ?? 0, loads: body.loads ?? 0 });
     })().catch(() => current && setError("Could not load the visitors"));
     return () => {
       current = false;
@@ -739,11 +748,22 @@ function VisitorsDialog({ site, onClose }: { site: Site | null; onClose: () => v
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Visitors</DialogTitle>
-          <DialogDescription>
-            {site?.title}
-            {visitors && ` · ${formatPeople(visitors.length)}`}. Only you can see this.
-          </DialogDescription>
+          <DialogDescription>{site?.title}. Only you can see this.</DialogDescription>
         </DialogHeader>
+        {counts && (
+          <div className="flex flex-col gap-1">
+            <p className="text-sm font-medium tabular-nums">
+              {formatTally(counts.people, "person", "people")} ·{" "}
+              {formatTally(counts.views, "view", "views")} ·{" "}
+              {formatTally(counts.loads, "load", "loads")}
+            </p>
+            <p className="text-xs text-muted-foreground">
+              People and views leave you out; views count opens within 30 minutes once
+              {site?.type === "dashboard" ? ", and a dashboard once per person" : ""}. Loads count
+              every time the page loaded, yours and reloads included.
+            </p>
+          </div>
+        )}
         {error && <p className="text-sm text-destructive">{error}</p>}
         <div className="-mx-4 max-h-[60vh] overflow-y-auto border-t">
           {visitors === null ? (

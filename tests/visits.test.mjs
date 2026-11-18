@@ -127,3 +127,34 @@ test("a dashboard counts each person once, but still remembers when they opened 
   [anna] = await runNap(env, listVisitors("quiz", OWNER));
   assert.equal(anna.visits, 2);
 });
+
+const { getNapFile } = await import("../src/lib/site-serving.ts");
+const { countLoads } = await import("../src/lib/visits.ts");
+
+test("loads count every live page load, the owner's and repeats too, but not files or HEAD", async () => {
+  for (const type of ["page", "dashboard"]) {
+    const { sqlite, env } = setup();
+    sqlite.exec(`UPDATE sites SET type = '${type}', view_count = 1592`);
+    const files = new Set(["index.html", "app.js", "games/index.html"]);
+    env.SITES = {
+      async get(key) {
+        const path = key.replace("sites/quiz/versions/v1/", "");
+        return files.has(path) ? { key } : null;
+      },
+    };
+    const nap = { slug: "quiz", type, currentVersion: "v1" };
+    const get = (path, method = "GET") =>
+      runNap(env, getNapFile(nap, path, new Request("https://quiz.example.com/", { method })));
+    await get("index.html");
+    await get("index.html");
+    await get("games/index.html");
+    await get("app.js");
+    await get("index.html", "HEAD");
+    await get("missing/index.html");
+    const counted = await runNap(env, countLoads("quiz"));
+    assert.equal(counted.loads, 1595, `${type}: kept the old count and added three page loads`);
+    assert.ok(counted.lastLoadedAt);
+    // Loads leave the people and views alone.
+    assert.equal(sqlite.prepare("SELECT count(*) AS n FROM site_visits").get().n, 0);
+  }
+});

@@ -377,14 +377,15 @@ export const handleFrameRequest = Effect.fn("handleFrameRequest")(function* (req
   const normalizedPath = normalizeRequestPath(safeDecode(rest));
   let object: R2ObjectBody | null;
   if (previewVersion) {
-    // Previews do not count as views.
+    // Previews do not count as visits or loads.
     if (!(yield* findVersion(frame.slug, previewVersion))) {
       return withCors(new Response("Version not found", { status: 404 }));
     }
     const storage = yield* Storage;
     object = yield* storage.get(objectKey(frame.slug, previewVersion, normalizedPath));
   } else {
-    object = yield* getNapFile(access.nap, normalizedPath);
+    // Loading the page counts as a load (getNapFile), the page reloading itself in the frame too.
+    object = yield* getNapFile(access.nap, normalizedPath, request);
   }
   if (!object) return withCors(new Response("File not found", { status: 404 }));
 

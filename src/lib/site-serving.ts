@@ -10,7 +10,7 @@ import { siteManifest } from "~/lib/site-manifest";
 import { Database, type DatabaseError } from "~/server/database";
 import { failText, redirect } from "~/server/http";
 import { Storage } from "~/server/storage";
-import { recordVisit } from "~/lib/visits";
+import { recordLoad, recordVisit } from "~/lib/visits";
 
 export type ServedNap = {
   slug: string;
@@ -122,7 +122,7 @@ export const serveUploadedSite = Effect.fn("serveUploadedSite")(function* (
     });
   }
 
-  let object = yield* getNapFile(nap, normalizedPath);
+  let object = yield* getNapFile(nap, normalizedPath, request);
   // A folder without its slash: /games/connections means /games/connections/.
   if (!object && !/\.[a-z0-9]+$/i.test(normalizedPath)) {
     const folderIndex = `${normalizedPath}/index.html`;
@@ -132,14 +132,14 @@ export const serveUploadedSite = Effect.fn("serveUploadedSite")(function* (
       if (exists) return redirect(`${url.pathname}/${url.search}`);
     } else {
       // Locally the route drops the trailing slash from the path.
-      object = yield* getNapFile(nap, folderIndex);
+      object = yield* getNapFile(nap, folderIndex, request);
     }
   }
   // A single-page app ("spa": true in nap.json): page paths without a file get the root
   // index.html, and the app's router shows the page. Missing files with an extension stay 404.
   if (!object && isPagePath(normalizedPath, request)) {
     if ((yield* siteManifest(nap.slug, nap.currentVersion)).spa) {
-      object = yield* getNapFile(nap, "index.html");
+      object = yield* getNapFile(nap, "index.html", request);
     }
   }
   // Browsers ask for /favicon.ico when a page names no icon. Sites without one get Nap's.
@@ -157,14 +157,27 @@ export const serveUploadedSite = Effect.fn("serveUploadedSite")(function* (
   return new Response(object.body, { headers });
 });
 
-/** Reads a file of the live version. */
+/**
+ * Reads a file of the live version, for a request. A GET that gets an index.html (the page, a
+ * folder's page, or a single-page app's fallback) counts as a load (recordLoad), for anyone,
+ * the owner too: in the frame and on a nap's own host, as before the people and views counts.
+ */
 export const getNapFile = Effect.fn("getNapFile")(function* (
   nap: ServedNap,
   normalizedPath: string,
+  request: Request,
 ) {
   const storage = yield* Storage;
-  return yield* storage.get(objectKey(nap.slug, nap.currentVersion, normalizedPath));
+  const object = yield* storage.get(objectKey(nap.slug, nap.currentVersion, normalizedPath));
+  if (object && request.method === "GET" && isIndexPage(normalizedPath)) {
+    yield* recordLoad(nap.slug);
+  }
+  return object;
 });
+
+function isIndexPage(normalizedPath: string) {
+  return normalizedPath === "index.html" || normalizedPath.endsWith("/index.html");
+}
 
 export function fileHeaders(object: R2ObjectBody) {
   const headers = new Headers();

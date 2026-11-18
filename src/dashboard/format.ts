@@ -10,9 +10,9 @@ export function formatCount(value: number) {
   return `${(value / 1_000_000).toFixed(1)}m`;
 }
 
-/** "1 person", "12 people", "1.2k people". */
-export function formatPeople(value: number) {
-  return `${formatCount(value)} ${value === 1 ? "person" : "people"}`;
+/** Exact, for the owner: "1 load", "1,595 loads". */
+export function formatTally(value: number, one: string, many: string) {
+  return `${value.toLocaleString("en-US")} ${value === 1 ? one : many}`;
 }
 
 /** "1 view", "12 views", "1.2k views". */
