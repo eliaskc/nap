@@ -237,7 +237,7 @@ export interface NapVoiceCall<M = unknown> {
 
 export interface NapFetchOptions {
   method?: "GET" | "HEAD" | "POST" | "PUT" | "PATCH" | "DELETE";
-  /** Sent upstream as given; never the viewer's cookies or login. */
+  /** Sent upstream as given, a cookie of the page's own included; never the viewer's cookies or login. */
   headers?: HeadersInit;
   /** Up to 256 KB. */
   body?: BodyInit | null;

@@ -15,12 +15,13 @@ const HEADERS_HEADER = "x-nap-fetch-headers";
 /**
  * Headers a page may set on the upstream request. Never the viewer's cookies or Access headers:
  * Nap only sends what the page passes explicitly, and drops headers that would let a page
- * steer Cloudflare or pose as Nap.
+ * steer Cloudflare or pose as Nap. A cookie the page passes itself is the page's own value (an
+ * anonymous session the other site hands to any visitor), like its authorization header, so it
+ * goes through; the browser's Cookie header never does.
  */
 const BLOCKED_HEADERS = new Set([
   "connection",
   "content-length",
-  "cookie",
   "expect",
   "host",
   "keep-alive",
@@ -43,7 +44,7 @@ export class UpstreamFetchError extends Schema.TaggedError<UpstreamFetchError>()
  * Fetches a URL for a page, so pages can use APIs that do not allow other origins. Only HTTPS,
  * only hosts the page lists in nap.json, and only for people who can view the page. Nothing of
  * the viewer's is sent on (no cookies, no Access headers, no referrer); only the method, body,
- * and headers the page passes. Plain GETs are cached at the edge for a few minutes.
+ * and headers the page passes (a cookie among them is the page's own). Plain GETs are cached at the edge for a few minutes.
  *
  * Sites call it on their own host. Artifacts call it below their frame token (`frame: true`):
  * the frame's origin is opaque, so its requests are always cross-site, and the token in the

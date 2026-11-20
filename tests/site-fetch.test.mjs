@@ -103,7 +103,8 @@ test("page headers: only explicit ones, and never Nap's or the viewer's", () => 
         "x-nap-fetch-headers": "{}",
       }),
     ),
-    { authorization: "Bearer x", referer: "https://example.com/" },
+    // The page's own cookie goes through; the viewer's never reaches this function.
+    { authorization: "Bearer x", referer: "https://example.com/", cookie: "session=1" },
   );
 });
 
@@ -139,7 +140,7 @@ test("POST passes the body and the page's headers, uncached", async () => {
         "x-nap-fetch-headers": JSON.stringify({
           "content-type": "application/json",
           referer: "https://example.com/",
-          cookie: "nope",
+          cookie: "player=page",
         }),
       },
       body: JSON.stringify({ direction: "left" }),
@@ -152,7 +153,8 @@ test("POST passes the body and the page's headers, uncached", async () => {
     assert.equal(new TextDecoder().decode(init.body), '{"direction":"left"}');
     assert.equal(init.headers.referer, "https://example.com/");
     assert.equal(init.headers["content-type"], "application/json");
-    assert.equal(init.headers.cookie, undefined);
+    // The page's cookie, not the viewer's.
+    assert.equal(init.headers.cookie, "player=page");
     assert.equal(init.cf, undefined);
   } finally {
     mock.restore();
