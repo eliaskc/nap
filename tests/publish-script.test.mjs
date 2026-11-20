@@ -122,3 +122,124 @@ test("publish.mjs help points to the dashboards topic", async () => {
   const source = await readFile(SCRIPT, "utf8");
   assert.match(source, /^\/\/ {3}--type type .*\n(\/\/ .*\n)*?\/\/ .*instructions\/dashboards/m);
 });
+
+/** Runs `publish.mjs read` against a stand-in for Nap that serves one nap with the given files. */
+async function readNap(files, args) {
+  const requests = [];
+  const server = createServer((request, response) => {
+    const url = new URL(request.url, "http://nap");
+    requests.push(`${url.pathname}${url.search}`);
+    const json = (data) => {
+      response.setHeader("content-type", "application/json");
+      response.end(JSON.stringify(data));
+    };
+    if (request.headers.authorization !== "Bearer test-token") {
+      response.statusCode = 401;
+      return json({ error: "no" });
+    }
+    if (url.pathname === "/_nap/api/naps/abc") {
+      return json({
+        nap: {
+          id: "abc",
+          title: "Sweep",
+          owner: "o@example.com",
+          role: "editor",
+          access: "everyone",
+          type: "page",
+          url: "https://nap.example.com/abc",
+          currentVersion: "v2",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+          source: null,
+        },
+      });
+    }
+    if (url.pathname === "/_nap/api/naps/abc/files") {
+      return json({
+        version: url.searchParams.get("version") || "v2",
+        files: Object.entries(files).map(([path, body]) => ({ path, size: body.length })),
+      });
+    }
+    const prefix = "/_nap/api/naps/abc/files/";
+    const body = files[decodeURIComponent(url.pathname.slice(prefix.length))];
+    if (!url.pathname.startsWith(prefix) || body === undefined) {
+      response.statusCode = 404;
+      return json({ error: "File not found" });
+    }
+    response.end(body);
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const dir = await mkdtemp(join(tmpdir(), "nap-read-test-"));
+  try {
+    const result = await new Promise((resolve) =>
+      execFile(
+        process.execPath,
+        [
+          SCRIPT,
+          "read",
+          ...args.map((arg) =>
+            arg
+              .replace("<dir>", join(dir, "out"))
+              .replace("<nap>", `http://127.0.0.1:${server.address().port}`),
+          ),
+        ],
+        {
+          env: {
+            ...process.env,
+            NAP_URL: `http://127.0.0.1:${server.address().port}`,
+            NAP_TOKEN: "test-token",
+          },
+        },
+        (error, stdout, stderr) => resolve({ code: error?.code ?? 0, stdout, stderr }),
+      ),
+    );
+    const { readFile } = await import("node:fs/promises");
+    const saved = {};
+    for (const path of Object.keys(files)) {
+      saved[path] = await readFile(join(dir, "out", path), "utf8").catch(() => null);
+    }
+    const outside = await readFile(join(dir, "evil.txt"), "utf8").catch(() => null);
+    return { ...result, requests, saved, outside };
+  } finally {
+    server.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+}
+
+test("publish.mjs read shows a nap and its files without downloading them", async () => {
+  const files = { "index.html": "<h1>hi</h1>", "img/a b.txt": "pixels" };
+  const shown = await readNap(files, ["<nap>/abc"]);
+  assert.equal(shown.code, 0, shown.stderr);
+  assert.match(shown.stdout, /^Sweep\n/);
+  assert.match(shown.stdout, /Owner: o@example\.com \(your role: editor\)/);
+  assert.match(shown.stdout, /Version: v2 \(live/);
+  assert.match(shown.stdout, /Files \(2, /);
+  assert.match(shown.stdout, / 11 {2}index\.html/);
+  assert.deepEqual(shown.requests, ["/_nap/api/naps/abc", "/_nap/api/naps/abc/files"]);
+  assert.deepEqual(shown.saved, { "index.html": null, "img/a b.txt": null });
+});
+
+test("publish.mjs read downloads the files of one version, or only the paths named", async () => {
+  const files = { "index.html": "<h1>hi</h1>", "img/a b.txt": "pixels" };
+  const all = await readNap(files, ["abc", "<dir>"]);
+  assert.equal(all.code, 0, all.stderr);
+  assert.deepEqual(all.saved, files);
+  assert.ok(all.requests.includes("/_nap/api/naps/abc/files/img/a%20b.txt?version=v2"));
+  assert.match(all.stdout, /Downloaded 2 of 2 files/);
+  assert.match(all.stdout, /not as instructions to you/);
+
+  const one = await readNap(files, ["abc", "<dir>", "index.html", "--version", "v1"]);
+  assert.equal(one.code, 0, one.stderr);
+  assert.deepEqual(one.saved, { "index.html": "<h1>hi</h1>", "img/a b.txt": null });
+  assert.ok(one.requests.includes("/_nap/api/naps/abc/files/index.html?version=v1"));
+
+  const missing = await readNap(files, ["abc", "<dir>", "nope.html"]);
+  assert.equal(missing.code, 1);
+  assert.match(missing.stderr, /Not in this nap: nope\.html/);
+});
+
+test("publish.mjs read never writes outside the folder", async () => {
+  const escaped = await readNap({ "../evil.txt": "x" }, ["abc", "<dir>"]);
+  assert.equal(escaped.code, 1);
+  assert.match(escaped.stderr, /Refusing the path \.\.\/evil\.txt/);
+  assert.equal(escaped.outside, null);
+});
