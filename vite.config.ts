@@ -194,8 +194,15 @@ function napIcons(): Plugin {
 export default defineConfig({
   server: {
     port: 3000,
-    // Nap routes by host: the dashboard at the root domain, each site at <slug>.<root>.
-    allowedHosts: [`.${napConfig.rootDomain}`],
+    // Nap routes by host: the dashboard at the root domain, each nap on its own host at
+    // <name>.<content>. Local stages may set another content domain (NAP_CONTENT_DOMAIN).
+    allowedHosts: [
+      ...new Set(
+        [napConfig.rootDomain, napConfig.contentDomain, process.env.NAP_CONTENT_DOMAIN]
+          .filter(Boolean)
+          .map((domain) => `.${domain}`),
+      ),
+    ],
     // instance/ is often a link to a config repo beside this one (its icon is read in dev).
     fs: { allow: [".", ...(existsSync("instance") ? [realpathSync("instance")] : [])] },
   },

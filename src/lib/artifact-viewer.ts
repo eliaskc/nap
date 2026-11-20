@@ -338,7 +338,7 @@ export const handleFrameRequest = Effect.fn("handleFrameRequest")(function* (req
     );
   }
   if (rest === "/_nap/notify") {
-    const { rootDomain } = yield* Settings;
+    const { rootDomain, contentDomain } = yield* Settings;
     const local = isLocalHostname(url.hostname) ? url.origin : null;
     return withCors(
       yield* recoverHttpError(
@@ -346,7 +346,7 @@ export const handleFrameRequest = Effect.fn("handleFrameRequest")(function* (req
           frame.slug,
           request,
           identity,
-          { rootDomain, localOrigin: local },
+          { rootDomain, contentDomain, localOrigin: local },
           {
             frame: true,
           },

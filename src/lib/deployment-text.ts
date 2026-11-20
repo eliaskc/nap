@@ -1,12 +1,14 @@
 import { napConfig, type NapConfig } from "../../nap.config.ts";
 
 /**
- * Fills the deployment's names into text that ships to agents: {{rootDomain}}, {{orgName}},
+ * Fills the deployment's names into text that ships to agents: {{rootDomain}},
+ * {{contentDomain}} (where naps on their own host are, by default the root domain), {{orgName}},
  * {{admin}}, and {{defaultAccess}}.
  */
 export function fillDeploymentText(text: string, config: NapConfig = napConfig) {
   return text
     .replaceAll("{{rootDomain}}", config.rootDomain)
+    .replaceAll("{{contentDomain}}", config.contentDomain || config.rootDomain)
     .replaceAll("{{orgName}}", config.orgName)
     .replaceAll("{{admin}}", config.admin)
     .replaceAll("{{defaultAccess}}", config.defaultAccess);

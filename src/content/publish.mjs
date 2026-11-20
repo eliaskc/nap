@@ -34,7 +34,7 @@
 // Options:
 //   --title "Name"         The title people see. Default: the page's <title>.
 //   --name name            New naps only: its URL, {{rootDomain}}/<name>. Default: a random id.
-//   --own-host             New naps only: serve it on its own host, <name>.{{rootDomain}}, for
+//   --own-host             New naps only: serve it on its own host, <name>.{{contentDomain}}, for
 //                          the few pages that need one (see the instructions).
 //                          (--site is the same as --own-host; --slug name the same as
 //                          --name name --own-host.)
@@ -45,6 +45,7 @@
 //   --access who           New naps only: private, everyone, or selected. Default: {{defaultAccess}}.
 //   --emails a@x,b@x       With --access selected: who can view it.
 //   --update <id or URL>   Publish a new version of a nap. Its URL and access stay the same.
+//                          The URL may be any of its addresses, old ones too.
 //   --expected-version v   With --update: the live version you read. Required on naps
 //                          someone else owns, so you never overwrite a change you have not seen.
 //   --message "..."        What changed, for the version history.
@@ -78,6 +79,8 @@ import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 
 const NAP_URL = (process.env.NAP_URL || "https://{{rootDomain}}").replace(/\/+$/, "");
+// Where naps on their own host are: <name>.{{contentDomain}}. On some Naps that is the root.
+const CONTENT_DOMAIN = "{{contentDomain}}";
 // One folder per Nap, by its host, so tokens for several Naps do not overwrite each other.
 const CONFIG_DIR = join(
   process.env.XDG_CONFIG_HOME || join(homedir(), ".config"),
@@ -255,22 +258,24 @@ async function nextPage(token, url) {
 }
 
 /**
- * The id in a nap's URL: <root>/<id>, <id>.<root>, an old <root>/artifact/<id> link, or /s/<id>/
- * locally.
+ * The id in a nap's URL: <root>/<id>, <id>.<content> (a nap on its own host), the older
+ * <id>.<root>, an old <root>/artifact/<id> link, or /s/<id>/ locally.
  */
 function idFrom(value) {
-  const root = new URL(NAP_URL).host;
+  const roots = [new URL(NAP_URL).host, "{{rootDomain}}"];
   let url;
   try {
     url = new URL(value);
   } catch {
     return value;
   }
-  if (url.host === root) {
+  if (roots.includes(url.host)) {
     const match = url.pathname.match(/^\/(?:artifact\/|s\/)?([a-z0-9-]+)(?:\/|$)/);
     if (match) return match[1];
   }
-  if (url.host.endsWith(`.${root}`)) return url.host.slice(0, -root.length - 1);
+  for (const domain of [...roots, CONTENT_DOMAIN]) {
+    if (url.host.endsWith(`.${domain}`)) return url.host.slice(0, -domain.length - 1);
+  }
   const match =
     value.match(/^https?:\/\/[^/]+\/artifact\/([a-z0-9-]+)/) ||
     value.match(/^https?:\/\/([a-z0-9-]+)\.[^/]*nap\./);

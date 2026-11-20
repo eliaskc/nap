@@ -1,6 +1,6 @@
 import { Effect } from "effect";
 import type { Identity } from "~/lib/nap-server";
-import { napUrl, type NapKind, type NapPlace } from "~/lib/nap-urls";
+import { contentDomainOf, napUrl, type NapKind, type NapPlace } from "~/lib/nap-urls";
 import {
   apnsToken,
   encryptWebPush,
@@ -448,9 +448,11 @@ function resolveOpen(source: NotificationSource, open: string) {
     return null;
   }
   const host = url.hostname;
+  const contentDomain = contentDomainOf(source.place);
   const ours =
     host === rootDomain ||
     host.endsWith(`.${rootDomain}`) ||
+    host.endsWith(`.${contentDomain}`) ||
     (localOrigin !== null && url.origin === new URL(localOrigin).origin);
   return ours && (url.protocol === "https:" || localOrigin !== null) ? url.href : null;
 }

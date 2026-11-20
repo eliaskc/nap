@@ -53,7 +53,7 @@ export const findViewableNap = Effect.fn("findViewableNap")(function* (
 });
 
 /**
- * Serves a nap on its own host, <name>.<root> (or /s/<name>/ locally): kind "site", an interim
+ * Serves a nap on its own host, <name>.<content> (or /s/<name>/ locally): kind "site", an interim
  * mode for the naps that need a real origin. Naps in the frame are not served here: a visit
  * redirects to <root>/<name>, so links from before a move keep working.
  */
@@ -226,25 +226,67 @@ export const ARTIFACTS_LABEL = "artifacts";
 
 export type HostTarget =
   | { type: "dashboard" }
+  /** <name>.<content>: the one nap it serves. */
   | { type: "site"; slug: string }
+  /** <name>.<root> on a deployment with a separate content domain: redirects only. */
+  | { type: "moved"; slug: string }
+  /** The content domain's apex and www: redirect to the dashboard. */
+  | { type: "contentApex" }
   | { type: "artifacts" }
   | { type: "unknown" };
 
 /**
  * <root>                       dashboard, and naps in the frame at /<name>
- * <name>.<root>                a nap on its own host (one origin each); naps in the frame
- *                              redirect to <root>/<name>
+ * <name>.<content>             a nap on its own host (one origin each); naps in the frame
+ *                              redirect to <root>/<name>. <content> is the content domain, by
+ *                              default the root domain.
+ * <name>.<root>                with a separate content domain: redirects, to <name>.<content> or
+ *                              <root>/<name>, and serves nothing
+ * <content>, www.<content>     with a separate content domain: redirect to the dashboard
  * artifacts.<root>             old artifact links (/<slug>), redirected
+ * anything deeper              not found
  */
-export function resolveHost(host: string, rootDomain: string): HostTarget {
+export function resolveHost(
+  host: string,
+  rootDomain: string,
+  contentDomain: string = rootDomain,
+): HostTarget {
   const hostname = host.split(":")[0]?.toLowerCase() ?? "";
   const root = rootDomain.toLowerCase();
-  if (hostname === root || !hostname.endsWith(`.${root}`)) return { type: "dashboard" };
+  const content = contentDomain.toLowerCase();
+  const separate = content !== root;
+  if (hostname === root) return { type: "dashboard" };
+
+  if (separate && isOnDomain(hostname, content)) {
+    if (hostname === content || hostname === `www.${content}`) return { type: "contentApex" };
+    const labels = hostname.slice(0, -(content.length + 1)).split(".");
+    if (labels.length === 1 && labels[0]) return { type: "site", slug: labels[0] };
+    return { type: "unknown" };
+  }
+
+  if (!hostname.endsWith(`.${root}`)) return { type: "dashboard" };
 
   const labels = hostname.slice(0, -(root.length + 1)).split(".");
   if (labels.length === 1 && labels[0] === ARTIFACTS_LABEL) return { type: "artifacts" };
-  if (labels.length === 1 && labels[0]) return { type: "site", slug: labels[0] };
+  if (labels.length === 1 && labels[0]) {
+    return separate ? { type: "moved", slug: labels[0] } : { type: "site", slug: labels[0] };
+  }
   return { type: "unknown" };
+}
+
+/**
+ * A host on a separate content domain (its apex included). Everything there runs or redirects
+ * to naps' own code, behind the content domain's own Access application. False when the content
+ * domain is the root domain.
+ */
+export function isContentDomainHost(host: string, rootDomain: string, contentDomain: string) {
+  const hostname = host.split(":")[0]?.toLowerCase() ?? "";
+  const content = contentDomain.toLowerCase();
+  return content !== rootDomain.toLowerCase() && isOnDomain(hostname, content);
+}
+
+function isOnDomain(hostname: string, domain: string) {
+  return hostname === domain || hostname.endsWith(`.${domain}`);
 }
 
 export function normalizeRequestPath(path: string) {

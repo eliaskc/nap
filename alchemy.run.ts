@@ -7,12 +7,16 @@ import * as Config from "effect/Config";
 import * as Effect from "effect/Effect";
 import * as Redacted from "effect/Redacted";
 import { napConfig } from "./nap.config.ts";
-import { productionSettings } from "./infra/production.ts";
+import { contentAccess, productionSettings } from "./infra/production.ts";
 import type { AppSigner } from "./src/lib/app-signer.ts";
 import type { SiteChannel } from "./src/lib/site-channel.ts";
 import type { SiteLive } from "./src/lib/site-live.ts";
 
 const ROOT_DOMAIN = napConfig.rootDomain;
+// Where naps on their own host run: <name>.<CONTENT_DOMAIN>. A separate content domain is a
+// registrable domain of its own (napConfig.contentDomain), with its zone in instance/production.ts.
+const CONTENT_DOMAIN = napConfig.contentDomain || ROOT_DOMAIN;
+const SEPARATE_CONTENT_DOMAIN = CONTENT_DOMAIN !== ROOT_DOMAIN;
 
 export const Database = Cloudflare.D1.Database(
   "Database",
@@ -147,6 +151,24 @@ export const SlackHookAccess = Cloudflare.Access.Application(
   }),
 ).pipe(RemovalPolicy.retain());
 
+// The content domain, when it is separate: <content>/* and *.<content>/*, for the same people as
+// the human application, with its own audience tag. The Worker checks every request there for an
+// Access JWT with this audience (src/lib/content-domain.ts), so a session on the root never
+// counts on the content domain or the other way round. Nothing on the content domain skips Access:
+// the agent API, frames, and the Slack hook are on the root only.
+export const ContentAccess = Cloudflare.Access.Application(
+  "ContentAccess",
+  Effect.gen(function* () {
+    const settings = productionSettings();
+    return {
+      ...contentAccess(settings)!,
+      policies: settings.accessPolicies?.length
+        ? settings.accessPolicies.map((id, index) => ({ id, precedence: index + 1 }))
+        : [yield* People],
+    };
+  }),
+).pipe(RemovalPolicy.retain());
+
 export const DraftLimiter = Cloudflare.RateLimit("DRAFT_LIMITER", {
   namespaceId: 1001,
   simple: { limit: 20, period: 60 },
@@ -207,6 +229,13 @@ export class NapWorker extends Cloudflare.Website.Vite<NapWorker>()(
     // without them, requests reach nobody on Slack and the page says so.
     const slackBotToken = yield* optional("NAP_SLACK_BOT_TOKEN");
     const slackSigningSecret = yield* optional("NAP_SLACK_SIGNING_SECRET");
+    // A separate content domain: its Access application's audience, which the Worker checks on
+    // every content request. Local stages may set the content domain, the issuer, and the audience
+    // from the environment: the content domain HTTP test runs its own stand-in for Access.
+    const contentAud =
+      production && SEPARATE_CONTENT_DOMAIN
+        ? (yield* ContentAccess).aud
+        : yield* local("NAP_CONTENT_ACCESS_AUD");
     return {
       name: production ? "nap" : `nap-${stage}`,
       main: "./src/worker.ts",
@@ -221,11 +250,21 @@ export class NapWorker extends Cloudflare.Website.Vite<NapWorker>()(
       workersDev: { enabled: false, previewsEnabled: false },
       // `alchemy dev` serves on 1337 or the next free port. The HTTP tests pick their own port.
       dev: devPort ? { port: devPort, strictPort: true } : undefined,
-      // Preserve host-based routing, including all hosted site subdomains.
+      // Preserve host-based routing, including all hosted site subdomains. With a separate
+      // content domain, *.<root> stays routed: old links to naps there redirect.
       routes: production
         ? [
             { pattern: `${ROOT_DOMAIN}/*`, zoneName: productionSettings().zoneName },
             { pattern: `*.${ROOT_DOMAIN}/*`, zoneName: productionSettings().zoneName },
+            ...(SEPARATE_CONTENT_DOMAIN
+              ? [
+                  { pattern: `${CONTENT_DOMAIN}/*`, zoneId: productionSettings().content!.zoneId },
+                  {
+                    pattern: `*.${CONTENT_DOMAIN}/*`,
+                    zoneId: productionSettings().content!.zoneId,
+                  },
+                ]
+              : []),
           ]
         : [],
       compatibility: { date: "2026-06-13", flags: ["nodejs_compat"] },
@@ -271,6 +310,13 @@ export class NapWorker extends Cloudflare.Website.Vite<NapWorker>()(
             : (yield* local("NAP_SOURCES_NAMESPACE")) || `nap-sites-${namespaceSuffix(stage)}`,
         }),
         NAP_ROOT_DOMAIN: ROOT_DOMAIN,
+        NAP_CONTENT_DOMAIN: production
+          ? CONTENT_DOMAIN
+          : (yield* local("NAP_CONTENT_DOMAIN")) || CONTENT_DOMAIN,
+        NAP_ACCESS_ISSUER: production
+          ? productionSettings().accessIssuer
+          : yield* local("NAP_ACCESS_ISSUER"),
+        NAP_CONTENT_ACCESS_AUD: contentAud,
         NAP_R2_ACCOUNT_ID: production
           ? productionSettings().accountId
           : yield* local("NAP_R2_ACCOUNT_ID"),
@@ -355,6 +401,26 @@ export default Alchemy.Stack(
           ? settings.accessPolicies.map((id, index) => ({ id, precedence: index + 1 }))
           : [yield* People],
       }).pipe(RemovalPolicy.retain());
+      // A separate content domain: its records, its own Access application, and (on the Worker)
+      // its routes. Its zone stays unmanaged, like the root's.
+      if (SEPARATE_CONTENT_DOMAIN) {
+        const content = settings.content!;
+        for (const record of content.dns) {
+          yield* Cloudflare.DNS.Record(
+            record.name.startsWith("*.") ? "ContentSitesDns" : "ContentApexDns",
+            {
+              zoneId: content.zoneId,
+              name: record.name,
+              type: record.type,
+              content: record.content,
+              proxied: true,
+              ttl: record.ttl,
+              comment: record.comment,
+            },
+          ).pipe(RemovalPolicy.retain());
+        }
+        yield* ContentAccess;
+      }
       yield* AgentApiAccess;
       yield* ArtifactFrameAccess;
       if (napConfig.accessRequests?.channels.includes("slack")) yield* SlackHookAccess;

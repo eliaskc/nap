@@ -33,7 +33,7 @@ Everything you publish is a nap: "make me a nap", "I sent you a nap".
 
 - A nap lives at `https://{{rootDomain}}/<random id>`, or at a name you choose with `--name`: `https://{{rootDomain}}/team-map`. It runs in a sandboxed frame below a small Nap bar with the title and a Share button. Use this for everything: reports, prototypes, tools, dashboards, games, things people come back to.
 - A dashboard, charts and numbers people come back to or leave open on a wall screen, is a nap of type `dashboard` (`--type dashboard`). Read the `dashboards` topic before you make one.
-- Only a nap that needs one of these gets its own host, `https://<name>.{{rootDomain}}` (`--own-host`): localStorage or IndexedDB that lasts across reloads, cookies, service workers, client-side routing with real paths, root-absolute URLs that scripts build, or pointer lock. Read the `sites` topic first.
+- Only a nap that needs one of these gets its own host, `https://<name>.{{contentDomain}}` (`--own-host`): localStorage or IndexedDB that lasts across reloads, cookies, service workers, client-side routing with real paths, root-absolute URLs that scripts build, or pointer lock. Read the `sites` topic first.
 
 ## Sign in and publish
 

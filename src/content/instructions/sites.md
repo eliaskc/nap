@@ -15,7 +15,8 @@ Every nap has a name: a random id, or one chosen with `--name` (lowercase letter
 
 ## On its own host
 
-- URL `https://<name>.{{rootDomain}}`: a real origin. Publish with `--own-host`, with or without `--name`; without one, Nap makes one from the title.
+- URL `https://<name>.{{contentDomain}}`: a real origin. Publish with `--own-host`, with or without `--name`; without one, Nap makes one from the title.
+- The name is the origin: after a rename, what the nap stored in browsers (localStorage, IndexedDB, cookies) stays behind at the old one.
 - Use it only when the nap needs what the frame cannot do: localStorage or IndexedDB that lasts, cookies, service workers, client-side routing with real paths, root-absolute URLs that scripts build, or pointer lock. This is for now: later every nap will run in a frame with its own origin.
 - Client-side routing (React Router, TanStack Router): put `{ "spa": true }` in `nap.json` at the root of the upload. Then a page path without a file, such as `/games/mini`, gets the root `index.html` and your router shows the page; missing files with an extension (`/assets/x.js`) stay 404. Use root-absolute asset paths (Vite's default `base: "/"`), so they also load on deep paths. Navigating inside the app keeps the page, so channels, voice calls, and live data stay connected.
 - It has no Nap bar unless the owner turns it on. Add the Share button before `</body>`: `<script src="/_nap/share.js" defer></script>`. Only the owner sees it. `data-position="bottom-left"`, `"top-right"`, or `"top-left"` moves it (default bottom-right). In the frame it shows nothing, so it is safe to keep.

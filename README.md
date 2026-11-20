@@ -6,7 +6,8 @@ can also keep its source in a Git repo on Nap, so agents can change it later.
 
 - **Dashboard:** `<root domain>`
 - **Naps:** `<root domain>/<name>`, in a sandboxed frame
-- **Naps on their own host (for now):** `<name>.<root domain>`
+- **Naps on their own host (for now):** `<name>.<content domain>`, where the
+  content domain is the root domain unless the instance sets a separate one
 - **Local:** `/<name>` and `/s/<name>/`
 
 The app uses TanStack Start, React, Tailwind CSS v4, and shadcn/ui with Base
@@ -54,10 +55,19 @@ repository holds no instance settings; the config repository holds them, with
 the secrets and a deploy workflow that deploys this code with them.
 
 1. **Cloudflare.** Add your domain as a zone. The dashboard is at the root
-   domain you choose and sites at `<slug>.<root domain>`, so the root domain
-   is the zone apex or one level below it (Universal SSL covers one wildcard
-   level). iOS and Android apps need the Workers Paid plan, for the signer
-   Container.
+   domain you choose and naps on their own host at `<name>.<root domain>`, so
+   the root domain is the zone apex or one level below it (Universal SSL
+   covers one wildcard level). iOS and Android apps need the Workers Paid
+   plan, for the signer Container.
+
+   Naps on their own host run their own code unsandboxed, so they can set
+   cookies for their parent domain: on `nap.example.com`, for every host of
+   `example.com`. To keep them away from it, add a second registrable domain
+   as a zone (such as `exampleusercontent.com`), set it as `contentDomain` in
+   `config.ts` and its zone as `content` in `production.ts`. Naps on their own
+   host then run at `<name>.<content domain>` behind an Access application of
+   their own, and old `<name>.<root domain>` links redirect there.
+
 2. **Zero Trust.** Create a team; its domain
    (`https://<team>.cloudflareaccess.com`) is your `accessIssuer`. Under
    Authentication, add the login methods people will use: One-time PIN works
@@ -69,8 +79,9 @@ the secrets and a deploy workflow that deploys this code with them.
    Workers Containers, Workers Observability, Artifacts, Secrets Store,
    Access: Apps and Policies, Access: Organizations, Identity Providers, and
    Groups, and Access: Service Tokens (all Edit), plus Workers Tail and Account
-   Settings (Read). On your zone: Workers Routes and DNS (Edit), Zone and Zone
-   Settings (Read). Workers Containers is only needed with apps.
+   Settings (Read). On your zone, and on the content domain's zone if it has
+   one: Workers Routes and DNS (Edit), Zone and Zone Settings (Read). Workers
+   Containers is only needed with apps.
 4. **R2 signing token.** Create a user API token with only "Workers R2
    Storage Bucket Item Write" on the bucket `nap-sites` (the bucket can not
    exist yet). Its id is `NAP_R2_ACCESS_KEY_ID`, and the SHA-256 of its value
@@ -172,6 +183,14 @@ This repository knows no instance. Each instance keeps its settings in
 application lets in the people listed there, with any login method of the
 Zero Trust team. Alchemy keeps its state in the account's state store.
 
+With a separate content domain (`contentDomain`, and `content` in
+`production.ts`), Alchemy also manages two proxied records in its zone (the
+apex and `*.<content>`), Worker routes for both, and a second Access
+application, `nap-content`, for the same people with the same session length.
+Its cookie is HttpOnly and SameSite=Lax. Nothing on the content domain
+bypasses Access, and `*.<root>` stays behind the human application and routed
+to the Worker, which only redirects there. The zone itself is not managed.
+
 ```sh
 pnpm infra:inventory # Read-only inspection; private snapshots in backups/
 pnpm plan            # Inspect the proposed changes
@@ -206,11 +225,17 @@ the owner chose, in one namespace. `kind` says how it is served:
   to its owner and the people it invites; one shared with everyone shows to
   others once they have opened it. Old `<root>/artifact/<id>` links redirect
   there permanently.
-- **On its own host** (`kind = 'site'`) at `<name>.<root>`: a real origin,
-  so these naps cannot read each other's data unless one allows it (below),
-  and they get lasting browser storage, service workers, and root-absolute
-  URLs. This is an interim mode for the naps that need these. It goes away
-  once frames get origins of their own on a separate content domain.
+- **On its own host** (`kind = 'site'`) at `<name>.<content>`: a real
+  origin, so these naps cannot read each other's data unless one allows it
+  (below), and they get lasting browser storage, service workers, and
+  root-absolute URLs. This is an interim mode for the naps that need these.
+  `<content>` is the content domain, the root domain unless the instance has
+  a separate one (`contentDomain`). On the root's registrable domain these
+  naps can set cookies for the whole site, the dashboard's and Access's
+  included; a separate content domain keeps them on a site of their own. The
+  name is the origin, so a rename leaves browser storage behind, and a new nap
+  that takes a deleted nap's name gets an origin where browsers may still
+  hold the old nap's storage.
 
 A nap also has a `type`: `page` (the default) or `dashboard`. The type
 changes how Nap shows and counts a nap and which instructions agents read;
@@ -236,10 +261,10 @@ before it moves into the frame.
 
 The owner can rename a nap (a chosen name, or back to a random id) and move
 it between the frame and its own host. A move keeps the name and only changes
-`kind`: `<root>/<name>` sends a nap on its own host there, and `<name>.<root>`
+`kind`: `<root>/<name>` sends a nap on its own host there, and `<name>.<content>`
 sends a nap in the frame to `<root>/<name>`. A rename moves the R2 files and
 rows to the new key (`src/lib/rekey.ts`), and the old name stays in
-`nap_redirects`. It only redirects, from both `<name>.<root>` and
+`nap_redirects`. It only redirects, from both `<name>.<content>` and
 `<root>/<name>`, and is never shown. A live nap with that name always wins
 over a redirect. The agent API still says `kind: "site" | "artifact"`, next
 to the clearer `ownHost`.
@@ -253,6 +278,25 @@ its settings, its URL, or its owner, or deletes it. A transfer goes only to
 someone who has used Nap, and the previous owner stays invited. Naps on
 their own host can show the Nap bar too (`src/lib/nap-toolbar.ts`). It serves
 the nap in a frame on the same host, so there is only one Access cookie.
+
+### Hosts
+
+`src/worker.ts` dispatches by host first (`resolveHost`):
+
+| Host                                      | Serves                                                                                      |
+| ----------------------------------------- | ------------------------------------------------------------------------------------------- |
+| `<root>`                                  | the dashboard, naps in the frame, the agent API, frames, hooks                              |
+| `<name>.<content>`                        | that one nap and its own `/_nap/*` endpoints; naps in the frame redirect to `<root>/<name>` |
+| `<name>.<root>` (separate content domain) | only redirects: to `<name>.<content>` or `<root>/<name>`                                    |
+| `<content>`, `www.<content>`              | a redirect to the dashboard                                                                 |
+| `artifacts.<root>`                        | old artifact links, redirected                                                              |
+| anything deeper                           | not found                                                                                   |
+
+On a separate content domain, every request must carry an Access JWT for the
+content application's audience; the Worker checks its signature against the
+team's keys (`src/lib/content-domain.ts`) before anything else. On the root,
+the Worker trusts the email header Access sets and does not check the JWT
+itself, so the root relies on every non-bypassed path being behind Access.
 
 ### Collections
 

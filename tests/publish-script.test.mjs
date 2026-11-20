@@ -24,7 +24,7 @@ const SCRIPT = new URL("../src/content/publish.mjs", import.meta.url).pathname;
  * Runs publish.mjs against a stand-in for Nap's upload API, with an empty file list so nothing
  * is PUT, and returns what it asked Nap to make.
  */
-async function publishBody(args) {
+async function publishBody(args, script = SCRIPT) {
   const bodies = [];
   const server = createServer(async (request, response) => {
     let text = "";
@@ -55,7 +55,7 @@ async function publishBody(args) {
     await new Promise((resolve, reject) =>
       execFile(
         process.execPath,
-        [SCRIPT, dir, ...args],
+        [script, dir, ...args],
         {
           env: {
             ...process.env,
@@ -115,6 +115,38 @@ test("publish.mjs sends --type, and nothing without it, so Nap keeps its default
   assert.equal(update.type, "dashboard", "an update can change it");
   assert.deepEqual(parseNapType("slides"), { error: 'type must be "page" or "dashboard"' });
   assert.equal(parseNapType(" Dashboard "), "dashboard");
+});
+
+test("publish.mjs --update takes a nap's URL on the root, the content domain, or an old host", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const { fillDeploymentText } = await import("../src/lib/deployment-text.ts");
+  const dir = await mkdtemp(join(tmpdir(), "nap-publish-script-"));
+  const filled = (contentDomain) =>
+    fillDeploymentText(source, {
+      rootDomain: "nap.test",
+      contentDomain,
+      orgName: "Test",
+      admin: "the admin",
+      defaultAccess: "private",
+      apps: null,
+    });
+  const source = await readFile(SCRIPT, "utf8");
+  try {
+    const separate = join(dir, "separate.mjs");
+    await writeFile(separate, filled("napcontent.test"));
+    const id = async (url, script = separate) => (await publishBody(["--update", url], script)).id;
+    assert.equal(await id("https://elo.napcontent.test/games/?x=1"), "elo");
+    assert.equal(await id("https://elo.nap.test/"), "elo", "the old host");
+    assert.equal(await id("https://nap.test/board/notes"), "board");
+    assert.equal(await id("https://nap.test/artifact/board"), "board");
+    assert.equal(await id("elo"), "elo");
+    const same = join(dir, "same.mjs");
+    await writeFile(same, filled(undefined));
+    assert.equal(await id("https://elo.nap.test/", same), "elo");
+    assert.match(filled("napcontent.test"), /its own host, <name>\.napcontent\.test/);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });
 
 test("publish.mjs help points to the dashboards topic", async () => {

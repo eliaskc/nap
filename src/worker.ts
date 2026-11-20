@@ -26,7 +26,8 @@ import { handleSiteFetch } from "~/lib/site-fetch";
 import { handleSiteFilesRequest } from "~/lib/site-files";
 import { EXTENSIONS } from "~/lib/extension-registry";
 import { handleExtensionRequest } from "~/lib/extensions";
-import { resolveHost, serveUploadedSite } from "~/lib/site-serving";
+import { isContentDomainHost, resolveHost, serveUploadedSite } from "~/lib/site-serving";
+import { redirectFromOldHost, verifyContentAccess } from "~/lib/content-domain";
 import { serveShareWidget } from "~/lib/share-widget";
 import { meResponse, peopleResponse, welcomeRedirect } from "~/lib/welcome";
 import { failNoStore } from "~/server/http";
@@ -50,20 +51,41 @@ const siteData = (hostSlug: string, request: Request, path: string) => {
   });
 };
 
-/** Routes a request by host and path. Everything else goes to the TanStack app. */
+/**
+ * Routes a request by host and path. Everything else goes to the TanStack app.
+ *
+ * Hosts (resolveHost), with <content> the content domain (by default the root domain):
+ * - <root>: the dashboard, naps in the frame, the agent API, frames, hooks. The only host with
+ *   anything that is not one nap's.
+ * - <name>.<content>: that one nap and its own /_nap/* endpoints, nothing else.
+ * - With a separate content domain: <name>.<root> only redirects (redirectFromOldHost), the
+ *   content apex and www redirect to the dashboard, and every request to the content domain must
+ *   carry its Access application's JWT (verifyContentAccess).
+ * - Deeper hosts: not found.
+ */
 const routeRequest = Effect.fn("routeRequest")(function* (
-  request: Request,
+  incoming: Request,
   env: Env,
   ctx: ExecutionContext,
 ) {
-  const { rootDomain } = yield* Settings;
+  const { rootDomain, contentDomain } = yield* Settings;
+  const host = incoming.headers.get("host") ?? "";
+  const target = resolveHost(host, rootDomain, contentDomain);
+  // Nothing on the content domain is served without its own Access session.
+  const request = isContentDomainHost(host, rootDomain, contentDomain)
+    ? yield* verifyContentAccess(incoming)
+    : incoming;
   const url = new URL(request.url);
-  const target = resolveHost(request.headers.get("host") ?? "", rootDomain);
   const isLocal = ["localhost", "127.0.0.1"].includes(url.hostname);
-  const place: NapPlace = { rootDomain, localOrigin: isLocal ? url.origin : null };
+  const place: NapPlace = { rootDomain, contentDomain, localOrigin: isLocal ? url.origin : null };
   const dashboardOrigin = isLocal ? url.origin : `https://${rootDomain}`;
   /** People without a name go to the welcome page first. */
   const welcome = () => welcomeRedirect(request, dashboardOrigin, isLocal);
+
+  // Hosts that serve nothing at all: redirect or refuse before any route below.
+  if (target.type === "unknown") return new Response("Not found", { status: 404 });
+  if (target.type === "contentApex") return Response.redirect(`https://${rootDomain}/`, 302);
+  if (target.type === "moved") return yield* redirectFromOldHost(target.slug, request, place);
 
   if (url.pathname === "/_nap/client.js" && request.method === "GET") {
     return serveSiteDataClient();
@@ -209,7 +231,7 @@ const routeRequest = Effect.fn("routeRequest")(function* (
     }
   }
 
-  // <name>.<root> serves one nap on its own host. Each has its own origin, so they cannot read
+  // <name>.<content> serves one nap on its own host. Each has its own origin, so they cannot read
   // each other's data, except collections another nap's nap.json allows them
   // (/_nap/data/@<name>/). Naps in the frame redirect to <root>/<name>.
   if (target.type === "site") {
@@ -241,7 +263,7 @@ const routeRequest = Effect.fn("routeRequest")(function* (
     }
     // The old artifact viewer sent tabs here once. Keep those links working.
     if (url.pathname === "/_nap/session" && request.method === "GET") {
-      return Response.redirect(`https://${slug}.${rootDomain}/`, 302);
+      return Response.redirect(`https://${slug}.${contentDomain}/`, 302);
     }
     if (url.pathname.startsWith("/_nap/data/")) {
       return yield* siteData(slug, request, url.pathname.slice("/_nap/data/".length));
@@ -269,6 +291,11 @@ const routeRequest = Effect.fn("routeRequest")(function* (
       const path = url.pathname.slice("/_nap/ext/".length);
       return yield* handleExtensionRequest(EXTENSIONS, slug, request, getIdentity(request), path);
     }
+    // On a separate content domain, nothing else below /_nap/ is Nap's, and a nap's own files
+    // never stand in for it there.
+    if (contentDomain !== rootDomain && url.pathname.startsWith("/_nap/")) {
+      return new Response("Not found", { status: 404 });
+    }
     const toWelcome = yield* welcome();
     if (toWelcome) return toWelcome;
     return yield* serveUploadedSite(slug, url.pathname, request, {
@@ -291,8 +318,6 @@ const routeRequest = Effect.fn("routeRequest")(function* (
       302,
     );
   }
-
-  if (target.type === "unknown") return new Response("Not found", { status: 404 });
 
   // Dashboard pages, except the welcome page itself and the API.
   if (!url.pathname.startsWith("/_nap/") && !url.pathname.startsWith("/api/")) {

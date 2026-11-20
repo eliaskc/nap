@@ -536,6 +536,12 @@ try {
     headers: { ...signedIn(OWNER), "sec-fetch-dest": "document" },
   });
   assert.match(siteDocument.text, /map/, "new sites have no toolbar by default");
+  // The local stand-in /s/<name>/ never serves a nap's code on the root host.
+  assert.equal(
+    (await call("/s/team-map/", { host: ROOT, headers: signedIn(OWNER) })).status,
+    404,
+    "/s/ is local only",
+  );
 
   // nap.json: "spa" serves the root index.html for page paths without a file. Manifests are
   // cached per version, so this writes it before anything reads it.

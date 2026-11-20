@@ -4,7 +4,7 @@ A page or app tells the people on this Nap that something happened: "Elias wants
 
 - Load `<script src="/_nap/client.js"></script>`, then `await nap.notify({ title: "Elias wants to play", body: "Join the next round", open: "/" })`. It resolves with `{ sent }`, the number of people it went to.
 - `title` is required (up to 80 characters); `body` is optional (up to 240). Write them as the message itself, short and specific; the page's title is shown with it.
-- `open` is where a tap goes: a path in the nap itself (default its home page) or a URL on {{rootDomain}}. Links elsewhere are refused.
+- `open` is where a tap goes: a path in the nap itself (default its home page) or a URL on {{rootDomain}} or a nap's own host (`<name>.{{contentDomain}}`). Links elsewhere are refused.
 - It goes to everyone else who can see the page, never to the sender. `skip: ["ann@example.com", …]` leaves people out too, such as the others who were there for what it is about (a team's own "We solved it"). There are no lists or subscriptions yet, so send only what most people who can see the page want to hear, and only when a person does something (a button press), never on a timer or on page load.
 - `only: [emails]` sends to those people alone (still never the sender, and only if they can see the page), such as "Ann beat your score" to the people Ann beat. An empty list sends to nobody.
 - `tag: "wordle-2026-11-10"` (up to 64 letters, digits, `.`, `_`, `:`, `-`) makes a newer notification from this page with the same tag replace the older one on every phone and browser, instead of piling up: one notification a game a day that says who has played so far. `quiet: true` sends it without a sound or a banner, only into the list, such as later updates of a tagged one.

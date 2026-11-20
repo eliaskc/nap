@@ -20,10 +20,11 @@ import { route } from "~/server/route";
 
 const placeOf = (request: Request) =>
   Effect.gen(function* () {
-    const { rootDomain } = yield* Settings;
+    const { rootDomain, contentDomain } = yield* Settings;
     const url = new URL(request.url);
     return {
       rootDomain,
+      contentDomain,
       localOrigin: isLocalHostname(url.hostname) ? url.origin : null,
     } satisfies NapPlace;
   });

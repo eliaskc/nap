@@ -9,10 +9,21 @@ import type { AutomaticCapability } from "~/lib/capabilities";
  */
 export type NapConfig = {
   /**
-   * The dashboard host. Sites are served at <slug>.<rootDomain>, so the TLS certificate must
-   * cover that wildcard (Universal SSL covers one level below the zone apex).
+   * The dashboard host. Naps in Nap's frame are at <rootDomain>/<name>.
    */
   rootDomain: string;
+  /**
+   * Where naps on their own host are served: <name>.<contentDomain>, so the TLS certificate must
+   * cover that wildcard (Universal SSL covers one level below the zone apex). Defaults to
+   * rootDomain.
+   *
+   * A nap on its own host runs its own code unsandboxed, so it can set cookies for its parent
+   * domain. On the root's registrable domain (nap.example.com is example.com) that reaches
+   * every host of the organisation. A separate registrable domain, such as
+   * exampleusercontent.com, keeps those naps away from the root's cookies: set it here and
+   * describe its zone in production.ts (`content`). Old <name>.<rootDomain> links then redirect.
+   */
+  contentDomain?: string;
   /** Who "everyone" means in the UI and agent docs: the people Cloudflare Access lets in. */
   orgName: string;
   /**

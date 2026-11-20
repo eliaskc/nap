@@ -62,7 +62,7 @@ import {
   type UploadFile,
 } from "~/dashboard/upload";
 import type { Color, Shape } from "~/lib/looks";
-import { napLabel } from "~/lib/nap-urls";
+import { NAP_DOMAINS, napLabel } from "~/lib/nap-urls";
 import { isNapType, NAP_TYPES, type NapType } from "~/lib/nap-types";
 import { napConfig } from "~/nap.config";
 
@@ -76,7 +76,7 @@ export type Actions = {
   visitors: (site: Site) => void;
   transfer: (site: Site) => void;
   rename: (site: Site) => void;
-  /** Between Nap's frame (<root>/<name>) and its own host (<name>.<root>). Keeps the name. */
+  /** Between Nap's frame (<root>/<name>) and its own host (<name>.<content>). Keeps the name. */
   toggleKind: (site: Site) => void;
   /** The Nap bar above a nap in the frame, on or off. */
   toggleBar: (site: Site) => void;
@@ -463,7 +463,9 @@ export function DashboardActions({
                   }}
                 />
                 {renamingSite?.kind === "site" && (
-                  <span className="shrink-0 text-sm text-muted-foreground">.{hostSuffix}</span>
+                  <span className="shrink-0 text-sm text-muted-foreground">
+                    .{NAP_DOMAINS.contentDomain}
+                  </span>
                 )}
                 <Button
                   variant={renameRandom ? "secondary" : "outline"}
@@ -513,9 +515,7 @@ export function DashboardActions({
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Share {sharingSite?.title}</DialogTitle>
-            <DialogDescription>
-              {sharingSite && napLabel(sharingSite, hostSuffix)}
-            </DialogDescription>
+            <DialogDescription>{sharingSite && napLabel(sharingSite)}</DialogDescription>
           </DialogHeader>
           <ShareAccess
             value={shareAccess}
@@ -545,7 +545,7 @@ export function DashboardActions({
             <DialogTitle>Delete nap?</DialogTitle>
             <DialogDescription>
               {deletingSite
-                ? `This removes ${napLabel(deletingSite, hostSuffix)} from Nap. Uploaded files may be cleaned up later.`
+                ? `This removes ${napLabel(deletingSite)} from Nap. Uploaded files may be cleaned up later.`
                 : "This removes it from Nap."}
             </DialogDescription>
           </DialogHeader>
@@ -678,10 +678,7 @@ export function ItemMenu({
               <ContextMenuItem onClick={() => actions.toggleKind(site)}>
                 <ArrowRightLeftIcon data-icon="inline-start" />
                 Move to{" "}
-                {napLabel(
-                  { slug: site.slug, kind: site.kind === "site" ? "artifact" : "site" },
-                  napConfig.rootDomain,
-                )}
+                {napLabel({ slug: site.slug, kind: site.kind === "site" ? "artifact" : "site" })}
               </ContextMenuItem>
             </ContextMenuGroup>
             <ContextMenuSeparator />

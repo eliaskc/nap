@@ -43,10 +43,15 @@ const EXTENSION_TOPICS = EXTENSIONS.filter(
 }));
 
 /** One instructions page ("index" for the main one), or null when this Nap has no such topic. */
-export function agentInstructionsFor(rootDomain = napConfig.rootDomain, topic = "index") {
+export function agentInstructionsFor(
+  rootDomain = napConfig.rootDomain,
+  topic = "index",
+  contentDomain = rootDomain === napConfig.rootDomain ? napConfig.contentDomain : undefined,
+) {
+  const config = { ...napConfig, contentDomain: contentDomain || rootDomain };
   const extension = EXTENSION_TOPICS.find((entry) => entry.name === topic);
-  if (extension) return renderInstructions(extension.text, napConfig, rootDomain);
+  if (extension) return renderInstructions(extension.text, config, rootDomain);
   if (!Object.hasOwn(TOPICS, topic)) return null;
   if (OPTIONAL_TOPICS[topic] && !OPTIONAL_TOPICS[topic](napConfig)) return null;
-  return renderInstructions(TOPICS[topic], napConfig, rootDomain, EXTENSION_TOPICS);
+  return renderInstructions(TOPICS[topic], config, rootDomain, EXTENSION_TOPICS);
 }

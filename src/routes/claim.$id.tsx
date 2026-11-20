@@ -8,7 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "~/com
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "~/components/ui/field";
 import { Input } from "~/components/ui/input";
 import { Skeleton } from "~/components/ui/skeleton";
-import { artifactPath, browserPlace, napLabel, napUrl } from "~/lib/nap-urls";
+import { artifactPath, browserPlace, NAP_DOMAINS, napLabel, napUrl } from "~/lib/nap-urls";
 import { cn } from "~/lib/utils";
 import { napConfig } from "~/nap.config";
 
@@ -270,7 +270,7 @@ function ClaimPage() {
                     <Field>
                       <FieldLabel>Updates</FieldLabel>
                       <p className="truncate text-sm text-muted-foreground">
-                        {napLabel(ownedSite, hostSuffix())}
+                        {napLabel(ownedSite, { ...NAP_DOMAINS, rootDomain: hostSuffix() })}
                       </p>
                       <FieldDescription>
                         {othersSite
@@ -295,7 +295,7 @@ function ClaimPage() {
                         />
                         {kind === "site" && (
                           <span className="shrink-0 text-sm text-muted-foreground">
-                            .{hostSuffix()}
+                            .{NAP_DOMAINS.contentDomain}
                           </span>
                         )}
                       </div>

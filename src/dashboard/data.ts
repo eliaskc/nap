@@ -62,7 +62,7 @@ export type Item = {
   title: string;
   /** Where it opens. */
   url: string;
-  /** The URL as people read it: `root/name`, or `name.root` on its own host. */
+  /** The URL as people read it: `root/name`, or `name.content` on its own host. */
   label: string;
   ownerEmail: string;
   ownerName: string;
@@ -145,7 +145,7 @@ export function useDashboardData() {
         slug: site.slug,
         title: site.title,
         url: place ? napUrl(site, place) : "#",
-        label: napLabel(site, root),
+        label: napLabel(site),
         ownerEmail: site.createdByEmail,
         ownerName: site.authorDisplayName ?? site.createdByEmail,
         mine: myEmail !== null && site.createdByEmail.toLowerCase() === myEmail,

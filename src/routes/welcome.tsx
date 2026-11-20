@@ -62,14 +62,20 @@ const COPY: Record<Outcome, { emoji: string; title: string; body?: string }> = {
   },
 };
 
-/** Only Nap's own hosts: this origin, the dashboard, and its sites. Anything else goes home. */
+/** Only Nap's own hosts: this origin, the dashboard, and its naps' hosts. Anything else goes home. */
 function safeNext(raw: string | undefined) {
   if (!raw) return "/";
   try {
     const url = new URL(raw, window.location.origin);
     const root = napConfig.rootDomain.toLowerCase();
+    const content = (napConfig.contentDomain || root).toLowerCase();
     if (url.origin === window.location.origin) return url.href;
-    if (url.protocol === "https:" && (url.hostname === root || url.hostname.endsWith(`.${root}`))) {
+    if (
+      url.protocol === "https:" &&
+      (url.hostname === root ||
+        url.hostname.endsWith(`.${root}`) ||
+        url.hostname.endsWith(`.${content}`))
+    ) {
       return url.href;
     }
   } catch {

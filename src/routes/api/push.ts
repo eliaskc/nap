@@ -10,7 +10,7 @@ import {
   webPushConfig,
 } from "~/lib/notifications";
 import { isLocalHostname } from "~/lib/nap-urls";
-import { napConfig } from "~/nap.config";
+import { Settings } from "~/server/platform";
 import { failNoStore, json, noStore, readJsonObject, requireSameSite } from "~/server/http";
 import { route } from "~/server/route";
 
@@ -60,7 +60,8 @@ export const Route = createFileRoute("/api/push")({
             if (body.test === true) {
               const url = new URL(request.url);
               const local = isLocalHostname(url.hostname) ? url.origin : null;
-              yield* sendTest(identity, { rootDomain: napConfig.rootDomain, localOrigin: local });
+              const { rootDomain, contentDomain } = yield* Settings;
+              yield* sendTest(identity, { rootDomain, contentDomain, localOrigin: local });
             }
             return json({ ok: true }, { headers: noStore });
           }),

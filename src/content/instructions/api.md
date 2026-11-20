@@ -17,7 +17,7 @@ Never print the token or put it in a project. In a sandbox that cannot write the
 
 - One HTML file: `curl -sS https://{{rootDomain}}/_nap/api/naps -H "authorization: Bearer $TOKEN" -H 'content-type: text/html' --data-binary @bundle.html --url-query 'title=Q3 report'`
 - A name: add `--url-query name=team-map` for `{{rootDomain}}/team-map`. Without one, the nap gets a random id.
-- Its own host, only for the needs in the `sites` topic: add `ownHost=true`, for `<name>.{{rootDomain}}`. (The older fields still work: `kind=site` is `ownHost=true`, `kind=artifact` the frame, and `slug` alone a name on its own host.)
+- Its own host, only for the needs in the `sites` topic: add `ownHost=true`, for `<name>.{{contentDomain}}`. (The older fields still work: `kind=site` is `ownHost=true`, `kind=artifact` the frame, and `slug` alone a name on its own host.)
 - Several files: multipart, each file with its path: `-F 'title=Team map' -F name=team-map -F 'files=@dist/index.html;filename=index.html' -F 'files=@dist/assets/app.js;filename=assets/app.js'`
 - A dashboard: add `type=dashboard` (`dashboards` topic). Without it a new nap is a page (`type=page`); other values are refused. On a new version, only the owner's `type` changes it.
 - Access for a new nap: `access=private`, `access=everyone`, or `access=selected` with `emails=a@x.com,b@x.com`. Without it the nap gets the default ({{defaultAccess}}).
@@ -34,7 +34,7 @@ Never print the token or put it in a project. In a sandbox that cannot write the
 
 ## Read and change naps
 
-- `GET /_nap/api/naps`: the user's naps and those shared with them by name: id, title, url, ownHost, owner, role. Naps shared with everyone are not listed but work by id. The id is the name in the URL: `{{rootDomain}}/<id>`, or `<id>.{{rootDomain}}` on its own host. Old links of the form `{{rootDomain}}/artifact/<id>` still work.
+- `GET /_nap/api/naps`: the user's naps and those shared with them by name: id, title, url, ownHost, owner, role. Naps shared with everyone are not listed but work by id. The id is the name in the URL: `{{rootDomain}}/<id>`, or `<id>.{{contentDomain}}` on its own host. Old links of the form `{{rootDomain}}/artifact/<id>` still work.
 - `GET /_nap/api/naps/<id>`: one nap, with currentVersion and source.
 - `GET /_nap/api/naps/<id>/files` lists the live files, and `/files/<path>` returns one. Add `?version=<version>` for an older version.
 - `GET /_nap/api/naps/<id>/versions`: history, newest first.

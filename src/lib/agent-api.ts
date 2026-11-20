@@ -114,23 +114,26 @@ const limitUploads = Effect.fnUntraced(function* (agent: AgentIdentity) {
 });
 
 export const handleAgentApi = Effect.fn("handleAgentApi")(function* (request: Request) {
-  const { rootDomain } = yield* Settings;
+  const { rootDomain, contentDomain } = yield* Settings;
   const url = new URL(request.url);
   const path = url.pathname.slice(PREFIX.length).replace(/\/+$/, "") || "/";
   const method = request.method;
 
   const topic = /^\/instructions(?:\/([a-z]+))?$/.exec(path);
   if (topic && method === "GET") {
-    const text = agentInstructionsFor(rootDomain, topic[1] ?? "index");
+    const text = agentInstructionsFor(rootDomain, topic[1] ?? "index", contentDomain);
     if (text === null) return yield* failNoStore(404, "No such topic");
     return markdown(text);
   }
   // The agent skill (skills/nap/SKILL.md), for installing without GitHub.
   if (path === "/skill" && method === "GET") return markdown(skill);
   if (path === "/publish.mjs" && method === "GET") {
-    return new Response(fillDeploymentText(publishScript, { ...napConfig, rootDomain }), {
-      headers: { "content-type": "text/javascript; charset=utf-8", ...noStore },
-    });
+    return new Response(
+      fillDeploymentText(publishScript, { ...napConfig, rootDomain, contentDomain }),
+      {
+        headers: { "content-type": "text/javascript; charset=utf-8", ...noStore },
+      },
+    );
   }
   // The types of window.nap (/_nap/client.js), for sites written in TypeScript.
   if (path === "/client.d.ts" && method === "GET") return serveClientTypes();
@@ -140,7 +143,11 @@ export const handleAgentApi = Effect.fn("handleAgentApi")(function* (request: Re
   const agent = yield* authenticateAgent(request);
   const db = yield* Database;
 
-  const place = { rootDomain, localOrigin: isLocalHostname(url.hostname) ? url.origin : null };
+  const place = {
+    rootDomain,
+    contentDomain,
+    localOrigin: isLocalHostname(url.hostname) ? url.origin : null,
+  };
   const napUrl = (nap: { slug: string; kind: NapKind }) => placeUrl(nap, place);
   const describe = (row: NapRow) => ({
     id: row.slug,

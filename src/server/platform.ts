@@ -34,6 +34,17 @@ export class Settings extends Context.Service<
   Settings,
   {
     readonly rootDomain: string;
+    /**
+     * Where naps on their own host are served: <name>.<contentDomain>. The root domain unless the
+     * deployment has a separate content domain (napConfig.contentDomain).
+     */
+    readonly contentDomain: string;
+    /**
+     * The Cloudflare Access application of a separate content domain: its team domain (issuer)
+     * and audience tag. Requests to content hosts must carry an Access JWT for it. Null when the
+     * content domain is the root, or on local stages that do not set one.
+     */
+    readonly contentAccess: { issuer: string; aud: string } | null;
     /** Direct uploads: presigned R2 URLs. Null when R2 signing is not set up. */
     readonly r2: R2Credentials | null;
     /** Apps: the App Store Connect team key. Null when it is not set up. */
@@ -55,6 +66,9 @@ export class Settings extends Context.Service<
 
 export type SettingsEnv = {
   NAP_ROOT_DOMAIN?: string;
+  NAP_CONTENT_DOMAIN?: string;
+  NAP_ACCESS_ISSUER?: string;
+  NAP_CONTENT_ACCESS_AUD?: string;
   NAP_R2_ACCOUNT_ID?: string;
   NAP_R2_BUCKET?: string;
   NAP_R2_ACCESS_KEY_ID?: string;
@@ -73,8 +87,16 @@ export type SettingsEnv = {
   NAP_SLACK_SIGNING_SECRET?: string;
 };
 
-export function settingsFromEnv(env: SettingsEnv, rootDomain: string): Settings["Service"] {
+export function settingsFromEnv(
+  env: SettingsEnv,
+  rootDomain: string,
+  contentDomain?: string,
+): Settings["Service"] {
   const text = (value: unknown) => (value ? String(value) : "");
+  const root = (text(env.NAP_ROOT_DOMAIN) || rootDomain).toLowerCase();
+  const content = (text(env.NAP_CONTENT_DOMAIN) || contentDomain || root).toLowerCase();
+  const accessIssuer = text(env.NAP_ACCESS_ISSUER).replace(/\/+$/, "");
+  const contentAud = text(env.NAP_CONTENT_ACCESS_AUD);
   const accountId = text(env.NAP_R2_ACCOUNT_ID);
   const bucket = text(env.NAP_R2_BUCKET);
   const accessKeyId = text(env.NAP_R2_ACCESS_KEY_ID);
@@ -89,7 +111,12 @@ export function settingsFromEnv(env: SettingsEnv, rootDomain: string): Settings[
   const slackBotToken = text(env.NAP_SLACK_BOT_TOKEN);
   const slackSigningSecret = text(env.NAP_SLACK_SIGNING_SECRET);
   return Settings.of({
-    rootDomain: text(env.NAP_ROOT_DOMAIN) || rootDomain,
+    rootDomain: root,
+    contentDomain: content,
+    contentAccess:
+      content !== root && accessIssuer && contentAud
+        ? { issuer: accessIssuer, aud: contentAud }
+        : null,
     r2:
       accountId && bucket && accessKeyId && secretAccessKey
         ? { accountId, bucket, accessKeyId, secretAccessKey }

@@ -79,10 +79,10 @@ export const handleSiteFetch = Effect.fn("handleSiteFetch")(function* (
   let body = yield* readBody(request);
   if (body === "too large") return yield* failNoStore(413, "The request body is too large");
 
-  const { rootDomain } = yield* Settings;
+  const { rootDomain, contentDomain } = yield* Settings;
   const hosts = (yield* siteManifest(slug, site.currentVersion)).fetch;
   for (let redirects = 0; ; redirects++) {
-    const problem = checkTarget(target, hosts, rootDomain);
+    const problem = checkTarget(target, hosts, [rootDomain, contentDomain]);
     if (problem) return yield* failNoStore(403, problem);
 
     const upstream = yield* fetchUpstream(target, request, method, forwarded, body);
@@ -208,12 +208,12 @@ function parseUrl(value: string) {
   }
 }
 
-function checkTarget(target: URL, hosts: string[], rootDomain: string) {
+function checkTarget(target: URL, hosts: string[], napDomains: string[]) {
   if (target.protocol !== "https:") return "Only https URLs can be fetched";
   if (target.username || target.password) return "URLs with credentials cannot be fetched";
   if (target.port && target.port !== "443") return "Only the default https port can be fetched";
   const host = target.hostname.toLowerCase();
-  if (host === rootDomain || host.endsWith(`.${rootDomain}`)) {
+  if (napDomains.some((domain) => host === domain || host.endsWith(`.${domain}`))) {
     return "Nap's own hosts cannot be fetched";
   }
   if (!hosts.some((allowed) => hostMatches(host, allowed))) {

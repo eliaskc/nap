@@ -61,7 +61,7 @@ const envServices = new WeakMap<object, Context.Context<Exclude<NapServices, Bac
 function servicesFor(env: NapEnv) {
   let services = envServices.get(env);
   if (!services) {
-    const settings = settingsFromEnv(env, napConfig.rootDomain);
+    const settings = settingsFromEnv(env, napConfig.rootDomain, napConfig.contentDomain);
     services = Context.make(Database, Database.make(env.DB)).pipe(
       Context.add(Storage, Storage.make(env.SITES ?? missingBucket())),
       Context.add(Settings, settings),
