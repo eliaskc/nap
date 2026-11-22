@@ -29,6 +29,12 @@ export type TurnKey = { keyId: string; token: string };
 /** A Slack app: its bot token (xoxb-...) and the signing secret that signs its requests. */
 export type SlackApp = { botToken: string; signingSecret: string };
 
+/**
+ * iOS cloud signing: the GitHub token that starts the signing workflow in the config repository,
+ * and the secret its job shows Nap.
+ */
+export type CloudSigningSecrets = { githubToken: string; secret: string };
+
 /** Settings from the Worker's environment. Empty values mean "not set up". */
 export class Settings extends Context.Service<
   Settings,
@@ -61,6 +67,8 @@ export class Settings extends Context.Service<
     readonly extensionSecrets: Readonly<Record<string, string>>;
     /** The Slack app for access requests. Null when it is not set up. */
     readonly slack: SlackApp | null;
+    /** iOS cloud signing (napConfig.apps.ios.signing.cloud). Null when it is not set up. */
+    readonly cloudSigning: CloudSigningSecrets | null;
   }
 >()("nap/Settings") {}
 
@@ -85,6 +93,8 @@ export type SettingsEnv = {
   NAP_EXTENSION_SECRETS?: string;
   NAP_SLACK_BOT_TOKEN?: string;
   NAP_SLACK_SIGNING_SECRET?: string;
+  NAP_SIGNING_GITHUB_TOKEN?: string;
+  NAP_SIGNING_SECRET?: string;
 };
 
 export function settingsFromEnv(
@@ -110,6 +120,8 @@ export function settingsFromEnv(
   const turnToken = text(env.NAP_TURN_KEY_API_TOKEN);
   const slackBotToken = text(env.NAP_SLACK_BOT_TOKEN);
   const slackSigningSecret = text(env.NAP_SLACK_SIGNING_SECRET);
+  const signingGithubToken = text(env.NAP_SIGNING_GITHUB_TOKEN);
+  const signingSecret = text(env.NAP_SIGNING_SECRET);
   return Settings.of({
     rootDomain: root,
     contentDomain: content,
@@ -130,6 +142,10 @@ export function settingsFromEnv(
     slack:
       slackBotToken && slackSigningSecret
         ? { botToken: slackBotToken, signingSecret: slackSigningSecret }
+        : null,
+    cloudSigning:
+      signingGithubToken && signingSecret
+        ? { githubToken: signingGithubToken, secret: signingSecret }
         : null,
   });
 }

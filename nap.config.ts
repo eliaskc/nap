@@ -42,10 +42,10 @@ export type NapConfig = {
     /** The app's slug on Nap. Its repo is app-<app>. */
     app: string;
     /**
-     * iOS: signed by Nap and distributed through TestFlight. Leave it out for no iOS. The signing
-     * certificate and the App Store Connect key are secrets (see alchemy.run.ts). The App ID,
-     * the App Store profile, and the app record are made by hand in the developer account; Nap
-     * never creates them.
+     * iOS: signed for the App Store and distributed through TestFlight. Leave it out for no iOS.
+     * The signing certificate and the App Store Connect key are secrets (see alchemy.run.ts). The
+     * App ID, the App Store profile, and the app record are made by hand in the developer account;
+     * Nap never creates them.
      */
     ios?: {
       /** The Apple developer team that owns the certificate and profiles. */
@@ -57,8 +57,32 @@ export type NapConfig = {
       appStoreId: string | null;
       /** The app record's bundle id, an explicit App ID such as com.example.nap. */
       bundleId: string;
-      /** The App Store provisioning profile for that bundle id, by its name. */
-      profileName: string;
+      /**
+       * The App Store provisioning profile for that bundle id, by its name. Not needed with
+       * `signing.cloud`, where Xcode manages the profile.
+       */
+      profileName?: string;
+      /**
+       * Who signs builds. Left out, Nap does: in its signer container, with the deployment's own
+       * Apple Distribution certificate (NAP_APPLE_SIGNING_PEM) and `profileName`.
+       *
+       * `cloud`: Apple's cloud-managed distribution certificate. It needs no certificate of the
+       * deployment's own, so it takes none of the team's few distribution certificates. Only
+       * Xcode can sign with it, so a macOS job in the deployment's config repository does: the
+       * workflow infra/config-repo-sign-ios.yml, which Nap starts for each build. Nap needs
+       * NAP_SIGNING_GITHUB_TOKEN to start it, and the job reaches Nap with NAP_SIGNING_SECRET.
+       * The build goes live once the job hands the signed app back, a minute or two later.
+       */
+      signing?: {
+        cloud: {
+          /** The config repository on GitHub, as owner/name. */
+          repository: string;
+          /** The workflow's file name there. Defaults to sign-ios.yml. */
+          workflow?: string;
+          /** The branch the workflow runs from. Defaults to main. */
+          ref?: string;
+        };
+      };
       /**
        * Capabilities that apps in the launcher may turn on for the App ID by declaring them in
        * app.json, such as ["push-notifications", "healthkit"]. Leave it out to allow every one

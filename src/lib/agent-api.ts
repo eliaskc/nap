@@ -33,7 +33,7 @@ import {
 import { isSafePath, napShape, normalizePath, readUpload, rejectLargeBody } from "~/lib/uploads";
 import { createSource, describeSource, mintSourceToken, SOURCE_BRANCH } from "~/lib/sources";
 import { listVersions, restoreVersion } from "~/lib/versions";
-import { handleAppsApi } from "~/lib/apps";
+import { handleAppsApi, handleSigningApi } from "~/lib/apps";
 import { handleSiteDataRequest } from "~/lib/site-data";
 import { handleSiteFilesRequest } from "~/lib/site-files";
 import { findPerson } from "~/lib/profiles";
@@ -139,6 +139,11 @@ export const handleAgentApi = Effect.fn("handleAgentApi")(function* (request: Re
   if (path === "/client.d.ts" && method === "GET") return serveClientTypes();
   if (path === "/auth/device") return yield* startDeviceLogin(request, url);
   if (path === "/auth/token") return yield* exchangeDeviceCode(request, url);
+
+  // An iOS cloud signing job: it shows the deployment's signing secret, not a token. See apps.ts.
+  if (path.startsWith("/signing/")) {
+    return yield* handleSigningApi(request, url, path.slice("/signing".length));
+  }
 
   const agent = yield* authenticateAgent(request);
   const db = yield* Database;

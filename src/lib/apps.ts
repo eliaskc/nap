@@ -19,6 +19,7 @@ import {
   planCapabilities,
   readRequests,
 } from "~/lib/capabilities";
+import { cloudSigning, isSigningJob, type SigningJob, startSigningJob } from "~/lib/cloud-signing";
 import { latestPlayVersionCode, PlayError, playConfigured, uploadToPlay } from "~/lib/google-play";
 import { slugify } from "~/lib/nap-server";
 import { apnsConfig } from "~/lib/notifications";
@@ -34,8 +35,8 @@ import { napConfig } from "~/nap.config";
 import { SignerBinding } from "~/server/bindings";
 import { Database } from "~/server/database";
 import type { NapServices } from "~/server/runtime";
-import { failNoStore, json, noStore, readParams } from "~/server/http";
-import { inBackground } from "~/server/platform";
+import { failNoStore, json, noStore, readJsonObject, readParams } from "~/server/http";
+import { inBackground, Settings } from "~/server/platform";
 import { Storage } from "~/server/storage";
 
 /**
@@ -54,7 +55,10 @@ import { Storage } from "~/server/storage";
  *
  * iOS: Nap signs the launcher with the App Store profile in the signer container and uploads it
  * to App Store Connect before it goes live. Apple processes it for a few minutes; Nap asks Apple
- * how far it got when someone looks at the apps.
+ * how far it got when someone looks at the apps. With cloud signing
+ * (napConfig.apps.ios.signing.cloud, src/lib/cloud-signing.ts) a macOS job signs instead: the
+ * publish answers while the build is still `signing`, and the build goes to TestFlight and
+ * live when the job hands the signed app back (handleSigningApi).
  *
  * Android: the upload is an unsigned Android App Bundle. Nap sets its version code and signs it
  * with the Play upload key in the signer container, then uploads it to Google Play's internal
@@ -171,6 +175,11 @@ const uploadKey = (app: string, build: string) => `apps/${app}/builds/${build}/u
 const signedKey = (app: string, build: string, profile: string) =>
   `apps/${app}/builds/${build}/signed-appstore-${profile}.ipa`;
 
+/** What a cloud signing job needs to know about a build (SigningJob), kept until it asks. */
+const signingJobKey = (app: string, build: string) => `apps/${app}/builds/${build}/signing.json`;
+/** A build still `signing` after this long failed: its request or its signing job died. */
+const SIGNING_TIMEOUT_MS = 30 * 60 * 1000;
+
 /** The Android bundle signed with the upload key, for Google Play. */
 const signedBundleKey = (app: string, build: string) => `apps/${app}/builds/${build}/signed.aab`;
 
@@ -226,6 +235,13 @@ export const handleAppsApi = Effect.fn("handleAppsApi")(function* (
       app.slug,
     );
     return json({ builds: results.map(describeBuild) }, { headers: noStore });
+  }
+  // One build: the publish script waits here for a build that a signing job is still signing.
+  const buildMatch = rest.match(/^\/builds\/([0-9a-f-]{36})$/);
+  if (buildMatch && method === "GET") {
+    const build = yield* getBuild(buildMatch[1]);
+    if (!build || build.appSlug !== app.slug) return yield* failNoStore(404, "Build not found");
+    return json({ build: describeBuild(yield* expireSigning(build)) }, { headers: noStore });
   }
   // The live build of a platform's launcher. Launchers ask this to update themselves.
   const targetMatch = rest.match(/^\/targets\/([a-z][a-z0-9-]{0,31})$/);
@@ -488,6 +504,61 @@ const publishBuild = Effect.fnUntraced(function* (
     notes,
     failBuild,
   });
+  const page = `${url.origin}/app`;
+  const answer = {
+    ok: true,
+    app: app.slug,
+    target,
+    buildNumber,
+    buildId: id,
+    sourceCommit: commit,
+    installPage: page,
+  };
+  // Someone else finishes the build (a signing job): it stays `signing` and is not live yet.
+  if ("pending" in processed) {
+    yield* logAppEvent(agent, app.slug, "publish-signing", { target, buildNumber, commit });
+    return json(
+      {
+        ...answer,
+        status: "signing",
+        ...processed.response,
+        message: processed.message(buildNumber, page),
+        readyMessage: processed.readyMessage(buildNumber, page),
+      },
+      { status: 202, headers: noStore },
+    );
+  }
+  yield* goLive(app, target, id, commit, processed, targetRow.liveBuild);
+  yield* logAppEvent(agent, app.slug, "publish", { target, buildNumber, commit });
+
+  return json(
+    { ...answer, ...processed.response, message: processed.message(buildNumber, page) },
+    { status: 201, headers: noStore },
+  );
+});
+
+/** What a platform made of a build. */
+type Processed = {
+  name: string;
+  version: string;
+  toolchain: string;
+  bytes: number;
+};
+
+/**
+ * Marks a processed build ready and makes it live, unless another build of this target went live
+ * meanwhile with commits this one lacks. `known` is the live build when processing began, if
+ * the caller knows it.
+ */
+const goLive = Effect.fnUntraced(function* (
+  app: AppRow,
+  target: string,
+  id: string,
+  commit: string,
+  processed: Processed,
+  known?: string | null,
+) {
+  const db = yield* Database;
   yield* db.run(
     `UPDATE app_builds SET status = 'ready', app_name = ?, short_version = ?, xcode = ?,
                            signed_bytes = ?
@@ -498,21 +569,22 @@ const publishBuild = Effect.fnUntraced(function* (
     processed.bytes,
     id,
   );
-
-  // Go live, unless another build of this target went live meanwhile with commits this one lacks.
-  let previous = targetRow.liveBuild;
+  let previous = known;
   for (let attempt = 0; attempt < 3; attempt++) {
-    const moved = yield* db.run(
-      `UPDATE app_targets SET live_build = ?1, title = ?2, updated_at = ?3
-       WHERE app_slug = ?4 AND target = ?5 AND live_build IS ?6`,
-      id,
-      processed.name || targetRow.title,
-      now(),
-      app.slug,
-      target,
-      previous,
-    );
-    if (moved.changes === 1) break;
+    if (previous !== undefined) {
+      const moved = yield* db.run(
+        `UPDATE app_targets SET live_build = ?1, title = CASE WHEN ?2 = '' THEN title ELSE ?2 END,
+                                updated_at = ?3
+         WHERE app_slug = ?4 AND target = ?5 AND live_build IS ?6`,
+        id,
+        processed.name,
+        now(),
+        app.slug,
+        target,
+        previous,
+      );
+      if (moved.changes === 1) break;
+    }
     const current = yield* getTarget(app.slug, target);
     const currentBuild = current?.liveBuild ? yield* getBuild(current.liveBuild) : null;
     if (
@@ -528,24 +600,7 @@ const publishBuild = Effect.fnUntraced(function* (
     previous = current?.liveBuild ?? null;
   }
   yield* db.run("UPDATE apps SET updated_at = ? WHERE slug = ?", now(), app.slug);
-  yield* logAppEvent(agent, app.slug, "publish", { target, buildNumber, commit });
   yield* inBackground(deleteOldBuildFiles(app.slug, target), "delete old build files");
-
-  const page = `${url.origin}/app`;
-  return json(
-    {
-      ok: true,
-      app: app.slug,
-      target,
-      buildNumber,
-      buildId: id,
-      sourceCommit: commit,
-      installPage: page,
-      ...processed.response,
-      message: processed.message(buildNumber, page),
-    },
-    { status: 201, headers: noStore },
-  );
 });
 
 /** What a platform's step gets: the stored upload is at uploadKey(app, build). */
@@ -570,17 +625,23 @@ type Platform = {
   targetId: (app: string) => string;
   /** The lowest build number the next build may have. */
   lowestBuildNumber: () => Effect.Effect<number, unknown, NapServices>;
-  /** The platform's own step before the build goes live. */
+  /**
+   * The platform's own step before the build goes live. `pending` when someone else finishes
+   * the build later (an iOS cloud signing job): the publish then answers 202 with `message`, and
+   * `readyMessage` is what to say once the build is live.
+   */
   process: (input: ProcessInput) => Effect.Effect<
-    {
-      name: string;
-      version: string;
-      toolchain: string;
-      bytes: number;
-      /** Extra fields for the publish answer. */
-      response: Record<string, unknown>;
-      message: (buildNumber: number, page: string) => string;
-    },
+    | (Processed & {
+        /** Extra fields for the publish answer. */
+        response: Record<string, unknown>;
+        message: (buildNumber: number, page: string) => string;
+      })
+    | {
+        pending: true;
+        response: Record<string, unknown>;
+        message: (buildNumber: number, page: string) => string;
+        readyMessage: (buildNumber: number, page: string) => string;
+      },
     unknown,
     NapServices
   >;
@@ -704,6 +765,16 @@ const PLATFORMS: Record<PlatformName, Platform> = {
             { code: "testflight_unavailable" },
           );
         }
+        if (cloudSigning()) {
+          if (!(yield* Settings).cloudSigning) {
+            return yield* failNoStore(
+              503,
+              `Cloud signing is not set up: this Nap needs NAP_SIGNING_GITHUB_TOKEN and NAP_SIGNING_SECRET. Ask ${napConfig.admin}.`,
+              { code: "signer_unavailable" },
+            );
+          }
+          return;
+        }
         if (!(yield* SignerBinding)) {
           return yield* failNoStore(503, "The app signer is not set up", {
             code: "signer_unavailable",
@@ -719,55 +790,287 @@ const PLATFORMS: Record<PlatformName, Platform> = {
           failNoStore(503, error.message, { code: "testflight_unavailable" }),
         ),
       ),
-    process: ({ app, build, buildNumber, failBuild }) =>
-      Effect.gen(function* () {
-        const { bundleId } = testFlightConfig()!;
-        const signed = yield* signBuild(app, build, bundleId, buildNumber).pipe(
-          Effect.catchTags({
-            SignError: (error: SignError) => failBuild(error.status, error.message),
-            AppleError: (error: AppleError) => failBuild(503, error.message),
-          }),
-        );
-        const upload = yield* uploadToTestFlight(signed.key, signed.shortVersion, buildNumber).pipe(
-          Effect.catchTag("AppleError", (error) =>
-            failBuild(502, `Uploading to TestFlight failed: ${error.message}`),
-          ),
-        );
-        const db = yield* Database;
-        yield* db.run(
-          `UPDATE app_builds SET testflight_state = 'processing', testflight_upload = ?,
-                                 testflight_key = ?, testflight_checked_at = ?
-           WHERE id = ?`,
-          upload,
-          signed.key,
-          now(),
-          build,
-        );
-        return {
-          name: signed.appName,
-          version: signed.shortVersion,
-          toolchain: signed.xcode,
-          bytes: signed.bytes,
-          response: {
-            bundleId,
-            testFlight: { state: "processing" },
-            capabilities: signed.capabilities,
-            capabilityWarnings: signed.capabilityWarnings,
-          },
-          message: (number: number, page: string) =>
-            [
-              `Build ${number} of the iOS app is uploaded to TestFlight. Apple processes it for a few minutes; then testers install or update it in the TestFlight app. ${page} shows when it is ready.`,
-              capabilityNote(signed),
-            ]
-              .filter(Boolean)
-              .join(" "),
-        };
-      }),
+    process: (input) => (cloudSigning() ? startCloudSigning(input) : signAndUpload(input)),
   },
 };
 
+/** For the publish message: what happens to an iOS build after TestFlight has it. */
+const TESTFLIGHT_NEXT =
+  "Apple processes it for a few minutes; then testers install or update it in the TestFlight app.";
+
+/** iOS, signing in Nap: signs the build in the signer container and uploads it to TestFlight. */
+const signAndUpload = ({ app, build, buildNumber, failBuild }: ProcessInput) =>
+  Effect.gen(function* () {
+    const { bundleId } = testFlightConfig()!;
+    const signed = yield* signBuild(app, build, bundleId, buildNumber).pipe(
+      Effect.catchTags({
+        SignError: (error: SignError) => failBuild(error.status, error.message),
+        AppleError: (error: AppleError) => failBuild(503, error.message),
+      }),
+    );
+    const upload = yield* uploadToTestFlight(signed.key, signed.shortVersion, buildNumber).pipe(
+      Effect.catchTag("AppleError", (error) =>
+        failBuild(502, `Uploading to TestFlight failed: ${error.message}`),
+      ),
+    );
+    const db = yield* Database;
+    yield* db.run(
+      `UPDATE app_builds SET testflight_state = 'processing', testflight_upload = ?,
+                                 testflight_key = ?, testflight_checked_at = ?
+           WHERE id = ?`,
+      upload,
+      signed.key,
+      now(),
+      build,
+    );
+    return {
+      name: signed.appName,
+      version: signed.shortVersion,
+      toolchain: signed.xcode,
+      bytes: signed.bytes,
+      response: {
+        bundleId,
+        testFlight: { state: "processing" },
+        capabilities: signed.capabilities,
+        capabilityWarnings: signed.capabilityWarnings,
+      },
+      message: (number: number, page: string) =>
+        [
+          `Build ${number} of the iOS app is uploaded to TestFlight. ${TESTFLIGHT_NEXT} ${page} shows when it is ready.`,
+          capabilityNote(signed),
+        ]
+          .filter(Boolean)
+          .join(" "),
+    };
+  });
+
+/**
+ * iOS with cloud signing: turns on what the build asks for, notes it for the job, and starts the
+ * job. The job finishes the build through handleSigningApi.
+ */
+const startCloudSigning = ({ app, build, failBuild }: ProcessInput) =>
+  Effect.gen(function* () {
+    const { bundleId } = testFlightConfig()!;
+    const storage = yield* Storage;
+    // The signer container reads what the build asks for. A Nap without one (cloud signing and
+    // no Android never starts it) signs with the basic entitlements only.
+    const signer = yield* SignerBinding;
+    const unsigned = signer ? yield* storage.get(uploadKey(app, build)) : null;
+    const inspected = unsigned
+      ? yield* inspectBuild(signer!, unsigned.body, unsigned.size).pipe(
+          Effect.catchTag("SignError", (error: SignError) =>
+            failBuild(error.status, error.message),
+          ),
+        )
+      : { requests: {}, extensions: [] };
+    const capabilities = yield* grantCapabilities(inspected.requests).pipe(
+      Effect.catchTag("AppleError", (error: AppleError) => failBuild(503, error.message)),
+    );
+    const job: SigningJob = {
+      entitlementKeys: capabilities.entitlementKeys,
+      warnings: capabilities.warnings,
+      capabilities: capabilities.granted,
+    };
+    yield* storage.put(signingJobKey(app, build), JSON.stringify(job), {
+      httpMetadata: { contentType: "application/json" },
+    });
+    yield* startSigningJob(build).pipe(
+      Effect.catchTag("SigningJobError", (error) => failBuild(502, error.message)),
+    );
+    const note = capabilityNote({ capabilityWarnings: capabilities.warnings });
+    return {
+      pending: true as const,
+      response: {
+        bundleId,
+        capabilities: capabilities.granted,
+        capabilityWarnings: capabilities.warnings,
+      },
+      message: (number: number, page: string) =>
+        [
+          `Build ${number} of the iOS app is being signed, which takes a minute or two. Then it goes to TestFlight and ${page} shows it.`,
+          note,
+        ]
+          .filter(Boolean)
+          .join(" "),
+      readyMessage: (number: number, page: string) =>
+        [
+          `Build ${number} of the iOS app is uploaded to TestFlight. ${TESTFLIGHT_NEXT} ${page} shows when it is ready.`,
+          note,
+        ]
+          .filter(Boolean)
+          .join(" "),
+    };
+  });
+
+/**
+ * The signing job's side of cloud signing, at /_nap/api/signing (path is what follows). The job
+ * shows the deployment's signing secret instead of a Nap token.
+ *
+ * GET  /builds/<id>           what to sign: bundle id, build number, team, entitlements, warnings
+ * GET  /builds/<id>/unsigned  the unsigned build, as the agent uploaded it
+ * PUT  /builds/<id>/signed?name=&version=&xcode=   the signed .ipa: Nap uploads it to TestFlight
+ *                             and makes the build live
+ * POST /builds/<id>/failed    { "error" }: signing failed, and the build with it
+ */
+export const handleSigningApi = Effect.fn("handleSigningApi")(function* (
+  request: Request,
+  url: URL,
+  path: string,
+) {
+  const ios = testFlightConfig();
+  if (!ios || !cloudSigning()) return yield* failNoStore(404, "Not found");
+  if (!(yield* isSigningJob(request))) return yield* failNoStore(401, "Not the signing job");
+  const match = path.match(/^\/builds\/([0-9a-f-]{36})(\/unsigned|\/signed|\/failed)?$/);
+  if (!match) return yield* failNoStore(404, "Not found");
+  const found = yield* getBuild(match[1]);
+  if (!found || found.target !== "ios" || found.appSlug !== napApp()) {
+    return yield* failNoStore(404, "Build not found");
+  }
+  const build = yield* expireSigning(found);
+  if (build.status !== "signing") {
+    return yield* failNoStore(409, `The build is not waiting to be signed: it is ${build.status}`);
+  }
+  const rest = match[2] ?? "";
+  const method = request.method;
+  const storage = yield* Storage;
+  const db = yield* Database;
+  const failed = (error: string) =>
+    db.run(
+      "UPDATE app_builds SET status = 'failed', error = ? WHERE id = ? AND status = 'signing'",
+      error.slice(0, 2000),
+      build.id,
+    );
+
+  if (rest === "" && method === "GET") {
+    const stored = yield* storage.get(signingJobKey(build.appSlug, build.id));
+    const job = (
+      stored ? yield* Effect.promise(() => new Response(stored.body).json()) : {}
+    ) as Partial<SigningJob>;
+    const base = `${url.origin}/_nap/api/signing/builds/${build.id}`;
+    return json(
+      {
+        build: build.id,
+        buildNumber: build.buildNumber,
+        bundleId: ios.bundleId,
+        teamId: ios.teamId,
+        entitlementKeys: job.entitlementKeys ?? [],
+        warnings: job.warnings ?? {},
+        unsigned: `${base}/unsigned`,
+        signed: `${base}/signed`,
+        failed: `${base}/failed`,
+      },
+      { headers: noStore },
+    );
+  }
+  if (rest === "/unsigned" && method === "GET") {
+    const unsigned = yield* storage.get(uploadKey(build.appSlug, build.id));
+    if (!unsigned) return yield* failNoStore(404, "The unsigned build is missing");
+    return new Response(fixedLength(unsigned.body, unsigned.size), {
+      headers: {
+        "content-type": "application/zip",
+        "content-length": String(unsigned.size),
+        ...noStore,
+      },
+    });
+  }
+  if (rest === "/failed" && method === "POST") {
+    const body = yield* readJsonObject(request);
+    const error =
+      typeof body.error === "string" && body.error.trim()
+        ? body.error.trim()
+        : "Signing failed. The signing job's log has the details.";
+    yield* failed(error);
+    yield* Effect.logWarning("Cloud signing failed").pipe(
+      Effect.annotateLogs({ build: build.id, error: error.slice(0, 500) }),
+    );
+    return json({ ok: true }, { headers: noStore });
+  }
+  if (rest === "/signed" && method === "PUT") {
+    const size = Number(request.headers.get("content-length"));
+    if (!request.body || !Number.isFinite(size) || size <= 0) {
+      return yield* failNoStore(411, "Send the .ipa as the body, with a content-length");
+    }
+    const key = signedKey(build.appSlug, build.id, "cloud");
+    yield* storage.put(key, fixedLength(request.body, size), {
+      httpMetadata: { contentType: "application/octet-stream" },
+    });
+    const field = (name: string, length: number) =>
+      (url.searchParams.get(name) ?? "").trim().slice(0, length);
+    const processed = {
+      name: field("name", 120),
+      version: field("version", 40),
+      toolchain: field("xcode", 20),
+      bytes: size,
+    };
+    // From here a failure is the build's: say so to the job, which fails with it.
+    const failBuild = (status: number, error: string) =>
+      failed(error).pipe(Effect.andThen(failNoStore(status, error, { code: "build_failed" })));
+    const upload = yield* uploadToTestFlight(key, processed.version, build.buildNumber).pipe(
+      Effect.catchTag("AppleError", (error) =>
+        failBuild(502, `Uploading to TestFlight failed: ${error.message}`),
+      ),
+    );
+    yield* db.run(
+      `UPDATE app_builds SET testflight_state = 'processing', testflight_upload = ?,
+                             testflight_key = ?, testflight_checked_at = ?
+       WHERE id = ?`,
+      upload,
+      key,
+      now(),
+      build.id,
+    );
+    const app = yield* getApp(build.appSlug);
+    if (!app) return yield* failBuild(404, "App not found");
+    // goLive marks the build ready first, so this failure is not `failed`'s (which only fails
+    // builds still signing).
+    yield* goLive(app, "ios", build.id, build.sourceCommit, processed).pipe(
+      Effect.catchTag("HttpError", (error) => {
+        const reason = String(
+          (error.body as { error?: unknown } | null)?.error ?? "The build could not go live",
+        );
+        return db
+          .run("UPDATE app_builds SET status = 'failed', error = ? WHERE id = ?", reason, build.id)
+          .pipe(Effect.andThen(failNoStore(error.status, reason, { code: "build_failed" })));
+      }),
+    );
+    yield* Effect.logInfo("App event").pipe(
+      Effect.annotateLogs({
+        action: "publish",
+        app: app.slug,
+        email: build.createdByEmail,
+        client: build.client,
+        target: "ios",
+        buildNumber: build.buildNumber,
+        commit: build.sourceCommit,
+        signing: "cloud",
+      }),
+    );
+    return json({ ok: true, buildNumber: build.buildNumber }, { headers: noStore });
+  }
+  return yield* failNoStore(404, "Not found");
+});
+
+/**
+ * A build that has been `signing` for too long, as failed: nothing is working on it any more
+ * (the publish request died, or a cloud signing job never reported back).
+ */
+const expireSigning = Effect.fnUntraced(function* (build: BuildRow) {
+  if (build.status !== "signing") return build;
+  if (Date.now() - Date.parse(build.createdAt) < SIGNING_TIMEOUT_MS) return build;
+  const error = cloudSigning()
+    ? `The signing job did not finish. Its log is in the config repository's Actions. Ask ${napConfig.admin}.`
+    : "Signing did not finish.";
+  const db = yield* Database;
+  const changed = yield* db.run(
+    "UPDATE app_builds SET status = 'failed', error = ? WHERE id = ? AND status = 'signing'",
+    error,
+    build.id,
+  );
+  return changed.changes === 1 ? { ...build, status: "failed" as const, error } : build;
+});
+
 /** For the publish message: what the build may not use, which the launcher also shows. */
-function capabilityNote(signed: Signed) {
+function capabilityNote(signed: Pick<Signed, "capabilityWarnings">) {
   const lines = Object.entries(signed.capabilityWarnings).flatMap(([slug, warnings]) =>
     warnings.map((warning) => `${slug}: ${warning}`),
   );

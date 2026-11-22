@@ -114,6 +114,19 @@ the secrets and a deploy workflow that deploys this code with them.
    one PEM) and `NAP_ASC_PRIVATE_KEY` (the `.p8`), and the variables
    `NAP_ASC_KEY_ID` and `NAP_ASC_ISSUER_ID`.
 
+   Cloud signing, instead of a certificate of your own: an Apple team may
+   have only a few distribution certificates, and Nap's would take one. Apple
+   also keeps a cloud-managed one for every team, which only Xcode can sign
+   with. To use it, set `apps.ios.signing` to
+   `{ cloud: { repository: "<owner>/<config repository>" } }` and leave out
+   `profileName` and `NAP_APPLE_SIGNING_PEM`. Copy
+   `infra/config-repo-sign-ios.yml` to `.github/workflows/sign-ios.yml` in
+   the config repository: Nap starts it for each build, on a macOS runner.
+   Add the secrets `NAP_SIGNING_GITHUB_TOKEN` (a fine-grained GitHub token
+   for the config repository with Actions: read and write, which Nap starts
+   the workflow with) and `NAP_SIGNING_SECRET` (any long random string, which
+   the job shows Nap). The team key needs the Admin role for this too.
+
    For Android, with a Google Play developer account: create the app in Play
    Console (its package name is `apps.android.packageName`) and set up its
    internal testing track with a testers list; the opt-in link is
@@ -639,6 +652,20 @@ Nap (reMarkable) → the zip as it came, with its SHA-256 → tablet (Nap token)
   checks the bundle's package name and that it is a release build, sets its
   version code to the build number, and signs it as jarsigner does
   (`containers/signer/android.py`). Deploys need Docker to build the image.
+- **Cloud signing.** With `apps.ios.signing.cloud`, Nap holds no Apple
+  certificate. Apple keeps the team's cloud-managed distribution certificate,
+  and only Xcode can sign with it, so a macOS job in the config repository
+  does (`infra/config-repo-sign-ios.yml`, which runs
+  `scripts/apps/cloud-sign.py`). Nap stores the upload, turns on the
+  capabilities it asks for, and starts the workflow through GitHub's API;
+  the publish answers 202 while the build is `signing`. The job reaches Nap
+  at `/_nap/api/signing/builds/<id>` with the deployment's signing secret
+  instead of a token: it downloads the unsigned build, exports it with
+  `xcodebuild -exportArchive` signed in with the team key (Xcode makes the
+  App Store profile), and sends the `.ipa` back. Nap then uploads it to
+  TestFlight and makes the build live, and the publish script waits for
+  that. A job that fails, or does not report within half an hour, fails the
+  build. App extensions are left out of the build.
 - **TestFlight.** Each iOS build is uploaded to App Store Connect with the build
   upload API before it goes live. Its build number goes above every build App
   Store Connect has. Apple then processes it for internal testers; Nap asks
@@ -696,7 +723,8 @@ Nap (reMarkable) → the zip as it came, with its SHA-256 → tablet (Nap token)
   with the token. These are the site's own data and channel endpoints under
   the token's identity; like frame requests, they do not count as using
   Nap.
-- **Secrets.** `NAP_APPLE_SIGNING_PEM`, `NAP_ASC_PRIVATE_KEY`,
+- **Secrets.** `NAP_APPLE_SIGNING_PEM` (or, with cloud signing,
+  `NAP_SIGNING_GITHUB_TOKEN` and `NAP_SIGNING_SECRET`), `NAP_ASC_PRIVATE_KEY`,
   `NAP_ANDROID_UPLOAD_PEM`, and `NAP_PLAY_SERVICE_ACCOUNT` are config
   repository secrets; `NAP_ASC_KEY_ID` and `NAP_ASC_ISSUER_ID` are its
   variables. The Cloudflare API token needs Containers edit access.

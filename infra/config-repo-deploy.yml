@@ -87,6 +87,11 @@ jobs:
           NAP_ASC_PRIVATE_KEY: ${{ secrets.NAP_ASC_PRIVATE_KEY }}
           NAP_ASC_KEY_ID: ${{ vars.NAP_ASC_KEY_ID }}
           NAP_ASC_ISSUER_ID: ${{ vars.NAP_ASC_ISSUER_ID }}
+          # iOS cloud signing only (napConfig.apps.ios.signing.cloud), instead of
+          # NAP_APPLE_SIGNING_PEM: a GitHub token that can start sign-ios.yml in this repository
+          # (fine-grained, Actions: read and write), and the secret its job shows Nap.
+          NAP_SIGNING_GITHUB_TOKEN: ${{ secrets.NAP_SIGNING_GITHUB_TOKEN }}
+          NAP_SIGNING_SECRET: ${{ secrets.NAP_SIGNING_SECRET }}
           # Android apps only (napConfig.apps.android): the Play upload key and certificate (one PEM),
           # and the JSON key of a service account with access to the app in Play Console.
           NAP_ANDROID_UPLOAD_PEM: ${{ secrets.NAP_ANDROID_UPLOAD_PEM }}

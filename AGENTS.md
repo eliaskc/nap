@@ -27,7 +27,7 @@ sites/<slug>/versions/<version_id>/<path>
 
 - Serve from D1 `sites.current_version`; never overwrite live files in place.
 - Use email as the stable identity key.
-- Nap never builds apps either: agents upload unsigned iOS builds and Android bundles with their commit, and only the `SIGNER` container holds the signing certificate and the Play upload key. Never sign on a laptop or in CI. Nap uploads TestFlight builds to App Store Connect and Android bundles to Google Play itself. Templates for app repos are in `templates/app`.
+- Nap never builds apps either: agents upload unsigned iOS builds and Android bundles with their commit, and only the `SIGNER` container holds the signing certificate and the Play upload key. Never sign on a laptop or in CI. The one exception is iOS cloud signing (`apps.ios.signing.cloud`, `src/lib/cloud-signing.ts`): there is no certificate to hold, and a macOS job in the deployment's config repository signs with Apple's cloud-managed one, which only Xcode can use. Nap uploads TestFlight builds to App Store Connect and Android bundles to Google Play itself. Templates for app repos are in `templates/app`.
 - Nap never runs Git or builds naps. Agents push source to a nap's Artifacts repo and publish the build with its commit; `src/lib/sources.ts` checks that commit. Use the `cf` CLI to inspect or clean up Artifacts repos.
 - Keep production private. `workers_dev` and `preview_urls` are bypass URLs that can avoid Cloudflare Access. They must be `false` in production:
 

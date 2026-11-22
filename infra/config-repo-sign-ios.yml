@@ -1,0 +1,57 @@
+name: Sign iOS build
+
+# The signing job of iOS cloud signing (napConfig.apps.ios.signing.cloud). Copy it to
+# .github/workflows/sign-ios.yml in a Nap config repository whose instance/config.ts turns cloud
+# signing on (see "Cloud signing" in the README of eliaskc/nap).
+#
+# Nap starts it for every iOS build an agent publishes. It signs the build with Apple's
+# cloud-managed distribution certificate, which only Xcode can use, and hands the .ipa back to
+# Nap. No signing certificate is stored anywhere: the job signs in to Apple with the App Store
+# Connect team key the deploy workflow also uses.
+#
+# Secrets: NAP_ASC_PRIVATE_KEY and NAP_SIGNING_SECRET. Variables: NAP_ASC_KEY_ID and
+# NAP_ASC_ISSUER_ID.
+on:
+  workflow_dispatch:
+    inputs:
+      build:
+        description: "The build's id on Nap"
+        required: true
+      nap:
+        description: "Nap's root, such as https://nap.example.com"
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  sign:
+    name: Sign build ${{ inputs.build }}
+    runs-on: macos-latest
+    timeout-minutes: 20
+    steps:
+      # Never a SHA from a payload: a branch or tag of eliaskc/nap, as in the deploy workflow.
+      - name: Check out Nap
+        uses: actions/checkout@v6
+        with:
+          repository: eliaskc/nap
+          ref: ${{ vars.NAP_REF || 'main' }}
+          sparse-checkout: scripts/apps
+          persist-credentials: false
+
+      - name: Sign and hand back
+        env:
+          NAP_URL: ${{ inputs.nap }}
+          NAP_BUILD: ${{ inputs.build }}
+          NAP_SIGNING_SECRET: ${{ secrets.NAP_SIGNING_SECRET }}
+          ASC_PRIVATE_KEY: ${{ secrets.NAP_ASC_PRIVATE_KEY }}
+          ASC_KEY_ID: ${{ vars.NAP_ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ vars.NAP_ASC_ISSUER_ID }}
+        run: |
+          [[ "$NAP_BUILD" =~ ^[0-9a-f-]{36}$ ]] || { echo "Not a build id"; exit 1; }
+          test -n "$NAP_SIGNING_SECRET" || { echo "Missing secret NAP_SIGNING_SECRET"; exit 1; }
+          test -n "$ASC_PRIVATE_KEY" || { echo "Missing secret NAP_ASC_PRIVATE_KEY"; exit 1; }
+          # The newest Xcode on the runner: builds come from developers' current Xcode.
+          sudo xcode-select -s "$(ls -d /Applications/Xcode_*.app | grep -vi beta | sort -V | tail -1)"
+          xcodebuild -version
+          /usr/bin/python3 scripts/apps/cloud-sign.py

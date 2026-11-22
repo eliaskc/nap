@@ -11,6 +11,9 @@ import { Storage, tryStorage } from "~/server/storage";
  * explicit bundle id, and uploads builds with the build upload API. Nap reads the profile by name
  * through the App Store Connect API and keeps a copy in R2. The App ID, the profile, and the app
  * record are made by hand; Nap only remakes the profile when it turns a capability on.
+ *
+ * With cloud signing (napConfig.apps.ios.signing.cloud, src/lib/cloud-signing.ts) Xcode signs and
+ * manages the profile, so Nap has no certificate and no profile of its own. The rest is the same.
  */
 
 const PROFILE_KEY = "apps/_signing/appstore.mobileprovision";
@@ -89,7 +92,13 @@ const profileName = Effect.suspend(() => {
   const name = napConfig.apps?.ios?.profileName;
   return name
     ? Effect.succeed(name)
-    : Effect.fail(new AppleError({ message: "iOS is off on this Nap" }));
+    : Effect.fail(
+        new AppleError({
+          message: napConfig.apps?.ios
+            ? "This Nap's iOS settings name no App Store profile (apps.ios.profileName)"
+            : "iOS is off on this Nap",
+        }),
+      );
 });
 
 /**
@@ -447,7 +456,8 @@ type CapabilityList = { data: Array<{ attributes: { capabilityType: string } }> 
 /**
  * Turns capabilities on for the TestFlight app's App ID (Apple's capability types, such as
  * PUSH_NOTIFICATIONS) and makes a new App Store profile when any was off, so it carries their
- * entitlements. Returns Apple's reason for each one it would not turn on.
+ * entitlements (not with cloud signing, where Xcode does). Returns Apple's reason for each one it
+ * would not turn on.
  */
 export const ensureCapabilities = Effect.fn("ensureCapabilities")(function* (
   types: ReadonlyArray<string>,
@@ -490,7 +500,8 @@ export const ensureCapabilities = Effect.fn("ensureCapabilities")(function* (
       );
     }
   }
-  if (changed) yield* regenerateProfile();
+  // With cloud signing Xcode manages the profile, and remakes it when it signs.
+  if (changed && !napConfig.apps?.ios?.signing?.cloud) yield* regenerateProfile();
   return refused;
 });
 
