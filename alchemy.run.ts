@@ -203,9 +203,22 @@ export class NapWorker extends Cloudflare.Website.Vite<NapWorker>()(
       Effect.orDie(Config.Redacted(name).pipe(Config.withDefault(Redacted.make(""))));
     const appsInProduction = production && Boolean(napConfig.apps?.ios);
     const plain = (name: string) => Effect.orDie(Config.String(name).pipe(Config.withDefault("")));
-    const appSigningPem = appsInProduction
-      ? yield* secret("NAP_APPLE_SIGNING_PEM")
-      : yield* optional("NAP_APPLE_SIGNING_PEM");
+    // With cloud signing (napConfig.apps.ios.signing.cloud) Nap has no certificate: a macOS job
+    // in the config repository signs with Apple's cloud-managed one. Nap starts that job with a
+    // GitHub token (Actions: write on the config repository), and the job shows Nap a secret.
+    const cloudSigning = Boolean(napConfig.apps?.ios?.signing?.cloud);
+    const appSigningPem =
+      appsInProduction && !cloudSigning
+        ? yield* secret("NAP_APPLE_SIGNING_PEM")
+        : yield* optional("NAP_APPLE_SIGNING_PEM");
+    const signingGithubToken =
+      appsInProduction && cloudSigning
+        ? yield* secret("NAP_SIGNING_GITHUB_TOKEN")
+        : yield* optional("NAP_SIGNING_GITHUB_TOKEN");
+    const signingSecret =
+      appsInProduction && cloudSigning
+        ? yield* secret("NAP_SIGNING_SECRET")
+        : yield* optional("NAP_SIGNING_SECRET");
     const ascPrivateKey = appsInProduction
       ? yield* secret("NAP_ASC_PRIVATE_KEY")
       : yield* optional("NAP_ASC_PRIVATE_KEY");
@@ -327,6 +340,8 @@ export class NapWorker extends Cloudflare.Website.Vite<NapWorker>()(
         // Docker engines where workerd's local containers do not start (such as OrbStack).
         NAP_SIGNER_URL: yield* local("NAP_SIGNER_URL"),
         NAP_APPLE_SIGNING_PEM: appSigningPem,
+        NAP_SIGNING_GITHUB_TOKEN: signingGithubToken,
+        NAP_SIGNING_SECRET: signingSecret,
         NAP_ASC_PRIVATE_KEY: ascPrivateKey,
         NAP_ASC_KEY_ID: yield* plain("NAP_ASC_KEY_ID"),
         NAP_ASC_ISSUER_ID: yield* plain("NAP_ASC_ISSUER_ID"),

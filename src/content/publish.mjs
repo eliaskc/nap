@@ -930,6 +930,12 @@ async function appCommand(options) {
     const data = await response.json().catch(() => ({}));
     if (!response.ok) throw failed("Publishing failed", { status: response.status, data });
     console.log(data.message);
+    if (data.status === "signing") {
+      // iOS on a Nap with cloud signing: a signing job finishes the build. Wait for it, so a
+      // build that fails says so here.
+      console.log(await signedBuild(token, app, data));
+      return;
+    }
     if (data.signedBundle) {
       // Android, when Nap could not upload to Google Play: the signed bundle, to upload by hand.
       const signed = await fetch(`${NAP_URL}${data.signedBundle}`, {
@@ -945,6 +951,25 @@ async function appCommand(options) {
   }
   throw new ExitError(
     "Usage: node publish.mjs app list | init | clone | setup | run | napkit | napkit-android | add-platform | publish. See --help.",
+  );
+}
+
+/** Waits for a build that is still being signed: what to say once it is live. */
+async function signedBuild(token, app, published) {
+  const started = Date.now();
+  while (Date.now() - started < 15 * 60 * 1000) {
+    await new Promise((resolve) => setTimeout(resolve, 5000));
+    const response = await fetch(`${NAP_URL}/_nap/api/apps/${app}/builds/${published.buildId}`, {
+      headers: { authorization: `Bearer ${token}` },
+    }).catch(() => null);
+    const build = response?.ok ? (await response.json().catch(() => ({}))).build : null;
+    if (build?.status === "ready") return published.readyMessage;
+    if (build?.status === "failed") {
+      throw new ExitError(`Build ${published.buildNumber} failed: ${build.error}`);
+    }
+  }
+  throw new ExitError(
+    `Build ${published.buildNumber} is still being signed. ${published.installPage} shows it once it is live.`,
   );
 }
 
