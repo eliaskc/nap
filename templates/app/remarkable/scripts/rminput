@@ -4,6 +4,7 @@
 #   scripts/rminput tap <x> <y>
 #   scripts/rminput pen <x,y> <x,y> ...      one pen stroke through the points
 #   scripts/rminput swipe <x1> <y1> <x2> <y2>
+#   scripts/rminput pinch <x> <y> <from> <to>   two fingers around a point, from and to px apart
 # Screen pixels, 1404 × 1872, portrait. Taps are the touchscreen (fingers), strokes the digitizer.
 set -eu
 cd "$(dirname "$0")/.."

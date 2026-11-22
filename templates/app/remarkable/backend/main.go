@@ -239,6 +239,8 @@ func (a *App) dispatch(op string, body []byte) (any, error) {
 		return a.sockets.handle(op, body)
 	case op == "hwr":
 		return hwrOp(a, body)
+	case op == "file.get":
+		return a.fileOp(body)
 	case op == "kv.get" || op == "kv.set":
 		return a.kvOp(op, body)
 	case strings.HasPrefix(op, "update."):

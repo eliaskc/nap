@@ -30,6 +30,8 @@ Item {
     /** The site's pen-log collection, or null not to log. */
     property var log: null
     property bool debug: false
+    /** The letters the game takes: A to Z unless set (a Swedish crossword adds Å, Ä and Ö). */
+    property string letters: PenCore.Core.LETTERS.slice(0, 26)
 
     property var cells: function () { return [] }
     property var writable: function (cell) { return true }
@@ -38,9 +40,29 @@ Item {
     /** null clears. May return the cell the letter really went to, or -1 when there is no room. */
     property var write: function (cell, letter) { return cell }
 
+    /**
+     * The panel's pen mode over the whole area. It is quick and rough: black and white only,
+     * and it leaves traces. Fine over plain boxes; a page with more under the pen (a picture,
+     * greys) sets `follow` instead.
+     */
+    property bool fast: true
+    /**
+     * With `fast` off: pen mode only around the squares being written in, a square further each
+     * way, for as long as the pen keeps writing. It only grows meanwhile (a change of its area
+     * redraws it, and a part left behind would get the slow update next to the ink). When the
+     * pen has rested, it goes, and the page there is redrawn clean.
+     */
+    property bool follow: false
+    property rect around: Qt.rect(0, 0, 0, 0)
+    readonly property int followRestMs: 2500
+    /** false: fingers go through to what is under the pen area (a page that pans and zooms). */
+    property bool fingers: true
+
     signal begin(int cell)
     signal flip(int cell)
     signal fingerTap(int cell, real x, real y)
+    /** A pen tap where no letter can go (a crossword's clue square), in this item's coordinates. */
+    signal strayTap(real x, real y)
     /** The pen came down: pages put their on-screen keys away. */
     signal penUsed()
 
@@ -55,7 +77,7 @@ Item {
 
     // ---- State
     property var current: null      // the letter being written: { id, cell, strokes, startedAt, lastUp, wasCursor }
-    property var pending: []        // letters being recognized: their ink stays, lighter
+    property var pending: []        // letters being recognized: their ink stays until they land
     property var boxes: []
     property var written: ({})      // cell → { event, id, saved, writtenAt, to }
     property var fixable: ({})      // cell → { letter, guesses, totalMs }
@@ -63,6 +85,9 @@ Item {
     property bool drawing: false
     property int fixVersion: 0
     property var guessCache: null   // { strokes: n, best } recognition of `current` so far
+
+    /** A letter is being written or read: pages hold back what would redraw next to the ink. */
+    readonly property bool busy: current !== null || pending.length > 0
 
     readonly property int fixCell: cursorCell >= 0 ? cursorCell : focusCell
     /** The other guesses for the letter in fixCell, best first, without the one it shows. */
@@ -125,10 +150,13 @@ Item {
         var started = now()
         return backend.call("hwr", { strokes: strokes.map(function (s) { return s.map(function (p) { return [p.x, p.y] }) }) })
             .then(function (r) {
-                var probs = r.probs.slice()
-                // A line that thin is an I (a capital L has its foot), as on the web.
+                // As run() in the web's recognizer.ts: only the game's letters, then a line that
+                // thin is an I (a capital L has its foot).
+                var probs = r.probs.slice(), all = PenCore.Core.LETTERS, kept = 0, i
+                for (i = 0; i < probs.length; i++) { if (letters.indexOf(all[i]) >= 0) kept += probs[i]; else probs[i] = 0 }
+                if (kept > 0) for (i = 0; i < probs.length; i++) probs[i] /= kept
                 if (aspect(strokes) < 0.3) { probs[8] += probs[11]; probs[11] = 0 }
-                return { guesses: PenCore.Core.ranked(probs), image: r.image, inferMs: r.inferMs, roundMs: now() - started }
+                return { guesses: PenCore.Core.ranked(probs, letters), image: r.image, inferMs: r.inferMs, roundMs: now() - started }
             })
     }
 
@@ -165,10 +193,11 @@ Item {
 
     function commit(letter, trigger) {
         if (current !== letter) return
+        // Into `pending` first, so `busy` never drops in between.
+        pending = pending.concat([letter])
         current = null
         guessCache = null
         commitTimer.stop()
-        pending = pending.concat([letter])
         var waitMs = now() - letter.lastUp
         var strokes = letter.strokes.filter(function (s) { return s.length })
         var done = function () {
@@ -239,11 +268,12 @@ Item {
         return known ? Promise.resolve(go(known)) : recognize(strokes).then(go)
     }
 
-    /** A fix from the choices (or the full list): writes it and logs it. */
-    function pick(letter, how) {
-        if (fixCell < 0) return
-        correct(fixCell, letter, how || "chip")
-        write(fixCell, letter)
+    /** A fix from the choices (or the full list): writes it and logs it. `cell`: fixCell unless given. */
+    function pick(letter, how, cell) {
+        if (cell === undefined) cell = fixCell
+        if (cell < 0) return
+        correct(cell, letter, how || "chip")
+        write(cell, letter)
         fixVersion++
     }
     /** Call before a key types `letter` into `cell`, so fixes by key are logged too. */
@@ -255,6 +285,25 @@ Item {
 
     // ---- Input: the pen is a real mouse on the tablet; fingers are synthesized from touch.
     Timer { id: commitTimer; interval: root.pauseMs; property var letter: null; onTriggered: root.commit(letter, "pause") }
+
+    /** Pen mode reaches the square `cell` and one further each way. */
+    function cover(cell) {
+        followRest.stop()
+        var b = boxOf(cell)
+        if (!b) return
+        // Out to whole ink tiles: a tile redraws all of itself, and none may reach outside.
+        var t = ink.tile
+        var x0 = Math.floor((b.x - b.w) / t) * t, y0 = Math.floor((b.y - b.h) / t) * t
+        var x1 = Math.ceil((b.x + 2 * b.w) / t) * t, y1 = Math.ceil((b.y + 2 * b.h) / t) * t
+        if (around.width > 0) {
+            x0 = Math.min(x0, around.x); y0 = Math.min(y0, around.y)
+            x1 = Math.max(x1, around.x + around.width); y1 = Math.max(y1, around.y + around.height)
+            if (x0 === around.x && y0 === around.y && x1 === around.x + around.width && y1 === around.y + around.height) return
+        }
+        around = Qt.rect(x0, y0, x1 - x0, y1 - y0)
+    }
+    Timer { id: followRest; interval: root.followRestMs; onTriggered: if (root.busy || root.drawing) restart(); else root.around = Qt.rect(0, 0, 0, 0) }
+    onBusyChanged: if (follow && !busy) followRest.restart()
 
     function penDown(p) {
         measure()
@@ -277,6 +326,7 @@ Item {
         }
         commitTimer.stop()
         drawing = true
+        if (follow) cover(current.cell)
         current.strokes.push([p])
         ink.dot(p)
         return true
@@ -315,6 +365,8 @@ Item {
 
     // The ink. Three things keep it up with the pen on the tablet:
     // - It is drawn in the panel's pen mode (UFast), the one the tablet's notebooks draw with.
+    //   That mode has black and white only, so ink being read stays black (the web greys it):
+    //   grey would get the slow update, right where the next letter is being written.
     // - The mode's area reaches past the ink. The panel applies a mode to whole bytes of the
     //   screen (8 px across) inside the area; whatever a frame changed outside them gets the
     //   slow update, and the ink then waits for that one, a second or two behind the pen.
@@ -385,8 +437,8 @@ Item {
                         full = false
                         c.clearRect(x, y, width, height)
                         var letters = root.pending.concat(root.current ? [root.current] : [])
+                        c.strokeStyle = "black"
                         letters.forEach(function (letter) {
-                            c.strokeStyle = letter === root.current ? "black" : "#8c8c8c"
                             letter.strokes.forEach(function (s) {
                                 c.beginPath()
                                 s.forEach(function (p, i) { if (i) c.lineTo(p.x, p.y); else c.moveTo(p.x, p.y) })
@@ -404,9 +456,17 @@ Item {
                 }
             }
         }
-        DisplayMethodArea { anchors.fill: parent; anchors.margins: -16 * root.u; displayMethod: DisplayMethodArea.UFast }
+        DisplayMethodArea {
+            readonly property real pad: 16 * root.u
+            readonly property bool whole: root.fast || !root.follow
+            x: (whole ? 0 : root.around.x) - pad
+            y: (whole ? 0 : root.around.y) - pad
+            width: (whole ? ink.width : root.around.width) + 2 * pad
+            height: (whole ? ink.height : root.around.height) + 2 * pad
+            visible: root.fast || (root.follow && root.around.width > 0)
+            displayMethod: DisplayMethodArea.UFast
+        }
     }
-    Connections { target: root; function onPendingChanged() { ink.redraw() } }
 
     MouseArea {
         anchors.fill: parent
@@ -415,16 +475,20 @@ Item {
         preventStealing: true
         property bool finger: false
         property bool active: false
+        property var stray: null
         onPressed: (m) => {
             finger = m.source !== Qt.MouseEventNotSynthesized
-            if (finger) return
+            if (finger) { if (!root.fingers) m.accepted = false; return }
             active = root.penDown({ x: m.x, y: m.y, t: root.now() })
+            stray = active ? null : { x: m.x, y: m.y, t: root.now() }
         }
         onPositionChanged: (m) => { if (!finger && active) root.penMove({ x: m.x, y: m.y, t: root.now() }) }
         onReleased: (m) => {
             if (finger) { root.measure(); root.fingerTap(root.cellAt({ x: m.x, y: m.y }), m.x, m.y); return }
             if (active) root.penUp()
+            else if (stray && root.now() - stray.t < root.tapMs && Math.hypot(m.x - stray.x, m.y - stray.y) <= root.cellSize() * root.tapReach) root.strayTap(stray.x, stray.y)
             active = false
+            stray = null
         }
         onCanceled: { if (!finger && active) root.penUp(); active = false }
     }

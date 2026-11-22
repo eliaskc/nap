@@ -50,7 +50,7 @@ for (const [i, c] of cases.entries()) {
   const web = rec.classify(model, rec.rasterize(strokes))
   const go = native[i].probs
   let diff = 0
-  for (let k = 0; k < 26; k++) diff = Math.max(diff, Math.abs(web[k] - go[k]))
+  for (let k = 0; k < web.length; k++) diff = Math.max(diff, Math.abs(web[k] - go[k]))
   worst = Math.max(worst, diff)
   const top = (p) => rec.LETTERS[[...p].indexOf(Math.max(...p))]
   if (top(web) === top(go)) agree++

@@ -6,7 +6,7 @@
 #   scripts/sync-pen <dle checkout>
 set -eu
 cd "$(dirname "$0")/.."
-dle=${1:?usage: scripts/sync-pen <dle checkout>}
+dle=$(cd "${1:?usage: scripts/sync-pen <dle checkout>}" && pwd)
 cp "$dle/public/pen/letters.bin" launcher/pen/letters.bin
 entry=$(mktemp -d -t pen)/pen.ts
 cat > "$entry" <<TS

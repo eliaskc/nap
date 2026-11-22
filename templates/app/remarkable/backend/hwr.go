@@ -30,7 +30,7 @@ type layer struct {
 	w           []int8
 }
 
-var shapes = [][2]int{{32, 1 * 9}, {64, 32 * 9}, {128, 64 * 9}, {128, 128 * 3 * 3}, {26, 128}}
+var shapes = [][2]int{{32, 1 * 9}, {64, 32 * 9}, {128, 64 * 9}, {128, 128 * 3 * 3}, {29, 128}}
 
 var (
 	modelOnce sync.Once
@@ -291,7 +291,7 @@ func (a *App) model() ([]layer, error) {
 	return model, modelErr
 }
 
-// The `hwr` op: strokes in any coordinates → the 26 probabilities, A to Z, and the image the
+// The `hwr` op: strokes in any coordinates → the probabilities of the model's letters (A to Z, Å, Ä, Ö), and the image the
 // network saw (one byte per pixel, base64, as the pen log keeps it).
 func hwrOp(a *App, body []byte) (any, error) {
 	var args struct {

@@ -18,6 +18,7 @@ app on Nap.
   - signing in (Nap's device flow) and keeping the token,
   - HTTP to Nap with the token, and WebSockets with an `Authorization` header,
   - handwriting recognition, the same model and maths as the web pen (`hwr.go`),
+  - downloading a file for QML to show, which cannot load `https` images itself (`files.go`),
   - small files (`kvGet`/`kvSet`) and updates (`update.go`).
 - `scripts/`: build, preview, install, publish, and device tools (below).
 - `tools/rminput/`: the input injector behind `scripts/rminput`.
@@ -35,11 +36,14 @@ preview matches the tablet. `host` is the launcher:
   version and the tablet then see the same data and channels.
 - `host.me()`: the person signed in (`email`, `name`, `shape`, `color`).
 - `host.kvGet(key)` / `host.kvSet(key, value)`: small files on the tablet, as promises.
+- `host.fetchFile(url)`: downloads a file (an image, say) and resolves to its path on the tablet,
+  for an `Image`'s `source`. Kept for 30 days.
 - `host.setTimeout(fn, ms)` / `host.clearTimeout(id)`, `host.log(text)`, `host.close()`.
 - Optional `function leave()`: called when the launcher closes the app.
 
 QML here is Qt 6.10's JavaScript: Promises, classes, `?.` and `??`, but no `async`/`await`.
-`ui/nap/polyfills.js` adds `at`, `findLast`, `toSorted` and `Object.hasOwn`. There is no
+`ui/nap/polyfills.js` adds `at`, `findLast`, `toSorted`, `flat`, `flatMap`, `matchAll`,
+`fromCodePoint`, `Object.hasOwn`, `Object.entries` and `Object.values`. There is no
 `fetch`; use the Nap client, or `host.backend.call("http", …)`.
 
 ### The pen
@@ -50,6 +54,14 @@ a pause of 450 ms commits it. Scribble across cells to clear them. A tap with th
 cursor; `fixChoices` and `pick(letter)` give the "did you mean" chips. Give it `cells()` (the
 boxes, in its coordinates), `value`, `writable` and `write`, and a Nap client as `log` to keep the
 pen log in the site's `pen-log` collection, as the web does.
+
+More of it: `letters` is the alphabet the puzzle uses (default A–Z; a Swedish crossword adds Å Ä Ö).
+`fingers: false` lets finger touches through to what is underneath (panning a zoomed page), and
+`strayTap(x, y)` is a pen tap where no letter cell is. `busy` is true while ink is being written
+or read: hold other redraws until it is false. Over a plain grid the whole area is in pen mode
+(`fast`). Over a page with a picture or colours, set `fast: false` and `follow: true`: pen mode
+then covers only the squares being written in and the ones around them, and when the pen rests
+that part is redrawn clean.
 
 The recognizer's model (`launcher/pen/letters.bin`) and its geometry (`ui/nap/pen/pencore.js`)
 come from dle; `scripts/sync-pen <dle checkout>` refreshes both.
@@ -66,6 +78,9 @@ come from dle; `scripts/sync-pen <dle checkout>` refreshes both.
   whole 8 px columns of the screen inside its area; anything a frame changes outside them gets the
   slow update, and the ink lags a second or two. A canvas redraws all of itself on every change,
   so one large canvas is slow.
+- Pen mode has black and white only. While someone writes, change nothing else on the screen,
+  and nothing grey inside the pen's area: each such change gets the slow update and the ink
+  waits for it. Move a cursor or other highlights only when the pen rests (`busy` is false).
 - There is no keyboard worth using and no microphone. Typing should be handwriting.
 
 ## Build, preview, and test
@@ -86,7 +101,8 @@ On the tablet, plugged in by USB (`root@10.11.99.1`, set `REMARKABLE` for anothe
   and when you tap Reload in the AppLoad menu with the app closed: close the launcher (swipe down
   from the top of the screen, then the X), tap Reload, and open it again.
 - `scripts/rmshot out.png [scale]`: a screenshot.
-- `scripts/rminput tap x y` and `scripts/rminput pen x,y x,y …`: a finger tap or a pen stroke.
+- `scripts/rminput tap x y`, `swipe x y x y`, `pinch x y from to` and `pen x,y x,y …`: a finger
+  tap, drag or pinch, or a pen stroke.
 
 To try the tablet against a local Nap, forward it and point the launcher at it, then remove the
 file afterwards:

@@ -5,6 +5,7 @@
 //	rminput tap <x> <y>
 //	rminput pen <x,y> <x,y> ... [-ms 8]   one stroke through the points
 //	rminput swipe <x1> <y1> <x2> <y2>
+//	rminput pinch <x> <y> <from> <to>     two fingers around a point, from and to px apart
 package main
 
 import (
@@ -105,6 +106,33 @@ func touch(f *os.File, pts [][2]float64, step time.Duration) {
 	syn(f)
 }
 
+// Two fingers that start `from` apart around a point and end `to` apart (a pinch).
+func pinch(f *os.File, cx, cy, from, to float64, step time.Duration) {
+	tracking += 2
+	const steps = 16
+	for k := 0; k <= steps; k++ {
+		d := (from + (to-from)*float64(k)/steps) / 2
+		for slot, sign := range []float64{-1, 1} {
+			x, y := touchXY(f, cx+sign*d, cy+sign*d*0.3)
+			emit(f, evAbs, absMtSlot, int32(slot))
+			if k == 0 {
+				emit(f, evAbs, absMtTrack, tracking-int32(slot))
+			}
+			emit(f, evAbs, absMtX, x)
+			emit(f, evAbs, absMtY, y)
+			emit(f, evAbs, absMtPress, 80)
+			emit(f, evAbs, absMtMajor, 10)
+		}
+		syn(f)
+		time.Sleep(step)
+	}
+	for slot := int32(0); slot < 2; slot++ {
+		emit(f, evAbs, absMtSlot, slot)
+		emit(f, evAbs, absMtTrack, -1)
+	}
+	syn(f)
+}
+
 func pen(f *os.File, pts [][2]float64, step time.Duration) {
 	x0, y0 := penXY(f, pts[0][0], pts[0][1])
 	emit(f, evKey, btnToolPen, 1)
@@ -137,7 +165,7 @@ func num(s string) float64 { v, _ := strconv.ParseFloat(s, 64); return v }
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: rminput info | tap x y | swipe x1 y1 x2 y2 | pen x,y x,y ... [-ms n]")
+		fmt.Fprintln(os.Stderr, "usage: rminput info | tap x y | swipe x1 y1 x2 y2 | pinch x y from to | pen x,y x,y ... [-ms n]")
 		os.Exit(2)
 	}
 	step := 8 * time.Millisecond
@@ -173,6 +201,8 @@ func main() {
 			pts = append(pts, [2]float64{num(args[0]) + (num(args[2])-num(args[0]))*t, num(args[1]) + (num(args[3])-num(args[1]))*t})
 		}
 		touch(f, pts, 15*time.Millisecond)
+	case "pinch": // pinch <x> <y> <from> <to>: two fingers around (x, y), from and to px apart
+		pinch(open("/dev/input/event2"), num(args[0]), num(args[1]), num(args[2]), num(args[3]), 30*time.Millisecond)
 	case "pen":
 		f := open("/dev/input/event1")
 		pts := [][2]float64{}

@@ -50,6 +50,8 @@ Rectangle {
         me: function () { return root.me },
         kvGet: function (key) { return backend.kvGet(key) },
         kvSet: function (key, value) { return backend.kvSet(key, value) },
+        /** A URL (a picture) as a file on the tablet: resolves with its path. */
+        fetchFile: function (url) { return backend.call("file.get", { url: url }).then(function (r) { return r.path }) },
         setTimeout: function (fn, ms) { return backend.setTimeout(fn, ms) },
         clearTimeout: function (id) { backend.clearTimeout(id) },
         log: function (text) { backend.log(text) },
