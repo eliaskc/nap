@@ -60,8 +60,12 @@ come from dle; `scripts/sync-pen <dle checkout>` refreshes both.
   every change redraws the screen, and the panel is slow.
 - Large targets (at least 100 × 100 px) for fingers. The pen arrives as a real mouse
   (`Qt.MouseEventNotSynthesized`); fingers as synthesized ones. The eraser end is `Qt.MiddleButton`.
-- For ink, use `DisplayMethodArea { displayMethod: DisplayMethodArea.Fast }` from
-  `net.asivery.ApploadUtils`, as `PenArea` does.
+- For ink, use `PenArea`, or do what it does: `DisplayMethodArea { displayMethod:
+  DisplayMethodArea.UFast }` from `net.asivery.ApploadUtils` (the pen mode of the tablet's own
+  notebooks), reaching 16 px past what you draw, over canvases of 128 px tiles. A mode covers only
+  whole 8 px columns of the screen inside its area; anything a frame changes outside them gets the
+  slow update, and the ink lags a second or two. A canvas redraws all of itself on every change,
+  so one large canvas is slow.
 - There is no keyboard worth using and no microphone. Typing should be handwriting.
 
 ## Build, preview, and test
@@ -77,8 +81,10 @@ Needs Go (`mise install`) and uv (for Qt's resource compiler and the preview, fr
 
 On the tablet, plugged in by USB (`root@10.11.99.1`, set `REMARKABLE` for another address):
 
-- `scripts/install [--build] [--restart]`: copies `build/app` to the tablet. This is the first
-  install; after that the launcher updates itself from Nap.
+- `scripts/install [--build]`: copies `build/app` to the tablet. This is the first install; after
+  that the launcher updates itself from Nap. AppLoad reads an app's QML when the interface starts
+  and when you tap Reload in the AppLoad menu with the app closed: close the launcher (swipe down
+  from the top of the screen, then the X), tap Reload, and open it again.
 - `scripts/rmshot out.png [scale]`: a screenshot.
 - `scripts/rminput tap x y` and `scripts/rminput pen x,y x,y …`: a finger tap or a pen stroke.
 
@@ -104,4 +110,9 @@ and publish again. Never force-push `main`.
 
 - After a reboot, xovi has to be started again before AppLoad shows up.
 - A reMarkable firmware update can break xovi and AppLoad until they are updated for it.
-- Ink drawn through QML lags behind the tablet's own notebooks.
+- Never `systemctl restart xochitl` while xovi is loaded: the interface crashes on the way down
+  and the tablet reboots. After a reboot, start xovi again with `/home/root/xovi/start`.
+- To see what the panel does with each frame (which mode, which region), start the interface with
+  `QT_LOGGING_RULES=rm.framebuffer*=true;rm.render*=true` (a `.conf` with that `Environment=` in
+  `/home/root/xovi/services/xochitl.service/`, then reboot and start xovi) and read
+  `journalctl -u xochitl`. Remove it afterwards; the logging slows every frame.

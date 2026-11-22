@@ -313,42 +313,98 @@ Item {
     // Turning the pen off drops a letter in progress.
     onEnabledChanged: if (!enabled) { commitTimer.stop(); current = null; ink.redraw() }
 
-    Canvas {
+    // The ink. Three things keep it up with the pen on the tablet:
+    // - It is drawn in the panel's pen mode (UFast), the one the tablet's notebooks draw with.
+    // - The mode's area reaches past the ink. The panel applies a mode to whole bytes of the
+    //   screen (8 px across) inside the area; whatever a frame changed outside them gets the
+    //   slow update, and the ink then waits for that one, a second or two behind the pen.
+    // - It is in tiles, so a frame redraws only the tile under the pen and not the whole area
+    //   (the renderer redraws every pixel of a canvas that changed).
+    Item {
         id: ink
         anchors.fill: parent
-        renderStrategy: Canvas.Immediate
-        property var segs: []
-        property bool full: true
-        function segment(a, b) { segs.push([a, b]); requestPaint() }
-        function dot(p) { segs.push([p, { x: p.x + 0.1, y: p.y }]); requestPaint() }
-        function redraw() { full = true; segs = []; requestPaint() }
-        onPaint: {
-            var c = getContext("2d")
-            c.lineCap = "round"; c.lineJoin = "round"
-            c.lineWidth = Math.min(9 * root.u * 2, Math.max(5 * root.u, root.cellSize() * 0.06))
-            if (full) {
-                full = false
-                c.clearRect(0, 0, width, height)
-                var letters = root.pending.concat(root.current ? [root.current] : [])
-                letters.forEach(function (letter) {
-                    c.strokeStyle = letter === root.current ? "black" : "#8c8c8c"
-                    letter.strokes.forEach(function (s) {
-                        c.beginPath()
-                        s.forEach(function (p, i) { if (i) c.lineTo(p.x, p.y); else c.moveTo(p.x, p.y) })
-                        if (s.length === 1) c.lineTo(s[0].x + 0.1, s[0].y)
-                        c.stroke()
-                    })
-                })
-                return
+        readonly property real tile: 128 * root.u
+        readonly property int cols: Math.max(1, Math.ceil(width / tile))
+        readonly property int rows: Math.max(1, Math.ceil(height / tile))
+        readonly property real lineWidth: Math.min(9 * root.u * 2, Math.max(5 * root.u, root.cellSize() * 0.06))
+
+        /** Calls fn with each tile the box touches. */
+        function over(x0, y0, x1, y1, fn) {
+            var pad = lineWidth
+            var c0 = Math.max(0, Math.floor((Math.min(x0, x1) - pad) / tile)), c1 = Math.min(cols - 1, Math.floor((Math.max(x0, x1) + pad) / tile))
+            var r0 = Math.max(0, Math.floor((Math.min(y0, y1) - pad) / tile)), r1 = Math.min(rows - 1, Math.floor((Math.max(y0, y1) + pad) / tile))
+            for (var r = r0; r <= r1; r++) for (var c = c0; c <= c1; c++) {
+                var t = tiles.itemAt(r * cols + c)
+                if (t) fn(t)
             }
-            c.strokeStyle = "black"
-            c.beginPath()
-            segs.forEach(function (s) { c.moveTo(s[0].x, s[0].y); c.lineTo(s[1].x, s[1].y) })
-            c.stroke()
-            segs = []
         }
-        // AppLoad's fast e-ink mode for the ink, so it keeps up with the pen.
-        DisplayMethodArea { anchors.fill: parent; displayMethod: DisplayMethodArea.Fast }
+        function segment(a, b) {
+            var s = [a, b]
+            over(a.x, a.y, b.x, b.y, function (t) { t.segs.push(s); t.inked = true; t.requestPaint() })
+        }
+        function dot(p) { segment(p, { x: p.x + 0.1, y: p.y }) }
+        /** Draws what is left of the letters again, in the tiles that have ink or get some. */
+        function redraw() {
+            var touched = {}
+            root.pending.concat(root.current ? [root.current] : []).forEach(function (letter) {
+                letter.strokes.forEach(function (s) {
+                    for (var i = 0; i < s.length; i++) {
+                        var q = s[Math.max(0, i - 1)]
+                        over(q.x, q.y, s[i].x, s[i].y, function (t) { touched[t.index] = true })
+                    }
+                })
+            })
+            for (var i = 0; i < tiles.count; i++) {
+                var t = tiles.itemAt(i)
+                if (!t || !(t.inked || touched[i])) continue
+                t.inked = !!touched[i]
+                t.full = true
+                t.segs = []
+                t.requestPaint()
+            }
+        }
+
+        Repeater {
+            id: tiles
+            model: ink.cols * ink.rows
+            Canvas {
+                required property int index
+                x: (index % ink.cols) * ink.tile
+                y: Math.floor(index / ink.cols) * ink.tile
+                width: Math.min(ink.tile, ink.width - x); height: Math.min(ink.tile, ink.height - y)
+                renderStrategy: Canvas.Immediate
+                property var segs: []
+                property bool full: false
+                property bool inked: false
+                onPaint: {
+                    var c = getContext("2d")
+                    c.setTransform(1, 0, 0, 1, -x, -y)
+                    c.lineCap = "round"; c.lineJoin = "round"
+                    c.lineWidth = ink.lineWidth
+                    if (full) {
+                        full = false
+                        c.clearRect(x, y, width, height)
+                        var letters = root.pending.concat(root.current ? [root.current] : [])
+                        letters.forEach(function (letter) {
+                            c.strokeStyle = letter === root.current ? "black" : "#8c8c8c"
+                            letter.strokes.forEach(function (s) {
+                                c.beginPath()
+                                s.forEach(function (p, i) { if (i) c.lineTo(p.x, p.y); else c.moveTo(p.x, p.y) })
+                                if (s.length === 1) c.lineTo(s[0].x + 0.1, s[0].y)
+                                c.stroke()
+                            })
+                        })
+                        return
+                    }
+                    c.strokeStyle = "black"
+                    c.beginPath()
+                    segs.forEach(function (s) { c.moveTo(s[0].x, s[0].y); c.lineTo(s[1].x, s[1].y) })
+                    c.stroke()
+                    segs = []
+                }
+            }
+        }
+        DisplayMethodArea { anchors.fill: parent; anchors.margins: -16 * root.u; displayMethod: DisplayMethodArea.UFast }
     }
     Connections { target: root; function onPendingChanged() { ink.redraw() } }
 

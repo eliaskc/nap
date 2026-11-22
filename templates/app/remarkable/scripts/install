@@ -1,19 +1,16 @@
 #!/bin/sh
 # Installs the launcher on a reMarkable plugged in by USB, the first time or for testing a build
 # before it is published. After that, the launcher updates itself from Nap.
-#   scripts/install [--build] [--restart]
+#   scripts/install [--build]
 # Needs root SSH to the tablet (ssh root@10.11.99.1 with your key) and xovi with AppLoad.
 #   --build     run scripts/build first
-#   --restart   restart the tablet's interface afterwards, so AppLoad sees a new app
 set -eu
 cd "$(dirname "$0")/.."
 host=${REMARKABLE:-root@10.11.99.1}
 build=false
-restart=false
 for arg in "$@"; do
   case $arg in
     --build) build=true ;;
-    --restart) restart=true ;;
   esac
 done
 $build && scripts/build >/dev/null
@@ -28,9 +25,5 @@ ssh "$host" "test -d /home/root/xovi/exthome/appload" || {
 ssh "$host" "rm -rf $dir.new && mkdir -p $dir.new"
 (cd build/app && tar -cf - .) | ssh "$host" "tar -xf - -C $dir.new && chmod +x $dir.new/backend/entry && rm -rf $dir.old && { [ ! -d $dir ] || mv $dir $dir.old; } && mv $dir.new $dir && rm -rf $dir.old"
 echo "Installed on $host:$dir"
-if $restart; then
-  ssh "$host" "systemctl restart xochitl"
-  echo "Restarted the interface. Open it from the AppLoad menu."
-else
-  echo "Close and reopen it on the tablet (or run with --restart)."
-fi
+echo "On the tablet: close the launcher (swipe down from the top, then the X), tap Reload in"
+echo "the AppLoad menu, and open it again. A new app folder shows up after the same Reload."
