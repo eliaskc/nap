@@ -58,26 +58,41 @@ export function findExtensions(root = process.cwd()): Array<FoundExtension> {
   return found;
 }
 
+/** instance/extensions/groups.ts (see NapGroups in nap.extension.ts), or null without one. */
+export function findGroups(root = process.cwd()): string | null {
+  const file = resolve(root, "instance/extensions/groups.ts");
+  return existsSync(file) ? file : null;
+}
+
 /** Every file of the extensions, for the dev server to watch. */
-export function extensionFiles(extensions: Array<FoundExtension>) {
-  return extensions.flatMap((extension) =>
-    [extension.server, extension.client, extension.types, extension.instructions].filter(
-      (file): file is string => Boolean(file),
-    ),
-  );
+export function extensionFiles(extensions: Array<FoundExtension>, groups: string | null = null) {
+  return [
+    ...extensions.flatMap((extension) => [
+      extension.server,
+      extension.client,
+      extension.types,
+      extension.instructions,
+    ]),
+    groups,
+  ].filter((file): file is string => Boolean(file));
 }
 
 /**
  * `virtual:nap-extensions` for the Worker: each extension's server module, types, and
- * instructions.
+ * instructions, and the deployment's groups.
  */
-export function serverModuleSource(extensions: Array<FoundExtension>) {
+export function serverModuleSource(
+  extensions: Array<FoundExtension>,
+  groups: string | null = null,
+) {
   const read = (file: string | null) =>
     file ? JSON.stringify(readFileSync(file, "utf8")) : "null";
   return [
     ...extensions.map(
       (extension, index) => `import server${index} from ${JSON.stringify(extension.server)};`,
     ),
+    groups ? `import groups from ${JSON.stringify(groups)};` : "const groups = {};",
+    "export { groups };",
     "export const extensions = [",
     ...extensions.map(
       (extension, index) =>

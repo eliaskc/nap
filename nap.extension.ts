@@ -20,6 +20,11 @@
  * artifact frames, and on local dev servers. Secrets come from the deployment: the JSON object in
  * NAP_EXTENSION_SECRETS (a GitHub secret of the config repository), and each extension gets only
  * the names it declares. Pages never see them.
+ *
+ * Next to the extension folders, instance/extensions/groups.ts may name groups of people:
+ * `export default { revenue: ["ada@example.com"] } satisfies NapGroups`. Nap tells an extension
+ * which groups the viewer is in, so it can keep some of what it answers to them. Nap itself does
+ * nothing with groups. Unlike instance/config.ts, the file stays on the server.
  */
 
 export type NapExtension = {
@@ -39,8 +44,13 @@ export type NapExtensionContext = {
   path: string;
   /** The page that asked. */
   page: { slug: string; kind: "site" | "artifact" };
-  /** The person viewing the page. Nap has checked that they can view it. */
-  viewer: { email: string; name: string };
+  /**
+   * The person viewing the page. Nap has checked that they can view it. `groups` are the groups
+   * of instance/extensions/groups.ts that they are in, none when there is no such file. A page's
+   * code runs in the viewer's browser, so what a page may get is what its viewer may see: answer
+   * 403 for the rest, and the page shows that part as locked.
+   */
+  viewer: { email: string; name: string; groups: ReadonlyArray<string> };
   /** The extension's declared secrets. A secret the deployment does not set is missing. */
   secrets: Readonly<Record<string, string | undefined>>;
   /** Values the extension keeps between requests, shared by every page and viewer. */
@@ -50,6 +60,12 @@ export type NapExtensionContext = {
   /** Writes one JSON line to the Worker's logs. Never log secrets. */
   log(message: string, fields?: Record<string, unknown>): void;
 };
+
+/**
+ * The default export of instance/extensions/groups.ts: each group's name (lowercase letters,
+ * digits, and "-") with the emails of the people in it.
+ */
+export type NapGroups = Readonly<Record<string, ReadonlyArray<string>>>;
 
 /**
  * A store for the extension's own cache, in Nap's bucket. It is global and private to the

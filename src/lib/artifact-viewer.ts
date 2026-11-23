@@ -17,7 +17,7 @@ import { handleLiveRequest, publishChange } from "~/lib/site-live";
 import { handleChannelRequest } from "~/lib/site-channel";
 import { handleRtcRequest } from "~/lib/site-rtc";
 import { handleSiteFetch } from "~/lib/site-fetch";
-import { EXTENSIONS } from "~/lib/extension-registry";
+import { EXTENSIONS, GROUPS } from "~/lib/extension-registry";
 import { handleExtensionRequest } from "~/lib/extensions";
 import { fileHeaders, findViewableNap, getNapFile, normalizeRequestPath } from "~/lib/site-serving";
 import { serveShareWidget } from "~/lib/share-widget";
@@ -358,7 +358,10 @@ export const handleFrameRequest = Effect.fn("handleFrameRequest")(function* (req
     const path = rest.slice("/_nap/ext/".length);
     return withCors(
       yield* recoverHttpError(
-        handleExtensionRequest(EXTENSIONS, frame.slug, request, identity, path, { frame: true }),
+        handleExtensionRequest(EXTENSIONS, frame.slug, request, identity, path, {
+          frame: true,
+          groups: GROUPS,
+        }),
       ),
     );
   }

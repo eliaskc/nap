@@ -24,7 +24,7 @@ import { handleChannelRequest } from "~/lib/site-channel";
 import { handleRtcRequest } from "~/lib/site-rtc";
 import { handleSiteFetch } from "~/lib/site-fetch";
 import { handleSiteFilesRequest } from "~/lib/site-files";
-import { EXTENSIONS } from "~/lib/extension-registry";
+import { EXTENSIONS, GROUPS } from "~/lib/extension-registry";
 import { handleExtensionRequest } from "~/lib/extensions";
 import { isContentDomainHost, resolveHost, serveUploadedSite } from "~/lib/site-serving";
 import { redirectFromOldHost, verifyContentAccess } from "~/lib/content-domain";
@@ -193,6 +193,7 @@ const routeRequest = Effect.fn("routeRequest")(function* (
         request,
         getIdentity(request),
         path,
+        { groups: GROUPS },
       );
     }
     const localNotifyMatch = url.pathname.match(/^\/s\/([^/]+)\/_nap\/notify$/);
@@ -289,7 +290,9 @@ const routeRequest = Effect.fn("routeRequest")(function* (
     }
     if (url.pathname.startsWith("/_nap/ext/")) {
       const path = url.pathname.slice("/_nap/ext/".length);
-      return yield* handleExtensionRequest(EXTENSIONS, slug, request, getIdentity(request), path);
+      return yield* handleExtensionRequest(EXTENSIONS, slug, request, getIdentity(request), path, {
+        groups: GROUPS,
+      });
     }
     // On a separate content domain, nothing else below /_nap/ is Nap's, and a nap's own files
     // never stand in for it there.

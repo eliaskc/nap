@@ -461,7 +461,11 @@ declares from `NAP_EXTENSION_SECRETS`, and a cache of its own in the bucket
 (`extension-cache/<name>/`, deleted after a week; the Workers Cache API does not
 work behind Access). An extension is server code with the
 deployment's secrets, so it is reviewed like Nap's own; pages still hold no
-secrets and run no server code. Tests next to an extension
+secrets and run no server code. A deployment can also name groups of people in
+`instance/extensions/groups.ts`: Nap tells each extension which groups the
+viewer is in, so an extension can keep some of what it answers to them (a page's
+code runs in its viewer's browser, so the viewer is who gets checked), and does
+nothing with groups itself. Tests next to an extension
 (`instance/extensions/*/*.test.mjs`) run with `pnpm test`.
 
 ### Comments

@@ -23,10 +23,10 @@ registerHooks({
     return next(specifier, context);
   },
 });
-const { handleExtensionRequest, clientTypesWithExtensions } =
+const { handleExtensionRequest, clientTypesWithExtensions, groupsOf } =
   await import("../src/lib/extensions.ts");
 const { respond } = await import("../src/server/runtime.ts");
-const { findExtensions, clientModuleSource, serverModuleSource } =
+const { findExtensions, findGroups, extensionFiles, clientModuleSource, serverModuleSource } =
   await import("../scripts/lib/extensions.ts");
 const { renderInstructions } = await import("../src/lib/instructions-text.ts");
 const { parseExtensionSecrets } = await import("../src/server/platform.ts");
@@ -107,6 +107,7 @@ const echo = {
         path: context.path,
         page: context.page,
         viewer: context.viewer.email,
+        groups: context.viewer.groups,
         secrets: context.secrets,
         backgroundDone: done,
         cache: [before, after?.value, after?.storedAt instanceof Date],
@@ -126,11 +127,14 @@ const broken = {
   },
 };
 
-function call(env, slug, path, { email = OWNER, frame = false, headers = {} } = {}) {
+function call(env, slug, path, { email = OWNER, frame = false, headers = {}, groups } = {}) {
   const request = new Request(`https://${slug}.nap.test/_nap/ext/${path}`, { headers });
   return respond(
     env,
-    handleExtensionRequest([echo, broken], slug, request, { email, name: email }, path, { frame }),
+    handleExtensionRequest([echo, broken], slug, request, { email, name: email }, path, {
+      frame,
+      groups,
+    }),
   );
 }
 
@@ -148,6 +152,20 @@ test("an extension gets the path, the page, the viewer, and only its own secrets
   assert.match([...env.objects.keys()][0], /^extension-cache\/echo\/[0-9a-f]{64}$/);
   assert.equal(response.headers.get("cache-control"), "no-store");
   assert.equal(response.headers.get("x-content-type-options"), "nosniff");
+});
+
+test("an extension hears which of the deployment's groups the viewer is in", async () => {
+  const env = environment();
+  const groups = {
+    revenue: ["someone@example.com", " Owner@Example.com "],
+    analysts: [OWNER],
+    others: ["other@example.com"],
+    broken: "owner@example.com",
+  };
+  const body = await (await call(env, "board", "echo/x", { groups })).json();
+  assert.deepEqual(body.groups, ["analysts", "revenue"]);
+  assert.deepEqual((await (await call(env, "board", "echo/x")).json()).groups, []);
+  assert.deepEqual(groupsOf(groups, "nobody@example.com"), []);
 });
 
 test("a claim goes to one caller until it runs out, and a stale claim to one of two", async () => {
@@ -245,6 +263,18 @@ test("extensions come from instance/extensions, with checked names", () => {
   assert.equal(demo.name, "demo");
   assert.ok(demo.client && demo.instructions && !demo.types);
   assert.match(serverModuleSource([demo]), /instructions: "# Demo\\n"/);
+  assert.equal(findGroups(root), null);
+  assert.match(serverModuleSource([demo]), /^const groups = \{\};\nexport \{ groups \};$/m);
+  const grouped = instance({ "instance/extensions/groups.ts": "export default {};" });
+  assert.deepEqual(findExtensions(grouped), [], "groups.ts is not an extension");
+  const groupsFile = findGroups(grouped);
+  assert.match(groupsFile, /instance\/extensions\/groups\.ts$/);
+  assert.ok(
+    serverModuleSource([], groupsFile).includes(
+      `import groups from ${JSON.stringify(groupsFile)};`,
+    ),
+  );
+  assert.deepEqual(extensionFiles([], groupsFile), [groupsFile]);
   assert.match(clientModuleSource([demo]), /\["demo", client0\]/);
 
   const named = (name) => () =>

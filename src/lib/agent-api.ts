@@ -42,7 +42,7 @@ import { handleLiveRequest, publishChange } from "~/lib/site-live";
 import { handleChannelRequest } from "~/lib/site-channel";
 import { handleRtcRequest } from "~/lib/site-rtc";
 import { handleSiteFetch } from "~/lib/site-fetch";
-import { EXTENSIONS } from "~/lib/extension-registry";
+import { EXTENSIONS, GROUPS } from "~/lib/extension-registry";
 import { handleExtensionRequest } from "~/lib/extensions";
 import {
   handleNotifyRequest,
@@ -359,6 +359,7 @@ export const handleAgentApi = Effect.fn("handleAgentApi")(function* (request: Re
       rest.slice("/ext/".length),
       {
         frame: nap.kind === "artifact",
+        groups: GROUPS,
       },
     );
   }

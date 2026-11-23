@@ -7,7 +7,12 @@ import viteReact from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import { napConfig } from "./nap.config.ts";
 import { bundleClient } from "./scripts/lib/client-bundle.ts";
-import { extensionFiles, findExtensions, serverModuleSource } from "./scripts/lib/extensions.ts";
+import {
+  extensionFiles,
+  findExtensions,
+  findGroups,
+  serverModuleSource,
+} from "./scripts/lib/extensions.ts";
 
 /**
  * Builds part of the artifact comments (src/comments) as one self-contained file. They load
@@ -123,8 +128,9 @@ function napExtensionsModule(): Plugin {
     load(resolved) {
       if (resolved !== `\0${id}`) return;
       const extensions = findExtensions();
-      for (const file of extensionFiles(extensions)) this.addWatchFile(file);
-      return serverModuleSource(extensions);
+      const groups = findGroups();
+      for (const file of extensionFiles(extensions, groups)) this.addWatchFile(file);
+      return serverModuleSource(extensions, groups);
     },
   };
 }

@@ -14,7 +14,9 @@ declare module "virtual:nap-client" {
 }
 
 declare module "virtual:nap-extensions" {
-  import type { NapExtension } from "../nap.extension.ts";
+  import type { NapExtension, NapGroups } from "../nap.extension.ts";
+  /** The deployment's groups, from instance/extensions/groups.ts. None without the file. */
+  export const groups: NapGroups;
   /** The deployment's extensions, from instance/extensions (see nap.extension.ts). */
   export const extensions: ReadonlyArray<{
     name: string;

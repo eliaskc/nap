@@ -1,5 +1,10 @@
 import { Effect, Schema } from "effect";
-import type { NapExtension, NapExtensionCache, NapExtensionContext } from "../../nap.extension.ts";
+import type {
+  NapExtension,
+  NapExtensionCache,
+  NapExtensionContext,
+  NapGroups,
+} from "../../nap.extension.ts";
 import type { Identity } from "~/lib/nap-server";
 import { canViewSite } from "~/lib/site-data";
 import { Database } from "~/server/database";
@@ -29,6 +34,7 @@ export class ExtensionError extends Schema.TaggedError<ExtensionError>()("Extens
  * (`frame: true`), or on a local dev server. Nap checks that the person can view the page and
  * hands the request to the extension with its secrets. Sites refuse cross-site requests, as
  * nap.fetch does; frames are cross-site by nature, and their token is the credential.
+ * `groups` are the deployment's (GROUPS); the extension hears which the viewer is in.
  */
 export const handleExtensionRequest = Effect.fn("handleExtensionRequest")(function* (
   extensions: ReadonlyArray<ExtensionEntry>,
@@ -36,7 +42,7 @@ export const handleExtensionRequest = Effect.fn("handleExtensionRequest")(functi
   request: Request,
   identity: Identity,
   path: string,
-  options: { frame?: boolean } = {},
+  options: { frame?: boolean; groups?: NapGroups } = {},
 ) {
   const slash = path.indexOf("/");
   const name = slash === -1 ? path : path.slice(0, slash);
@@ -63,7 +69,11 @@ export const handleExtensionRequest = Effect.fn("handleExtensionRequest")(functi
   const context: NapExtensionContext = {
     path: rest,
     page: { slug, kind },
-    viewer: { email: identity.email, name: identity.name },
+    viewer: {
+      email: identity.email,
+      name: identity.name,
+      groups: groupsOf(options.groups ?? {}, identity.email),
+    },
     secrets,
     cache: extensionCache(yield* Storage, name),
     waitUntil: (promise) => {
@@ -97,6 +107,21 @@ export const handleExtensionRequest = Effect.fn("handleExtensionRequest")(functi
   headers.set("x-content-type-options", "nosniff");
   return new Response(response.body, { status: response.status, headers });
 });
+
+/** The groups this person is in, sorted. Emails match whatever their case. */
+export function groupsOf(groups: NapGroups, email: string): Array<string> {
+  const wanted = email.trim().toLowerCase();
+  return Object.entries(groups)
+    .filter(
+      ([, emails]) =>
+        Array.isArray(emails) &&
+        emails.some(
+          (member) => typeof member === "string" && member.trim().toLowerCase() === wanted,
+        ),
+    )
+    .map(([name]) => name)
+    .sort();
+}
 
 /**
  * An extension's cache: one object per key below extension-cache/<name>/, by the key's hash, and
