@@ -35,12 +35,16 @@ export function toolbarPage(options: {
     commentsPath: string;
     versionsPath: string;
     bar: boolean;
+    /** The theme the person chose (the nap-theme cookie), for pages that have it. */
+    theme?: string;
   };
 }) {
   const { title, owner, artifact } = options;
   const bar = !artifact || artifact.bar;
   const frame = artifact
-    ? `<iframe data-nap-content data-src="${attr(options.frameSrc)}" data-base="${attr(artifact.base)}"
+    ? `<iframe data-nap-content data-src="${attr(options.frameSrc)}" data-base="${attr(artifact.base)}"${
+        artifact.theme ? ` name="nap-theme:${attr(artifact.theme)}"` : ""
+      }
       sandbox="${attr(artifact.sandbox)}" title="${attr(title)}"
       allow="clipboard-read *; clipboard-write *; fullscreen *; autoplay *; camera *; microphone *; geolocation *; web-share *"
       allowfullscreen></iframe>
@@ -62,7 +66,7 @@ export function toolbarPage(options: {
       <h1 title="${attr(`${title} · ${owner} · updated ${formatDate(options.updatedAt)}`)}">
         ${text(title)}<span class="owner"> · ${text(owner)}</span>
       </h1>
-      <div class="actions"><span id="nap-history-slot"></span><span id="nap-comments-slot"></span><span id="nap-share-slot"></span></div>
+      <div class="actions"><span id="nap-theme-slot"></span><span id="nap-history-slot"></span><span id="nap-comments-slot"></span><span id="nap-share-slot"></span></div>
     </header>`;
   const body = `${bar ? header : ""}
     <main>${frame}</main>
@@ -102,6 +106,8 @@ export function toolbarPage(options: {
   h1 { flex: 1; min-width: 0; margin: 0; font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   h1 .owner { color: var(--nap-muted); font-weight: 400; }
   .actions, .actions > span { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+  #nap-theme-slot select { height: 28px; max-width: 120px; padding: 0 6px; border: 1px solid var(--nap-line); border-radius: 6px; background: var(--nap-bg); color: var(--nap-fg); font: inherit; font-size: 12px; cursor: pointer; }
+  #nap-theme-slot select:hover { background: var(--nap-hover); }
   main { position: relative; display: flex; flex: 1; min-height: 0; }
   iframe { flex: 1; width: 100%; min-width: 0; border: 0; background: #fff; }
   @media (max-width: 480px) { h1 .owner { display: none; } }
@@ -243,6 +249,33 @@ const VIEWER_SOURCE = String.raw`(() => {
   if (!frame) return;
   const base = frame.dataset.base;
   const baseTitle = document.title;
+
+  // Themes. A page that can switch theme says which it has (see frameScript). The person's
+  // choice is a cookie, for every nap with a theme of that name: Nap puts it in the frame's
+  // name when it serves this page, so the nap starts in it.
+  function showThemes(themes, current) {
+    const slot = document.getElementById("nap-theme-slot");
+    if (!slot) return;
+    slot.textContent = "";
+    if (themes.length < 2) return;
+    const select = document.createElement("select");
+    select.setAttribute("aria-label", "Theme");
+    select.title = "Theme";
+    themes.forEach((theme) => {
+      const option = document.createElement("option");
+      option.value = theme.id;
+      option.textContent = theme.label;
+      select.appendChild(option);
+    });
+    select.value = current;
+    select.addEventListener("change", () => {
+      document.cookie = "nap-theme=" + select.value + "; path=/; max-age=31536000; samesite=lax";
+      // The frame's origin is opaque, so there is no origin to name.
+      frame.contentWindow.postMessage({ type: "nap:theme", theme: select.value }, "*");
+    });
+    slot.appendChild(select);
+  }
+
   frame.src = frame.dataset.src + location.hash;
 
   const token = (frame.dataset.src.match(/^\/_nap\/frame\/([A-Za-z0-9_-]+)\//) || [])[1];
@@ -269,6 +302,14 @@ const VIEWER_SOURCE = String.raw`(() => {
   window.addEventListener("message", (event) => {
     if (event.source !== frame.contentWindow) return;
     const data = event.data;
+    if (data && data.type === "nap:themes" && Array.isArray(data.themes)) {
+      const themes = data.themes
+        .filter((theme) => theme && /^[a-z][a-z0-9-]{0,31}$/.test(theme.id) && typeof theme.label === "string")
+        .slice(0, 12)
+        .map((theme) => ({ id: theme.id, label: theme.label.slice(0, 40) }));
+      showThemes(themes, typeof data.current === "string" ? data.current : "");
+      return;
+    }
     if (!data || data.type !== "nap:location" || typeof data.path !== "string") return;
     if (data.path.charAt(0) !== "/" || data.path.charAt(1) === "/") return;
     // "/" and "/?q" belong to the artifact page itself: /<slug> and /<slug>?q.
@@ -341,4 +382,10 @@ function text(value: string) {
 
 function attr(value: string) {
   return text(value).replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
+
+/** The theme a person chose in the Nap bar, from the nap-theme cookie, or undefined. */
+export function chosenTheme(request: Request) {
+  const value = /(?:^|;\s*)nap-theme=([^;]*)/.exec(request.headers.get("cookie") ?? "")?.[1] ?? "";
+  return /^[a-z][a-z0-9-]{0,31}$/.test(value) ? value : undefined;
 }

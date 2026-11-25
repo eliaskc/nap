@@ -11,6 +11,7 @@ Every nap has a name: a random id, or one chosen with `--name` (lowercase letter
   - localStorage and sessionStorage are cleared on reload. Use collections (`data` topic) for anything that must last.
   - Cookies, service workers, IndexedDB, and pointer lock do not work. Client-side routing works with hash URLs (`#/games/mini`), not with real paths.
   - Scripts, modules, fetch of the nap's own files, `nap.fetch`, forms, popups, downloads, clipboard, and fullscreen all work.
+- Themes: a page whose colours all come from CSS variables can have more than one theme and let each person pick theirs in the Nap bar. List them in `<meta name="nap-themes" content="vivid=Vivid,plain=Plain">` (id=Label), put the default on `<html data-theme="vivid">`, and give each its variables under `:root[data-theme="plain"]`. Nap sets `data-theme` to the person's choice, kept for every nap with a theme of that id. The kit does all of this (`kit` topic); without the meta tag a page never switches.
 - People comment on it from the Nap bar (`api` topic).
 
 ## On its own host

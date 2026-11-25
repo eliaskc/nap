@@ -2,7 +2,7 @@ import { meResponse, peopleResponse } from "~/lib/welcome";
 import { Effect } from "effect";
 import { handleSiteCommentsRequest } from "~/lib/comments";
 import { ensureProfile, getIdentity, objectKey, type Identity } from "~/lib/nap-server";
-import { toolbarPage } from "~/lib/nap-toolbar";
+import { chosenTheme, toolbarPage } from "~/lib/nap-toolbar";
 import { handleVisitorAccessRequest, visitorRequestState } from "~/lib/access-requests";
 import { noAccessHeaders, noAccessPage } from "~/lib/no-access-page";
 import { findRedirect } from "~/lib/rekey";
@@ -182,6 +182,7 @@ export const handleArtifactPage = Effect.fn("handleArtifactPage")(function* (
       commentsPath: `${base}/_nap/comments`,
       versionsPath: `${base}/_nap/versions`,
       bar: Boolean(nap.toolbar),
+      theme: chosenTheme(request),
     },
   });
 });
@@ -458,6 +459,10 @@ function rewriteArtifactHtml(response: Response, prefix: string, viewerOrigin: s
  *   page in-memory stand-ins, so it works. Data does not last after a reload; artifacts that need
  *   that use window.nap.db.
  * - Tell the viewer the page's path, title, and icon links, so the address bar and the tab follow.
+ * - Themes: a page that lists its themes in <meta name="nap-themes" content="id=Label,…"> and
+ *   styles them by <html data-theme> can switch. Tell the viewer the list, and set the theme the
+ *   viewer asks for: at the start through the frame's name ("nap-theme:<id>", before the page
+ *   paints), later by message.
  */
 function frameScript(prefix: string, viewerOrigin: string) {
   return `(function(){var P=${JSON.stringify(prefix)},O=${JSON.stringify(viewerOrigin)};
@@ -468,7 +473,13 @@ function post(){try{var p=location.pathname;if(p.indexOf(P)===0)p=p.slice(P.leng
 ["pushState","replaceState"].forEach(function(n){var o=history[n];history[n]=function(){var r=o.apply(this,arguments);post();return r}});
 addEventListener("popstate",post);addEventListener("hashchange",post);
 addEventListener("DOMContentLoaded",function(){post();var t=document.querySelector("title");if(t)new MutationObserver(post).observe(t,{childList:true,characterData:true,subtree:true})});
-post();})();`;
+post();
+var R=document.documentElement,themes=null,want=/^nap-theme:/.test(window.name)?window.name.slice(10):"";
+function setTheme(id){if(!themes||!themes.some(function(t){return t.id===id}))return;R.setAttribute("data-theme",id);try{parent.postMessage({type:"nap:themes",themes:themes,current:id},O)}catch(e){}}
+function findThemes(){if(themes)return true;var m=document.querySelector('meta[name="nap-themes"]');if(!m)return false;themes=(m.getAttribute("content")||"").split(",").map(function(p){var i=p.indexOf("="),id=(i<0?p:p.slice(0,i)).trim();return{id:id,label:(i<0?id:p.slice(i+1)).trim().slice(0,40)||id}}).filter(function(t){return/^[a-z][a-z0-9-]{0,31}$/.test(t.id)}).slice(0,12);var now=R.getAttribute("data-theme")||"";if(want&&want!==now&&themes.some(function(t){return t.id===want}))setTheme(want);else try{parent.postMessage({type:"nap:themes",themes:themes,current:now},O)}catch(e){}return true}
+if(!findThemes()){var mo=new MutationObserver(function(){if(findThemes())mo.disconnect()});mo.observe(R,{childList:true,subtree:true});addEventListener("DOMContentLoaded",function(){findThemes();mo.disconnect()})}
+addEventListener("message",function(e){if(e.source!==parent||e.origin!==O)return;var d=e.data;if(d&&d.type==="nap:theme"&&typeof d.theme==="string"){want=d.theme;setTheme(d.theme)}});
+})();`;
 }
 
 /**

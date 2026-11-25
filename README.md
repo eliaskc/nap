@@ -482,6 +482,13 @@ theme. Nap serves it, as files, at `/_nap/api/kit` (`node publish.mjs kit
 of it lives in an agent skill. Pages bundle the kit when they build, so a
 change to it reaches new pages only.
 
+A page built with more than one theme lists them in `<meta
+name="nap-themes">`. The script Nap adds to every framed page tells the viewer,
+the Nap bar offers the choice, and the choice (the `nap-theme` cookie) reaches
+the page in the frame's name, so it starts in that theme, and by message when
+it changes. Nap only ever sets `data-theme` on the page's `<html>`, and only to
+a theme the page listed.
+
 A deployment changes the kit without changing Nap (`scripts/lib/kit.ts`):
 
 - `instance/kit/<path>` replaces or adds the file at `kit/<path>`. Themes are
