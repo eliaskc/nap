@@ -12,13 +12,14 @@ export const OPTIONAL_TOPICS: Record<string, (config: NapConfig) => boolean> = {
  * <!-- /if --> shows only when the flag is on (with <!-- if !<flag> -->, only when it
  * is off): "apps" when apps are on, "avatars", "channelServers", "ios", "android", and "remarkable" for
  * the platforms it has, and "private" or "everyone" for the default access.
- * {{extensionTopics}} on a line of its own becomes the deployment's extension topics.
+ * {{extensionTopics}} on a line of its own becomes the deployment's extension topics and the
+ * instance's own topics (`api: false`: not a nap.<name>).
  */
 export function renderInstructions(
   text: string,
   config: NapConfig,
   rootDomain = config.rootDomain,
-  extensionTopics: ReadonlyArray<{ name: string; summary: string }> = [],
+  extensionTopics: ReadonlyArray<{ name: string; summary: string; api?: boolean }> = [],
 ) {
   const flags: Record<string, boolean> = {
     apps: Boolean(config.apps),
@@ -39,7 +40,11 @@ export function renderInstructions(
     },
   );
   const topics = extensionTopics
-    .map((topic) => `- \`${topic.name}\`: ${topic.summary} (\`nap.${topic.name}\`).\n`)
+    .map((topic) =>
+      topic.api === false
+        ? `- \`${topic.name}\`: ${topic.summary.replace(/\.$/, "")}.\n`
+        : `- \`${topic.name}\`: ${topic.summary} (\`nap.${topic.name}\`).\n`,
+    )
     .join("");
   const withTopics = shown.replace(/^\{\{extensionTopics\}\}\n/m, topics);
   return fillDeploymentText(withTopics.replace(/\n{3,}/g, "\n\n"), {

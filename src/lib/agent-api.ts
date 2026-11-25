@@ -2,6 +2,7 @@ import publishScript from "~/content/publish.mjs?raw";
 import skill from "../../skills/nap/SKILL.md?raw";
 import { Effect, Predicate } from "effect";
 import { napConfig } from "~/nap.config";
+import { kitFiles } from "virtual:nap-instance-content";
 import { agentInstructionsFor } from "~/lib/agent-instructions";
 import { serveClientTypes } from "~/lib/site-data-client";
 import { DEFAULT_ACCESS, EVERYONE_LABEL, fillDeploymentText } from "~/lib/deployment-text";
@@ -172,6 +173,12 @@ export const handleAgentApi = Effect.fn("handleAgentApi")(function* (request: Re
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   });
+
+  // This Nap's kit (kit/, with the instance's themes and components): the project a page starts
+  // from. `node publish.mjs kit <dir>` writes it.
+  if (path === "/kit" && method === "GET") {
+    return json({ files: kitFiles }, { headers: noStore });
+  }
 
   if (path === "/me" && method === "GET") {
     // With the look (shape and color), like /_nap/me on a nap's host: NapKit's Nap.me().

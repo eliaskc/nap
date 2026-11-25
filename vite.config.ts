@@ -13,6 +13,7 @@ import {
   findGroups,
   serverModuleSource,
 } from "./scripts/lib/extensions.ts";
+import { instanceContentModuleSource, kitWatchFiles } from "./scripts/lib/kit.ts";
 
 /**
  * Builds part of the artifact comments (src/comments) as one self-contained file. They load
@@ -136,6 +137,24 @@ function napExtensionsModule(): Plugin {
 }
 
 /**
+ * `virtual:nap-instance-content`: the kit agents start pages from (kit/, with instance/kit/ over
+ * it) and what the instance adds to the instructions (instance/instructions/). See
+ * scripts/lib/kit.ts.
+ */
+function napInstanceContentModule(): Plugin {
+  const id = "virtual:nap-instance-content";
+  return {
+    name: "nap-instance-content",
+    resolveId: (source) => (source === id ? `\0${id}` : undefined),
+    load(resolved) {
+      if (resolved !== `\0${id}`) return;
+      for (const file of kitWatchFiles()) this.addWatchFile(file);
+      return instanceContentModuleSource();
+    },
+  };
+}
+
+/**
  * The instance's own icon: instance/icon/web (rendered by scripts/icons.mjs from
  * instance/icon/AppIcon.icon) replaces Nap's icons in public/ with the same names.
  */
@@ -236,6 +255,7 @@ export default defineConfig({
     commentsFrameModule(),
     napClientModule(),
     napExtensionsModule(),
+    napInstanceContentModule(),
     napIcons(),
   ],
 });

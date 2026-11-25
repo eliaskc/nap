@@ -12,6 +12,7 @@ registerHooks({
       "virtual:nap-client":
         "export const client = ''; export const voice = ''; export const voiceVersion = '';",
       "virtual:nap-extensions": "export const extensions = [];",
+      "virtual:nap-instance-content": "export const kitFiles = []; export const instructions = {};",
     }[specifier];
     if (stub !== undefined) {
       return { url: `data:text/javascript,${encodeURIComponent(stub)}`, shortCircuit: true };

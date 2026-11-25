@@ -146,7 +146,7 @@ the secrets and a deploy workflow that deploys this code with them.
    `cf realtime turn keys create --name nap`. Its `uid` is the variable
    `NAP_TURN_KEY_ID` and its `secret` is the secret `NAP_TURN_KEY_API_TOKEN`.
    Without them, calls use STUN only and fail on some networks.
-9. **Extensions (optional).** Add APIs of your own to the kit pages get, in
+9. **Extensions (optional).** Add APIs of your own to `window.nap`, in
    `instance/extensions/<name>/` (see "Extensions" below). Their secrets go in
    one secret, `NAP_EXTENSION_SECRETS`, as a JSON object.
 10. **Notifications (optional).** Set `notifications: true` in
@@ -175,6 +175,10 @@ the secrets and a deploy workflow that deploys this code with them.
     `node scripts/icons.mjs instance/icon` on a Mac. Commit both the icon and
     the `instance/icon/web/` it writes. An app repo made before keeps its icon
     in `ios/Launcher/Resources/`.
+
+13. **Themes and instructions (optional).** Give the kit your own look and
+    tell agents how your team works, in `instance/kit/` and
+    `instance/instructions/` (see "The kit" below).
 
 To stay on a release instead of `main`, set the config repository variable
 `NAP_REF` to a tag of this repository. To add someone, put their email in
@@ -450,7 +454,7 @@ loses the frame when the token runs out.
 
 ### Extensions
 
-A deployment can add APIs to the kit without changing Nap: each folder in
+A deployment can add APIs to `window.nap` without changing Nap: each folder in
 `instance/extensions/<name>/` becomes `nap.<name>` for pages, an endpoint at
 `/_nap/ext/<name>/*`, and an instructions topic. The contract is in
 `nap.extension.ts`; the build bundles extensions into the Worker and
@@ -467,6 +471,27 @@ viewer is in, so an extension can keep some of what it answers to them (a page's
 code runs in its viewer's browser, so the viewer is who gets checked), and does
 nothing with groups itself. Tests next to an extension
 (`instance/extensions/*/*.test.mjs`) run with `pnpm test`.
+
+### The kit
+
+`kit/` is the project agents start a content page from: React, Tailwind,
+shadcn/ui, and components for text, diagrams, charts, and code, in a neutral
+theme. Nap serves it, as files, at `/_nap/api/kit` (`node publish.mjs kit
+
+<dir>`), and its guide `kit/KIT.md` as the instructions topic `kit`; nothing
+of it lives in an agent skill. Pages bundle the kit when they build, so a
+change to it reaches new pages only.
+
+A deployment changes the kit without changing Nap (`scripts/lib/kit.ts`):
+
+- `instance/kit/<path>` replaces or adds the file at `kit/<path>`. Themes are
+  blocks of token values in `src/theme/instance.css`, listed in `theme.json`
+  with the default one; their fonts go in `src/assets/fonts/`. Components of
+  the deployment's own go anywhere below `src/`. Prefer tokens to replacing a
+  component: a replaced file no longer follows Nap's.
+- `instance/instructions/<topic>.md` is added to the end of that instructions
+  topic, below "On this Nap" (`kit.md` to `KIT.md`), or is a topic of its own
+  when Nap has none by that name, listed in the index by its first heading.
 
 ### Comments
 

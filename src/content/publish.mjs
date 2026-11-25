@@ -9,6 +9,8 @@
 //   node publish.mjs read <id or URL> <dir> [path...]
 //                          Download its live files into <dir>, or only the paths you name,
 //                          to read them. --version <v> reads an older version.
+//   node publish.mjs kit <dir>                  Write this Nap's kit into a new folder: the
+//                          project a page starts from (see the kit topic of the instructions).
 //   node publish.mjs source <id> [--create]     Show a nap's source repo, or create it.
 //   node publish.mjs clone <id> [dir]           Clone a nap's source repo with Git.
 //   node publish.mjs setup <id> [dir]           Let plain git and jj in an existing clone reach it.
@@ -726,6 +728,27 @@ async function run(options) {
 
 // ---- Apps ----
 
+// This Nap's kit: a React project with components and this Nap's themes, to start a page from.
+async function kit(options) {
+  const dir = options._[1];
+  if (!dir) throw new ExitError("Give a folder for the kit, for example: kit my-page");
+  const token = await signedIn();
+  const fetched = await api("/kit", { token, method: "GET" });
+  if (!fetched.ok) throw failed("Could not read the kit", fetched);
+  await mkdir(dir, { recursive: true });
+  if ((await readdir(dir)).length > 0) throw new ExitError(`${dir} is not empty.`);
+  for (const file of fetched.data.files) {
+    const path = join(dir, file.path);
+    await mkdir(dirname(path), { recursive: true });
+    await writeFile(
+      path,
+      file.encoding === "base64" ? Buffer.from(file.content, "base64") : file.content,
+    );
+  }
+  console.log(`Wrote the kit to ${dir} (${fetched.data.files.length} files).`);
+  console.log(`Next: read ${join(dir, "KIT.md")}, then cd ${dir} && pnpm install && pnpm build`);
+}
+
 function appSlug(options, position = 2) {
   const value = options._[position];
   if (!value) throw new ExitError("Give the app's name.");
@@ -1013,6 +1036,8 @@ try {
     await login(options);
   } else if (options._[0] === "read") {
     await read(options);
+  } else if (options._[0] === "kit") {
+    await kit(options);
   } else if (options._[0] === "source") {
     await source(options);
   } else if (options._[0] === "clone") {

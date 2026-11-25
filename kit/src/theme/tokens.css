@@ -1,0 +1,97 @@
+/* The neutral theme: every token the kit has, in light and dark. It is the kit's own look and the
+   fallback for any token a theme leaves out. A Nap's themes are in instance.css. */
+
+:root {
+  /* type */
+  --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+
+  /* ground and ink */
+  --bg: #fafafa;
+  --paper: #ffffff; /* opaque raised surface: diagram nodes, popovers */
+  --ink: 24 24 27; /* rgb triplet; text and hairlines are ink at an opacity */
+  --value: #18181b; /* the brightest text: numbers, titles */
+  --line-a: 0.1;
+  --sheer-a: 0.032;
+
+  /* accents: use sparingly and with meaning. The names are slots, not colours a theme must
+     keep: teal is the primary accent, peach the secondary, orange the strong one, cream the
+     quiet one. */
+  --cream: #71717a;
+  --peach: #7c5cc4;
+  --orange: #c2410c;
+  --teal: #2563eb;
+
+  /* status, separate from the accents */
+  --good: #2f7d4f;
+  --warn: #9a6400;
+  --bad: #be3a2e;
+
+  /* charts and categorical series (in order) */
+  --chart-1: #2563eb;
+  --chart-2: #d97706;
+  --chart-3: #0d9488;
+  --chart-4: #7c5cc4;
+  --chart-5: #db2777;
+  --chart-6: rgb(var(--ink) / 0.42);
+
+  /* code */
+  --code-fg: rgb(var(--ink) / 0.86);
+  --code-comment: rgb(var(--ink) / 0.44);
+  --code-punct: rgb(var(--ink) / 0.52);
+  --code-keyword: #b8401a;
+  --code-string: #0b7285;
+  --code-string-2: #2f7d4f;
+  --code-number: #7a4cc2;
+  --code-fn: #1c5fb0;
+  --code-type: #9a5b0f;
+  --code-prop: rgb(var(--ink) / 0.72);
+
+  /* background glow (see .kit-glow); transparent means none */
+  --glow-a: transparent;
+  --glow-b: transparent;
+  --glow-top: transparent;
+
+  /* diagram frame ground (opaque, so edge labels can sit on it) */
+  --frame: color-mix(in srgb, var(--bg) 97%, rgb(var(--ink)));
+
+  --radius: 0.625rem;
+}
+
+.dark {
+  --bg: #111113;
+  --paper: #1c1c1f;
+  --ink: 237 237 240;
+  --value: #f4f4f5;
+  --line-a: 0.1;
+  --sheer-a: 0.045;
+
+  --cream: #a1a1aa;
+  --peach: #a78bfa;
+  --orange: #fb923c;
+  --teal: #60a5fa;
+
+  --good: #74c69a;
+  --warn: #e8b85c;
+  --bad: #f2756a;
+
+  --chart-1: #60a5fa;
+  --chart-2: #fbbf24;
+  --chart-3: #2dd4bf;
+  --chart-4: #a78bfa;
+  --chart-5: #f472b6;
+  --chart-6: rgb(var(--ink) / 0.4);
+
+  --code-fg: rgb(var(--ink) / 0.86);
+  --code-comment: rgb(var(--ink) / 0.4);
+  --code-punct: rgb(var(--ink) / 0.5);
+  --code-keyword: #f2875a;
+  --code-string: #86d4df;
+  --code-string-2: #8fd19e;
+  --code-number: #c4a5f5;
+  --code-fn: #8fb8f5;
+  --code-type: #f2c890;
+  --code-prop: rgb(var(--ink) / 0.76);
+
+  --frame: color-mix(in srgb, var(--bg) 94%, rgb(var(--ink)));
+}

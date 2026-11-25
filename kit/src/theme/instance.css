@@ -1,0 +1,7 @@
+/* This Nap's own themes. The kit ships this file empty; a Nap replaces it (instance/kit/ in its
+   config) and lists the themes in theme.json. A theme sets any of the tokens in tokens.css, for
+   light and for dark, and may bring fonts:
+
+   :root[data-theme="plain"] { --bg: #f4f4f2; --teal: #0e7584; }
+   :root[data-theme="plain"].dark { --bg: #131313; --teal: #72d1df; }
+*/

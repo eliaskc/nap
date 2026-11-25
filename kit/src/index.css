@@ -1,0 +1,533 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "./styles/shadcn.css";
+@import "./theme/tokens.css";
+@import "./theme/instance.css";
+@import "./styles/code.css";
+
+@custom-variant dark (&:is(.dark *));
+
+/* ────────────────────────────────────────────────────────────────────────────
+   Semantic tokens. Components, charts and diagrams only use these, so every
+   piece works in light and dark, and in every theme. Their values are in
+   theme/tokens.css (the neutral theme) and theme/instance.css (this Nap's
+   themes). Change a value there, never in a component.
+   ──────────────────────────────────────────────────────────────────────────── */
+
+/* shadcn/ui variables, mapped onto the kit tokens */
+:root,
+.dark {
+  --background: var(--bg);
+  --foreground: var(--value);
+  --card: var(--paper);
+  --card-foreground: var(--value);
+  --popover: var(--paper);
+  --popover-foreground: rgb(var(--ink) / 0.85);
+  --primary: var(--value);
+  --primary-foreground: var(--bg);
+  --secondary: rgb(var(--ink) / 0.06);
+  --secondary-foreground: var(--value);
+  --muted: rgb(var(--ink) / 0.06);
+  --muted-foreground: rgb(var(--ink) / 0.5);
+  --accent: rgb(var(--ink) / 0.07);
+  --accent-foreground: var(--value);
+  --destructive: var(--bad);
+  --border: rgb(var(--ink) / var(--line-a));
+  --input: rgb(var(--ink) / calc(var(--line-a) * 1.6));
+  --ring: var(--teal);
+}
+
+@theme inline {
+  --font-sans: var(--sans);
+  --font-mono: var(--mono);
+}
+
+@theme {
+  --ease-out-soft: cubic-bezier(0.22, 1, 0.36, 1);
+  /* every transition-* utility uses the kit curve unless it names another */
+  --default-transition-timing-function: var(--ease-out-soft);
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-paper: var(--paper);
+  --color-frame: var(--frame);
+  --color-value: var(--value);
+  --color-strong: rgb(var(--ink) / 0.85);
+  --color-body: rgb(var(--ink) / 0.76);
+  --color-quiet: rgb(var(--ink) / 0.56);
+  --color-faint: rgb(var(--ink) / 0.38);
+  --color-line: rgb(var(--ink) / var(--line-a));
+  --color-line-strong: rgb(var(--ink) / calc(var(--line-a) * 1.9));
+  --color-sheer: rgb(var(--ink) / var(--sheer-a));
+  --color-sheer-2: rgb(var(--ink) / calc(var(--sheer-a) * 1.9));
+  --color-cream: var(--cream);
+  --color-peach: var(--peach);
+  --color-orange: var(--orange);
+  --color-teal: var(--teal);
+  --color-good: var(--good);
+  --color-warn: var(--warn);
+  --color-bad: var(--bad);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-chart-6: var(--chart-6);
+
+  /* shadcn */
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --radius-sm: calc(var(--radius) * 0.5);
+  --radius-md: calc(var(--radius) * 0.75);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.3);
+  --radius-2xl: calc(var(--radius) * 1.6);
+}
+
+/* ─── base ─────────────────────────────────────────────────────────────────── */
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  html {
+    background: var(--bg);
+    color: rgb(var(--ink) / 0.85);
+    font-family: var(--font-sans);
+    font-feature-settings: "kern", "liga";
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+    -webkit-text-size-adjust: 100%;
+  }
+  body {
+    margin: 0;
+    overflow-wrap: break-word; /* safety net: a long word wraps instead of leaving its box */
+    overflow-x: clip;
+  }
+  ::selection {
+    background: color-mix(in oklab, var(--peach) 30%, transparent);
+  }
+  a {
+    color: inherit;
+  }
+  :focus-visible {
+    outline: 2px solid var(--teal);
+    outline-offset: 2px;
+  }
+  /* Charts are focusable for keyboard tooltips, and Recharts focuses them on click, which would
+     draw a ring around the whole plot. The tooltip already shows where you are. */
+  .recharts-wrapper :focus,
+  .recharts-surface:focus,
+  .recharts-wrapper:focus {
+    outline: none;
+  }
+  /* axis numbers line up */
+  .recharts-cartesian-axis-tick-value {
+    font-variant-numeric: tabular-nums;
+  }
+  code,
+  kbd,
+  samp,
+  pre {
+    font-family: var(--font-mono);
+  }
+  /* iOS zooms into fields under 16px on focus and doesn't zoom back (inside the Nap iframe that
+     leaves the page cropped) */
+  @media (pointer: coarse) {
+    input,
+    textarea,
+    select {
+      font-size: max(16px, 1em);
+    }
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  html {
+    scroll-behavior: smooth;
+  }
+}
+/* Reduced motion removes movement and scale, but keeps opacity and colour fades: they still
+   explain what changed. Motion's reducedMotion="user" (Root) does the same for Motion. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  ::before,
+  ::after {
+    /* tw-animate-css enter/exit keyframes become plain fades */
+    --tw-enter-scale: 1 !important;
+    --tw-enter-rotate: 0 !important;
+    --tw-enter-translate-x: 0 !important;
+    --tw-enter-translate-y: 0 !important;
+    --tw-exit-scale: 1 !important;
+    --tw-exit-rotate: 0 !important;
+    --tw-exit-translate-x: 0 !important;
+    --tw-exit-translate-y: 0 !important;
+    animation-iteration-count: 1 !important;
+  }
+  /* Base UI popups (tooltip, popover, select, dialog) fade without scaling */
+  [data-starting-style],
+  [data-ending-style] {
+    scale: none !important;
+  }
+}
+
+/* ─── utilities used across the kit ───────────────────────────────────────── */
+
+@utility tnum {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Press feedback for compact controls (chips, options, thumbnails, diagram nodes): a slight
+   scale while pressed. Also colours, borders, shadow and opacity on the same curve, so don't add
+   transition-* classes next to it; set --press-duration for the colour changes instead, and
+   --press-scale for big targets (0.98). It also applies to a direct child of a pressed element,
+   so a label inside a button can carry it. No layout shift: scale is a transform. */
+@utility press {
+  transition-property: color, background-color, border-color, box-shadow, opacity, scale;
+  transition-duration: var(--press-duration, 150ms), var(--press-duration, 150ms), var(--press-duration, 150ms),
+    var(--press-duration, 150ms), var(--press-duration, 150ms), 160ms;
+  transition-timing-function: var(--ease-out-soft);
+  &:active,
+  :active > & {
+    scale: var(--press-scale, 0.97);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    &:active,
+    :active > & {
+      scale: none;
+    }
+  }
+}
+
+/* Press feedback for full-width rows (Disclosure): a faint tint instead of a scale */
+@utility press-row {
+  transition-property: color, background-color;
+  transition-duration: 160ms;
+  transition-timing-function: var(--ease-out-soft);
+  &:active {
+    background-color: rgb(var(--ink) / calc(var(--sheer-a) * 1.9));
+  }
+}
+
+/* Uppercase, tracked label: section eyebrows, column heads, legends */
+@utility eyebrow {
+  font-size: 11.5px;
+  line-height: 16px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  font-weight: 500;
+  color: rgb(var(--ink) / 0.5);
+}
+
+/* Diagonal hatch for "not applicable", "planned", "saved" fills */
+@utility hatch {
+  background-image: repeating-linear-gradient(-45deg, rgb(var(--ink) / 0.14) 0 1px, transparent 1px 6px);
+}
+
+/* Background glow: big soft radial lights, fixed behind the page 
+   Page adds it once. Colours come from --glow-top, --glow-a, --glow-b; a theme without a glow
+   sets them to transparent. */
+.kit-glow {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 0;
+}
+.kit-glow::before,
+.kit-glow::after {
+  content: "";
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(20px);
+}
+.kit-glow::before {
+  width: 110vmax;
+  height: 80vmax;
+  left: 35%;
+  top: -48vmax;
+  background: radial-gradient(closest-side, var(--glow-top), var(--glow-a) 45%, transparent 100%);
+}
+.kit-glow::after {
+  width: 80vmax;
+  height: 70vmax;
+  left: -35vmax;
+  top: 70%;
+  background: radial-gradient(closest-side, var(--glow-b), transparent 100%);
+}
+/* Scroll container for wide diagrams on phones: fades the clipped edge */
+.kit-scroll {
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+}
+
+/* Scrollbars everywhere (page, diagrams, menus): no track, a slim rounded thumb in ink.
+   Chrome and Safari use the ::-webkit-scrollbar styles (setting scrollbar-color there would
+   switch them off); Firefox gets the standard properties. */
+@supports selector(::-webkit-scrollbar) {
+  ::-webkit-scrollbar {
+    width: 11px;
+    height: 11px;
+  }
+  ::-webkit-scrollbar-track,
+  ::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: rgb(var(--ink) / 0.2);
+    background-clip: padding-box;
+    border: 3px solid transparent;
+    border-radius: 999px;
+    min-height: 40px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background-color: rgb(var(--ink) / 0.34);
+  }
+  ::-webkit-scrollbar-thumb:active {
+    background-color: rgb(var(--ink) / 0.45);
+  }
+}
+@supports not selector(::-webkit-scrollbar) {
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: rgb(var(--ink) / 0.22) transparent;
+  }
+}
+
+@layer components {
+/* ─── page flow: text column + margin notes (see kit/page.tsx) ───────────── */
+
+.kit-flow {
+  container: kit-flow / inline-size;
+}
+.kit-flow-inner {
+  display: flow-root;
+}
+.kit-flow-inner > * {
+  max-width: var(--kit-measure, 680px);
+  margin-bottom: var(--kit-gap, 1.75rem);
+}
+.kit-flow-inner > :last-child {
+  margin-bottom: 0;
+}
+.kit-flow-inner > [data-wide] {
+  max-width: none;
+  clear: both;
+}
+.kit-flow-inner > .kit-margin {
+  margin-bottom: var(--kit-gap, 1.75rem);
+}
+@container kit-flow (min-width: 900px) {
+  .kit-flow-inner > * {
+    max-width: min(var(--kit-measure, 680px), calc(100% - 272px));
+  }
+  .kit-flow-inner > .kit-margin {
+    float: right;
+    clear: right;
+    width: 224px;
+    max-width: none;
+    margin: 0.25rem 0 1.25rem 48px;
+  }
+}
+
+/* ─── Prose: plain HTML children get document typography ────────────────── */
+
+.kit-prose {
+  font-size: 16.5px;
+  line-height: 1.65;
+  color: rgb(var(--ink) / 0.78);
+}
+.kit-prose > * + * {
+  margin-top: 1em;
+}
+.kit-prose :where(strong, b) {
+  color: rgb(var(--ink) / 0.92);
+  font-weight: 500;
+}
+.kit-prose :where(em, i) {
+  font-style: italic;
+}
+.kit-prose :where(a) {
+  color: rgb(var(--ink) / 0.92);
+  text-decoration: underline;
+  text-decoration-color: color-mix(in oklab, var(--teal) 60%, transparent);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+.kit-prose :where(a):hover {
+  text-decoration-color: var(--teal);
+}
+/* Running text keeps about 72 characters a line; tables, code and figures keep the full column */
+.kit-prose :where(p, ul, ol, blockquote, h3, h4) {
+  max-width: 34em;
+}
+.kit-prose :where(h3) {
+  margin-top: 2em;
+  font-size: 19px;
+  line-height: 1.3;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  color: var(--value);
+}
+.kit-prose :where(h4) {
+  margin-top: 1.6em;
+  font-size: 16.5px;
+  font-weight: 500;
+  color: rgb(var(--ink) / 0.9);
+}
+.kit-prose :where(h3, h4) + * {
+  margin-top: 0.5em;
+}
+.kit-prose :where(ul, ol) {
+  padding-left: 1.35em;
+}
+.kit-prose :where(ul) {
+  list-style: none;
+}
+.kit-prose :where(ul > li) {
+  position: relative;
+}
+.kit-prose :where(ul > li)::before {
+  content: "";
+  position: absolute;
+  left: -1.05em;
+  top: 0.72em;
+  width: 5px;
+  height: 1px;
+  background: rgb(var(--ink) / 0.45);
+}
+.kit-prose :where(ol) {
+  list-style: decimal;
+}
+.kit-prose :where(ol > li)::marker {
+  color: rgb(var(--ink) / 0.42);
+  font-variant-numeric: tabular-nums;
+  font-size: 0.9em;
+}
+.kit-prose :where(li + li) {
+  margin-top: 0.4em;
+}
+.kit-prose :where(code) {
+  font-size: 0.84em;
+  padding: 0.12em 0.36em;
+  border-radius: 6px;
+  background: rgb(var(--ink) / 0.06);
+  color: rgb(var(--ink) / 0.86);
+  overflow-wrap: anywhere;
+}
+.kit-prose :where(pre) {
+  font-size: 13px;
+  line-height: 1.6;
+  padding: 14px 16px;
+  border-radius: 14px;
+  border: 1px solid rgb(var(--ink) / var(--line-a));
+  background: rgb(var(--ink) / var(--sheer-a));
+  overflow-x: auto;
+}
+.kit-prose :where(pre code) {
+  background: none;
+  padding: 0;
+  font-size: inherit;
+}
+.kit-prose :where(blockquote) {
+  border-left: 1px solid color-mix(in oklab, var(--peach) 55%, transparent);
+  padding-left: 1.1em;
+  color: rgb(var(--ink) / 0.62);
+}
+.kit-prose :where(hr) {
+  border: 0;
+  border-top: 1px solid rgb(var(--ink) / var(--line-a));
+  margin: 2em 0;
+}
+.kit-prose :where(table) {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+  font-size: 14.5px;
+  line-height: 1.45;
+}
+.kit-prose :where(th) {
+  text-align: left;
+  font-size: 11.5px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  font-weight: 500;
+  color: rgb(var(--ink) / 0.5);
+  padding: 0 1.25em 0.6em 0;
+  border-bottom: 1px solid rgb(var(--ink) / calc(var(--line-a) * 1.9));
+  white-space: nowrap;
+}
+.kit-prose :where(td) {
+  font-variant-numeric: tabular-nums;
+  padding: 0.65em 1.25em 0.65em 0;
+  border-bottom: 1px solid rgb(var(--ink) / var(--line-a));
+  vertical-align: top;
+}
+.kit-prose :where(td:first-child) {
+  color: rgb(var(--ink) / 0.88);
+}
+.kit-prose :where(img) {
+  max-width: 100%;
+  border-radius: 12px;
+}
+
+}
+
+/* ─── @pierre/diffs inherits the kit look ─────────────────────────────────── */
+
+.kit-diff {
+  --diffs-font-family: var(--font-mono);
+  --diffs-header-font-family: var(--font-sans);
+  --diffs-font-size: 12.5px;
+  --diffs-line-height: 1.7;
+  --diffs-addition-color-override: var(--good);
+  --diffs-deletion-color-override: var(--bad);
+  --diffs-modified-color-override: var(--warn);
+  /* line backgrounds come from the base colours above; only the changed words get a sheer wash */
+  --diffs-bg-addition-emphasis-override: color-mix(in oklab, var(--good) 22%, transparent);
+  --diffs-bg-deletion-emphasis-override: color-mix(in oklab, var(--bad) 22%, transparent);
+  --diffs-bg-separator-override: rgb(var(--ink) / 0.04);
+  --diffs-bg-buffer-override: var(--frame);
+  --diffs-bg-context-override: var(--frame);
+  --diffs-bg-context-gutter-override: var(--frame);
+  --diffs-fg-number-override: rgb(var(--ink) / 0.35);
+  background: var(--frame);
+}
+
+/* Light mode: the warm ground greys out green and red, so the lines mix from vivid, clearly
+   different hues (cool green vs pink-red). Dark mode uses the base colours as they are. */
+.kit-diff {
+  --diffs-bg-addition-override: #1fb85a;
+  --diffs-bg-deletion-override: #ff3d5a;
+}
+.dark .kit-diff {
+  --diffs-bg-addition-override: initial;
+  --diffs-bg-deletion-override: initial;
+  /* the same lift as Code blocks' sheer box (4 % ink), but opaque: the sticky line-number gutter
+     must hide the code that scrolls under it */
+  --kit-diff-bg: color-mix(in srgb, var(--bg) calc(100% - var(--sheer-a) * 100%), rgb(var(--ink)));
+  --diffs-token-background: var(--kit-diff-bg);
+  --diffs-bg-buffer-override: var(--kit-diff-bg);
+  --diffs-bg-context-override: var(--kit-diff-bg);
+  --diffs-bg-context-gutter-override: var(--kit-diff-bg);
+  background: var(--kit-diff-bg);
+}

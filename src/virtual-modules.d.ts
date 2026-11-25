@@ -33,3 +33,14 @@ declare module "virtual:nap-extensions-client" {
   /** [name, client.ts] for each extension with a client: nap.<name>. */
   export const extensions: ReadonlyArray<readonly [string, NapExtensionClient]>;
 }
+
+declare module "virtual:nap-instance-content" {
+  /** The kit (kit/ with instance/kit/ over it), as files. See scripts/lib/kit.ts. */
+  export const kitFiles: ReadonlyArray<{
+    path: string;
+    content: string;
+    encoding: "utf8" | "base64";
+  }>;
+  /** instance/instructions/<topic>.md by topic, without kit.md, which is in the kit's KIT.md. */
+  export const instructions: Readonly<Record<string, string>>;
+}

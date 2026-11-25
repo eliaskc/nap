@@ -26,7 +26,8 @@ test("every topic the index lists has a file and is served", () => {
   const listed = indexTopics(renderInstructions(read("index"), config()));
   assert.ok(listed.length >= 7, "the index lists its topics");
   for (const topic of listed) {
-    assert.ok(files.includes(topic), `${topic}.md exists`);
+    // The kit topic is the kit's own guide, kit/KIT.md.
+    if (topic !== "kit") assert.ok(files.includes(topic), `${topic}.md exists`);
     assert.match(loader, new RegExp(`^  ${topic},$`, "m"), `agent-instructions.ts serves ${topic}`);
   }
   for (const file of files) {
@@ -122,7 +123,16 @@ test("the index lists the dashboards topic and says to read it before making one
   // It works on any screen, without hover.
   assert.match(topic, /from a phone to a large display/);
   assert.match(topic, /Nothing that only shows on hover/);
-  // Nap ships no chart components; the topic must not pretend it does.
-  assert.match(topic, /Nap has no chart components of its own/);
+  // Charts come from the kit, not from window.nap.
+  assert.match(topic, /Use the kit's chart components \(`kit` topic\)/);
   assert.doesNotMatch(topic, /nap\.chart|<nap-chart/);
+});
+
+test("an instance's own topics are listed by their heading, without a nap.<name>", () => {
+  const text = renderInstructions(read("index"), config(), undefined, [
+    { name: "amplitude", summary: "Amplitude analytics" },
+    { name: "brand", summary: "How we write.", api: false },
+  ]);
+  assert.match(text, /^- `amplitude`: Amplitude analytics \(`nap\.amplitude`\)\.$/m);
+  assert.match(text, /^- `brand`: How we write\.$/m);
 });

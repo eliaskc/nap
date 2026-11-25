@@ -193,6 +193,17 @@ try {
     "access_denied",
   );
 
+  // The kit: this Nap's project for pages, as files, and its guide as the kit topic.
+  assert.equal((await call("/_nap/api/kit")).status, 401);
+  const kit = await call("/_nap/api/kit", { headers: bearer(token) });
+  assert.equal(kit.status, 200);
+  const kitGuide = kit.json.files.find((file) => file.path === "KIT.md");
+  assert.match(kitGuide.content, /^# Nap kit/);
+  assert.ok(kit.json.files.some((file) => file.path === "theme.json"));
+  assert.ok(kit.json.files.some((file) => file.path === ".gitignore"));
+  assert.ok(!kit.json.files.some((file) => file.path.includes("node_modules")));
+  assert.equal((await call("/_nap/api/instructions/kit")).text.trim(), kitGuide.content.trim());
+
   const me = await call("/_nap/api/me", { headers: bearer(token) });
   assert.equal(me.status, 200, me.text);
   assert.equal(me.json.email, OWNER);

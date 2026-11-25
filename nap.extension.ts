@@ -1,5 +1,5 @@
 /**
- * Extensions add an API to the kit that pages get, for one Nap deployment, without changing Nap
+ * Extensions add an API to window.nap, which pages get, for one Nap deployment, without changing Nap
  * itself. Each lives in instance/extensions/<name>/ of the deployment:
  *
  *   server.ts        `export default { ... } satisfies NapExtension`: handles /_nap/ext/<name>/...

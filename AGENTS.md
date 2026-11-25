@@ -96,7 +96,7 @@ channels, voice, `nap.fetch`, `nap.me`. It runs in visitors' browsers, on every 
 
 ## Documentation
 
-`README.md` covers architecture, the security model, and operations. `src/content/instructions/` is the contract for agents that publish to Nap (an index plus topics), and `skills/nap/SKILL.md` is the skill that points agents to it. Keep UI details, limits, endpoint lists, and file-by-file layouts out of the README; the code is the reference for those. Update the docs only when a concept, security rule, operation, or command changes.
+`README.md` covers architecture, the security model, and operations. `src/content/instructions/` is the contract for agents that publish to Nap (an index plus topics), and `skills/nap/SKILL.md` is the skill that points agents to it; the skill stays a thin pointer, and everything an agent needs is in the instructions. `kit/` is the project agents start a page from (its own Vite project and code style, served at `/_nap/api/kit`), and `kit/KIT.md` is the `kit` topic. A deployment adds themes, components, and instructions in `instance/kit/` and `instance/instructions/` (`scripts/lib/kit.ts`); keep anything specific to one deployment out of `kit/`. Keep UI details, limits, endpoint lists, and file-by-file layouts out of the README; the code is the reference for those. Update the docs only when a concept, security rule, operation, or command changes.
 
 ## Commands
 

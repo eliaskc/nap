@@ -20,6 +20,7 @@ This page covers the common case. Read a topic below when you need it.
 ## Build
 
 - Make it feel finished and easy to open cold: a clear title, enough context on the page, responsive, real empty states, no console errors.
+- For a page that is mostly content (a report, a write-up, an explainer, a dashboard), start from this Nap's kit, a ready project with components and this Nap's look: `node /tmp/nap-publish.mjs kit <dir>`. Read the `design` topic first, and the `kit` topic for its parts.
 - Follow the system light or dark mode; the Nap bar does. With plain CSS, use `color-scheme: light dark` and `@media (prefers-color-scheme: dark)`. With a `.dark` class theme (Tailwind, shadcn), put this in `<head>`:
   `<script>(()=>{const m=matchMedia("(prefers-color-scheme: dark)"),r=document.documentElement,s=()=>{r.classList.toggle("dark",m.matches);r.style.colorScheme=m.matches?"dark":"light"};s();m.addEventListener("change",s)})()</script>`
 - Never upload servers, API routes, SSR, `.env` files, or secrets. Treat everything on Nap as internal, not secret.
@@ -81,6 +82,8 @@ Access only applies when you create a nap. After that, only the owner changes it
 
 Read one with `curl -fsSL https://{{rootDomain}}/_nap/api/instructions/<topic>`.
 
+- `design`: what makes a good page, and when to start from the kit. Read it before you make a page of content.
+- `kit`: this Nap's kit: its components, charts, diagrams, themes, and how to build with it.
 - `sites`: how a nap runs in its frame, names, the Nap bar and Share button, and naps on their own host.
 - `source`: source repos for naps with a build step, and changing a nap that has one.
 - `data`: collections that save JSON documents, with live updates (`nap.db`), and files such as photos (`nap.files`).

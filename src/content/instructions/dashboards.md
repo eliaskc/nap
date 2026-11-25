@@ -27,7 +27,7 @@ Refresh in place on a timer (a minute or more, unless the data changes faster) w
 
 ## Charts
 
-- If your skill provides a kit or design system with chart components, use them. Otherwise use a well-known charting library (such as Chart.js, ECharts, Vega-Lite, or Observable Plot), loaded from your bundle or a CDN. Nap has no chart components of its own.
+- Use the kit's chart components (`kit` topic). Without the kit, use a well-known charting library (such as Chart.js, ECharts, Vega-Lite, or Observable Plot), loaded from your bundle or a CDN.
 - Draw to scale: bar charts start at zero, and axes do not break silently. Label axes and units, and show the time range.
 - Prefer a few clear charts over many: a line for change over time, bars to compare, a big number for one value. No 3D, no pie charts with many slices.
 - Follow light and dark mode like the rest of the page; charts drawn on a canvas need their colours set for both.

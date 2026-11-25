@@ -1,2 +1,4 @@
 # The reMarkable template has its own style; its QML JavaScript (.pragma) is not plain JavaScript.
 templates/app/remarkable
+# The kit agents start pages from is its own project with its own style.
+kit
