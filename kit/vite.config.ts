@@ -33,6 +33,7 @@ function requireTitle(mode: string): Plugin {
     apply: 'build',
     transformIndexHtml(html) {
       if (mode === 'kitchen') return html.replace(/<title>[\s\S]*?<\/title>/i, '<title>Nap kit: kitchen sink</title>')
+      if (mode === 'dashboard') return html.replace(/<title>[\s\S]*?<\/title>/i, '<title>Nap kit: dashboard</title>')
       const title = html.match(/<title>([\s\S]*?)<\/title>/i)?.[1].trim() ?? ''
       if (PLACEHOLDER_TITLES.has(title.toLowerCase())) {
         throw new Error(

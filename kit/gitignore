@@ -23,5 +23,6 @@ dist-ssr
 *.sln
 *.sw?
 dist-kitchen
+dist-dashboard
 *.png
 !src/**/*.png

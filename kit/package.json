@@ -9,7 +9,8 @@
     "typecheck": "tsc -b",
     "preview": "vite preview",
     "shot": "node scripts/shot.mjs",
-    "build:kitchen": "vite build --mode kitchen --outDir dist-kitchen"
+    "build:kitchen": "vite build --mode kitchen --outDir dist-kitchen",
+    "build:dashboard": "vite build --mode dashboard --outDir dist-dashboard"
   },
   "dependencies": {
     "@base-ui/react": "^1.9.0",

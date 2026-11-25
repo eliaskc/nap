@@ -1,7 +1,8 @@
 /**
- * The Nap artifact kit. Everything here is light; import heavier parts directly:
+ * The Nap kit. Everything here is light; import heavier parts directly:
  *   import { BarChart, LineChart, Histogram } from '@/kit/charts'   // Recharts
  *   import { Code, Diff } from '@/kit/code'                          // WASM highlighter
+ *   import { Dashboard, Panel, Metric, useDataset } from '@/kit/dashboard'  // dashboards
  * Read KIT.md for the overview and each file for the full props.
  */
 export { KitRoot } from './root'

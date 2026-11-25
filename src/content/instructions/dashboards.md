@@ -4,13 +4,15 @@ A dashboard is a nap of type `dashboard`: one or more charts and numbers that pe
 
 Publish with `--type dashboard` (`type=dashboard` in the API and for drafts). The owner can change the type in Nap, or by publishing a new version with `--type`. Everything in the `sites` topic still applies: it runs in Nap's frame below the Nap bar.
 
+Build it from the kit (`kit` topic, Dashboards): its `Dashboard`, `Metric`, `Panel`, and `useDataset` do what this page asks for, so you do not write the refreshing, the states, or the wall-screen layout yourself. The rest of this page says what a dashboard needs whichever way it is built.
+
 ## Structure
 
 A loose shape, not a template. Fit it to the question the dashboard answers.
 
 - On top, the few numbers that matter most, each with its unit and what it compares to ("412 signups, +8% on last week").
 - Below, charts grouped by the question they answer, each with a title that says what it shows ("Signups per day, last 30 days"), not what it is ("Chart 1").
-- Always visible: the date range the numbers cover, and when the data was last updated.
+- Always visible: the date range the numbers cover, when the data was last updated, and where each number comes from (the kit's Sources list).
 
 ## Data
 
@@ -37,5 +39,5 @@ Refresh in place on a timer (a minute or more, unless the data changes faster) w
 A dashboard should work on any screen, from a phone to a large display on a wall:
 
 - A responsive layout: numbers and charts reflow into fewer columns on narrow screens, and nothing needs sideways scrolling.
-- Readable from a distance when given the room: on a large screen, scale type and charts up and keep it to one screen of content.
+- Readable from a distance when given the room: on a large screen, scale type and charts up and keep it to one screen of content. The kit's `Dashboard` does this in wall mode: add `?wall` to the link for a screen left on.
 - Nothing that only shows on hover: touch screens and wall displays have no pointer. Label the values that matter on the chart.

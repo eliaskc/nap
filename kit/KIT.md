@@ -42,6 +42,7 @@ node scripts/shot.mjs out.png 1400 dark full   # screenshot dist/index.html; 390
 import { Page, Section, Flow, Stat /* … */ } from '@/kit'      // everything light
 import { BarChart, LineChart, Histogram } from '@/kit/charts'    // Recharts
 import { Code, Diff } from '@/kit/code'                          // WASM highlighter
+import { Dashboard, Panel, Metric, useDataset } from '@/kit/dashboard'  // dashboards
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/kit/ui/tabs'  // shadcn/ui
 ```
 
@@ -376,6 +377,58 @@ Series default to `--chart-1…6`. A legend appears with two or more series.
 
 **`Sparkline`** (from `@/kit`, no Recharts): tiny trend line. `values`, `tone`, `width`, `height`,
 `area`, `dot`.
+
+## Dashboards (`@/kit/dashboard`)
+
+For a nap of type `dashboard`. Read the `dashboards` topic first; these parts do what it asks for.
+`src/examples/DashboardExample.tsx` shows all of them with every state (`/?dashboard` in dev).
+
+**`useDataset`**: one thing the page loads and keeps fresh. `id`, `title`, `source` (where it comes
+from, a few words), `link`, `load` (async; gets `{ signal }`), `refresh` (seconds, default 300, 0
+for once), `staleAfter` (seconds, default three refreshes), `deps` (a change loads again), `enabled`.
+It returns `{ status: 'loading' | 'ready' | 'error', data, error, updatedAt, stale, refreshing,
+reload }`. It refreshes in place, waits while the tab is hidden, loads at once when the tab shows
+again with old data, and keeps the last data when a refresh fails (`stale` and `error` are then set).
+Never write your own timer or fetch-in-effect for dashboard data.
+
+**`Dashboard`**: the shell, instead of `Page`: `title`, `eyebrow`, `range` (the time the numbers
+cover: text or a `RangePicker`), `controls`. Its header shows how fresh the data is ("Updated 3
+min ago", by the oldest dataset) and opens Sources: every dataset with its source, age and error.
+With `?wall` in the address (or `wall`) it is wall mode: no controls, everything enlarged to fill
+a big screen (`wallWidth`, default 1440, is the width the layout is designed for).
+
+**`DashGrid`**: one column on a phone up to `cols` (1, 2, 3, 4, 6) on wide screens, by its own width.
+**`Metric`**: one number with its unit and what it compares to. `label`, `dataset`, `value` and
+`compare` (numbers, or functions of the data; the change shows in percent), `compareLabel`, `format`,
+`pre`, `unit`, `goodWhen` (`'up' | 'down' | 'none'`), `note`.
+**`Panel`**: a titled card for a chart or table. `title` (what it shows, not what it is), `note`,
+`dataset`, `children` as a function of the data, `empty`, `emptyText`, `height` (kept while there
+is nothing to draw), `span` (2, 3, `'full'`), `actions`. With a dataset it draws the loading,
+empty and error states itself and marks stale data with its age.
+**`RangePicker`**: `options` (`id`, `label`), `value`, `onChange`. Put the choice in the datasets' `deps`.
+**`ago(date)`**: "3 min ago".
+
+```tsx
+const [range, setRange] = useState('30')
+const signups = useDataset({
+  id: 'signups', title: 'Signups per day', source: 'Amplitude', deps: [range],
+  load: () => nap.amplitude.segmentation({ /* … */ }).then(toRows),
+})
+<Dashboard title="Signups" range={<RangePicker options={RANGES} value={range} onChange={setRange} />}>
+  <DashGrid cols={4}>
+    <Metric dataset={signups} label="Signups" value={(d) => d.total} compare={(d) => d.previous} />
+  </DashGrid>
+  <DashGrid cols={3}>
+    <Panel title="Signups per day" dataset={signups} span={2}>
+      {(d) => <LineChart data={d.rows} x="day" series={[{ key: 'signups' }]} />}
+    </Panel>
+  </DashGrid>
+</Dashboard>
+```
+
+- The look of a dashboard is the theme's: charts use `--chart-1…6`, so a page switches theme with
+  the rest of Nap.
+- Label the values that matter on the chart; wall screens and phones have no hover.
 
 ## Code (`@/kit/code`) and trees
 

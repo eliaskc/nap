@@ -1,4 +1,4 @@
-import { StrictMode } from 'react'
+import { StrictMode, type ReactNode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { KitRoot } from '@/kit/root'
 import App from './App'
@@ -12,27 +12,24 @@ if (import.meta.env.DEV) {
 
 const root = createRoot(document.getElementById('root')!)
 
-// The kit's kitchen sink: `pnpm dev` then open /?kitchen, or `pnpm build:kitchen`.
-// The check on import.meta.env is static, so a normal `pnpm build` leaves it out.
-const kitchen =
-  (import.meta.env.DEV && new URLSearchParams(location.search).has('kitchen')) || import.meta.env.MODE === 'kitchen'
+// The kit's examples: `pnpm dev` then open /?kitchen (every component) or /?dashboard (the
+// dashboard parts), or `pnpm build:kitchen` and `pnpm build:dashboard`. The checks on
+// import.meta.env are written out so they are static: a normal `pnpm build` leaves the examples out.
+const asks = (name: string) => new URLSearchParams(location.search).has(name)
+const kitchen = (import.meta.env.DEV && asks('kitchen')) || import.meta.env.MODE === 'kitchen'
+const dashboard = (import.meta.env.DEV && asks('dashboard')) || import.meta.env.MODE === 'dashboard'
 
-if (kitchen) {
-  import('./examples/KitchenSink').then(({ default: KitchenSink }) =>
-    root.render(
-      <StrictMode>
-        <KitRoot>
-          <KitchenSink />
-        </KitRoot>
-      </StrictMode>,
-    ),
-  )
-} else {
+const show = (page: ReactNode) =>
   root.render(
     <StrictMode>
-      <KitRoot>
-        <App />
-      </KitRoot>
+      <KitRoot>{page}</KitRoot>
     </StrictMode>,
   )
+
+if (kitchen) {
+  import('./examples/KitchenSink').then(({ default: KitchenSink }) => show(<KitchenSink />))
+} else if (dashboard) {
+  import('./examples/DashboardExample').then(({ default: DashboardExample }) => show(<DashboardExample />))
+} else {
+  show(<App />)
 }
