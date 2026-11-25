@@ -17,9 +17,15 @@ export function extensionApis(): Record<string, object> {
       request,
       async json<T>(path: string, init?: RequestInit) {
         const response = await request(path, init);
-        const result = (await response.json().catch(() => ({}))) as { error?: string };
+        const result = (await response.json().catch(() => ({}))) as {
+          error?: string;
+          locked?: unknown;
+        };
         if (!response.ok) {
-          throw new NapError(result.error || "nap." + name + " failed", response.status);
+          const error = new NapError(result.error || "nap." + name + " failed", response.status);
+          // { error, locked: "<group>" }: not broken, but not for this viewer (<nap-locked>).
+          if (typeof result.locked === "string") error.locked = result.locked;
+          throw error;
         }
         return result as T;
       },

@@ -519,7 +519,10 @@ function withCors(response: Response) {
   const result = new Response(response.body, response);
   result.headers.set("access-control-allow-origin", "*");
   // nap.fetch tells Nap's own errors from the upstream's by these.
-  result.headers.set("access-control-expose-headers", "x-nap-fetch, x-nap-fetch-url");
+  result.headers.set(
+    "access-control-expose-headers",
+    "x-nap-fetch, x-nap-fetch-url, x-nap-set-cookie",
+  );
   return result;
 }
 

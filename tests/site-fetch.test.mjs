@@ -21,7 +21,8 @@ registerHooks({
     return next(specifier, context);
   },
 });
-const { handleSiteFetch, readForwardedHeaders } = await import("../src/lib/site-fetch.ts");
+const { handleSiteFetch, readForwardedHeaders, setCookieHeader } =
+  await import("../src/lib/site-fetch.ts");
 const { respond } = await import("../src/server/runtime.ts");
 
 const OWNER = "owner@example.com";
@@ -244,4 +245,44 @@ test("artifacts fetch below their frame token, which is cross-site by nature", a
   } finally {
     mock.restore();
   }
+});
+
+test("cookies the upstream sets come back in x-nap-set-cookie, not as cookies", async () => {
+  const env = environment();
+  const reply = () => {
+    const headers = new Headers({ "content-type": "application/json" });
+    headers.append("set-cookie", "sid=abc123; Path=/; HttpOnly; SameSite=Lax; Max-Age=3600");
+    headers.append("set-cookie", "theme=m\u00f6rk; Path=/");
+    return new Response("{}", { headers });
+  };
+  const mock = upstream(reply);
+  try {
+    const posted = await call(env, "https://api.example.com/start", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{}",
+    });
+    assert.equal(posted.headers.get("set-cookie"), null);
+    const value = posted.headers.get("x-nap-set-cookie");
+    assert.match(value, /^[\x20-\x7e]+$/);
+    assert.deepEqual(JSON.parse(value), ["sid=abc123", "theme=m\u00f6rk"]);
+
+    // A plain GET is shared between viewers: nobody's session goes into it.
+    const cached = await call(env, "https://api.example.com/today");
+    assert.match(cached.headers.get("cache-control"), /max-age=300/);
+    assert.equal(cached.headers.get("x-nap-set-cookie"), null);
+  } finally {
+    mock.restore();
+  }
+});
+
+test("x-nap-set-cookie: none without cookies, and none when they do not fit", () => {
+  assert.equal(setCookieHeader(new Headers()), null);
+  const big = new Headers();
+  big.append("set-cookie", `a=${"x".repeat(5000)}`);
+  assert.equal(setCookieHeader(big), null);
+  const odd = new Headers();
+  odd.append("set-cookie", "=nameless");
+  odd.append("set-cookie", "flag");
+  assert.equal(setCookieHeader(odd), null);
 });

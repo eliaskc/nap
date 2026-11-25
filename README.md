@@ -407,7 +407,9 @@ the page, fetches only over https from those hosts (and never
 Nap's own), and checks every redirect against the list. Pages choose the method, a small body,
 and headers (in `x-nap-fetch-headers`, so they stay apart from the browser's own); Nap sends
 nothing of the viewer's: no cookies, no Access headers. A cookie among the page's own headers is
-the page's value and is sent. Plain GETs are cached at the edge for a
+the page's value and is sent, and cookies the other site sets come back in `x-nap-set-cookie`
+(a JSON array of `name=value`, never as cookies of the browser, and never on a cached response),
+so a page can keep an anonymous session it was handed. Plain GETs are cached at the edge for a
 few minutes; anything with a body or the page's own headers is not, since the cache keys on the
 URL alone. Responses are size limited and carry a sandbox CSP, because they are served from the
 nap's own origin.

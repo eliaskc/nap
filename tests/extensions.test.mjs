@@ -321,6 +321,9 @@ test("client.js mounts each extension's client as nap.<name>, with a kit for its
   const requests = [];
   const fetch = async (url) => {
     requests.push(url);
+    if (url.includes("secret")) {
+      return Response.json({ error: "Not for you", locked: "revenue" }, { status: 403 });
+    }
     return url.includes("missing")
       ? Response.json({ error: "No such thing" }, { status: 404 })
       : Response.json({ ok: true });
@@ -345,6 +348,12 @@ test("client.js mounts each extension's client as nap.<name>, with a kit for its
     assert.equal(error.message, "No such thing");
     return error instanceof nap.demo.Error;
   });
+  await assert.rejects(nap.demo.hello("missing"), (error) => error.locked === undefined);
+  await assert.rejects(
+    nap.demo.hello("secret"),
+    (error) =>
+      error.status === 403 && error.locked === "revenue" && error.message === "Not for you",
+  );
   assert.equal(typeof nap.db.collection, "function", "Nap's own names stay");
 
   run("https://nap.test/_nap/frame/abc123/").demo.hello("x");

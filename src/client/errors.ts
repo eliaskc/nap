@@ -5,6 +5,8 @@ export class NapError extends Error {
   override readonly name = "NapError";
   readonly status: number;
   declare readonly document?: NapDocument | null;
+  /** The viewer is not allowed to see this: the group that is, or "". Set by extensions. */
+  declare locked?: string;
 
   constructor(message: string, status: number, document?: NapDocument | null) {
     super(message);

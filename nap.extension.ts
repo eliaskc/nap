@@ -48,7 +48,8 @@ export type NapExtensionContext = {
    * The person viewing the page. Nap has checked that they can view it. `groups` are the groups
    * of instance/extensions/groups.ts that they are in, none when there is no such file. A page's
    * code runs in the viewer's browser, so what a page may get is what its viewer may see: answer
-   * 403 for the rest, and the page shows that part as locked.
+   * 403 for the rest with `{ "error": "<a sentence for the viewer>", "locked": "<group>" }`. The
+   * NapError then has `locked`, and the page shows <nap-locked> with the sentence there.
    */
   viewer: { email: string; name: string; groups: ReadonlyArray<string> };
   /** The extension's declared secrets. A secret the deployment does not set is missing. */

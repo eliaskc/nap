@@ -12,6 +12,7 @@ import { NapError } from "./errors";
 import { extensionApis } from "./extensions";
 import { proxyFetch } from "./fetch";
 import { remove as deleteFile, upload as uploadFile, url as fileUrl } from "./files";
+import { defineLockedElement } from "./locked";
 import { canNotify, notify } from "./notify";
 import { avatar, defineAvatarElement, looks, people } from "./people";
 import { voice } from "./voice";
@@ -35,3 +36,4 @@ const nap: Nap = Object.freeze({
 
 Object.defineProperty(window, "nap", { value: nap, enumerable: true });
 defineAvatarElement();
+defineLockedElement();

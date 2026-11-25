@@ -9,6 +9,9 @@ const MAX_REDIRECTS = 3;
 const MAX_BYTES = 5 * 1024 * 1024;
 const MAX_REQUEST_BYTES = 256 * 1024;
 const CACHE_SECONDS = 300;
+/** The cookies the upstream set, for the page: a JSON array of "name=value". */
+const SET_COOKIE_HEADER = "x-nap-set-cookie";
+const MAX_SET_COOKIE_BYTES = 4096;
 const METHODS = new Set(["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"]);
 /** The page's own headers for the upstream request, as a JSON object. */
 const HEADERS_HEADER = "x-nap-fetch-headers";
@@ -45,6 +48,8 @@ export class UpstreamFetchError extends Schema.TaggedError<UpstreamFetchError>()
  * only hosts the page lists in nap.json, and only for people who can view the page. Nothing of
  * the viewer's is sent on (no cookies, no Access headers, no referrer); only the method, body,
  * and headers the page passes (a cookie among them is the page's own). Plain GETs are cached at the edge for a few minutes.
+ * Cookies the other site sets come back in x-nap-set-cookie, never as cookies of the browser, so
+ * a page can keep the anonymous session it was handed and pass it on itself.
  *
  * Sites call it on their own host. Artifacts call it below their frame token (`frame: true`):
  * the frame's origin is opaque, so its requests are always cross-site, and the token in the
@@ -229,6 +234,24 @@ function hostMatches(host: string, allowed: string) {
 }
 
 /**
+ * The cookies an upstream set, as a JSON array of "name=value" (attributes dropped: the page
+ * sends them itself, so path, expiry, and the rest mean nothing here). Null when there are none,
+ * or more than fits in a header. Characters outside ASCII are escaped, as header values must be.
+ */
+export function setCookieHeader(upstream: Headers) {
+  const pairs = upstream
+    .getSetCookie()
+    .map((cookie) => cookie.split(";")[0].trim())
+    .filter((pair) => pair.includes("=") && !pair.startsWith("="));
+  if (!pairs.length) return null;
+  const value = JSON.stringify(pairs).replace(
+    /[^\x20-\x7e]/g,
+    (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, "0")}`,
+  );
+  return value.length > MAX_SET_COOKIE_BYTES ? null : value;
+}
+
+/**
  * Keeps what a page needs to read the body. The response is served from the site's own origin,
  * so it is sandboxed: fetched HTML must never run as one of the site's pages.
  */
@@ -238,6 +261,9 @@ function proxiedHeaders(upstream: Headers, target: URL, cache: boolean) {
     const value = upstream.get(name);
     if (value) headers.set(name, value);
   }
+  // Never on a response that is shared: one viewer's session would reach everyone.
+  const cookies = cache ? null : setCookieHeader(upstream);
+  if (cookies) headers.set(SET_COOKIE_HEADER, cookies);
   headers.set("cache-control", cache ? `private, max-age=${CACHE_SECONDS}` : "no-store");
   headers.set("content-security-policy", "default-src 'none'; sandbox");
   headers.set("x-content-type-options", "nosniff");

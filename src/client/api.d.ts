@@ -9,6 +9,11 @@ export interface NapError extends Error {
   readonly status: number;
   /** On a 409: the document as it is now, or null when it is gone. */
   readonly document?: NapDocument | null;
+  /**
+   * Set when the viewer is not allowed to see what was asked for: the name of the group that
+   * is, or "". Nothing is broken: show <nap-locked hint="..."> with the error's message there.
+   */
+  readonly locked?: string;
 }
 
 export interface NapErrorConstructor {
