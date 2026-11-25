@@ -17,7 +17,12 @@ import { artifactPath, type NapPlace } from "~/lib/nap-urls";
 import { isReservedSlug } from "~/lib/uploads";
 import { handleSiteAccessRequest } from "~/lib/site-access";
 import { handleSiteDataRequest, siteDataTarget } from "~/lib/site-data";
-import { serveClientTypes, serveSiteDataClient, serveVoiceEngine } from "~/lib/site-data-client";
+import {
+  serveClientTypes,
+  serveSiteDataClient,
+  serveSlidesShell,
+  serveVoiceEngine,
+} from "~/lib/site-data-client";
 import { handleLiveRequest, publishChange } from "~/lib/site-live";
 import { handleNotifyRequest } from "~/lib/notifications";
 import { handleChannelRequest } from "~/lib/site-channel";
@@ -92,6 +97,9 @@ const routeRequest = Effect.fn("routeRequest")(function* (
   }
   if (url.pathname === "/_nap/client-voice.js" && request.method === "GET") {
     return serveVoiceEngine(request);
+  }
+  if (url.pathname === "/_nap/slides.js" && request.method === "GET") {
+    return serveSlidesShell();
   }
   if (url.pathname === "/_nap/client.d.ts" && request.method === "GET") {
     return serveClientTypes();

@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync, renameSync } from 'node:fs'
 import path from 'node:path'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
@@ -21,7 +21,7 @@ function noShiki(): Plugin {
   }
 }
 
-const PLACEHOLDER_TITLES = new Set(['', 'untitled', 'todo: page title'])
+const PLACEHOLDER_TITLES = new Set(['', 'untitled', 'todo: page title', 'todo: deck title'])
 
 /**
  * Fail the build while index.html still has the placeholder <title>. Nap names a published page
@@ -37,8 +37,8 @@ function requireTitle(mode: string): Plugin {
       const title = html.match(/<title>([\s\S]*?)<\/title>/i)?.[1].trim() ?? ''
       if (PLACEHOLDER_TITLES.has(title.toLowerCase())) {
         throw new Error(
-          `index.html still has the placeholder <title>${title}</title>. ` +
-            'Set it to the page\'s name; Nap uses it as the page title.',
+          `The HTML file still has the placeholder <title>${title}</title>. ` +
+            'Set it to the name of the page or deck; Nap uses it as the title.',
         )
       }
       return html
@@ -75,8 +75,48 @@ function themes(): Plugin {
   }
 }
 
+/** Where this kit came from: `publish.mjs kit` writes the Nap's address to nap.local.json. */
+function napUrl() {
+  if (process.env.NAP_URL) return process.env.NAP_URL.replace(/\/+$/, '')
+  const file = path.resolve(import.meta.dirname, 'nap.local.json')
+  return existsSync(file) ? String(JSON.parse(readFileSync(file, 'utf8')).url ?? '').replace(/\/+$/, '') : ''
+}
+
+/**
+ * Decks (slides.html) load Nap's slides shell from /_nap/slides.js, which only exists on Nap.
+ * In dev and preview, fetch it from the Nap this kit came from. `pnpm build:slides` writes the
+ * deck to dist-slides/index.html.
+ */
+function slides(mode: string): Plugin {
+  const serve = async (_req: unknown, res: { setHeader(name: string, value: string): void; end(body: string): void }) => {
+    res.setHeader('content-type', 'text/javascript; charset=utf-8')
+    const url = napUrl()
+    try {
+      if (!url) throw new Error('no Nap address: set NAP_URL, or fetch the kit with publish.mjs kit')
+      const shell = await fetch(`${url}/_nap/api/slides.js`)
+      if (!shell.ok) throw new Error(`${url} answered ${shell.status}`)
+      res.end(await shell.text())
+    } catch (error) {
+      res.end(`console.error(${JSON.stringify(`Nap's slides shell did not load: ${error instanceof Error ? error.message : error}`)})`)
+    }
+  }
+  return {
+    name: 'kit:slides',
+    configureServer: (server) => void server.middlewares.use('/_nap/slides.js', serve),
+    configurePreviewServer: (server) => void server.middlewares.use('/_nap/slides.js', serve),
+    closeBundle() {
+      const built = path.resolve(import.meta.dirname, 'dist-slides/slides.html')
+      if (mode === 'slides' && existsSync(built)) renameSync(built, path.resolve(import.meta.dirname, 'dist-slides/index.html'))
+    },
+  }
+}
+
 export default defineConfig(({ mode }) => ({
-  plugins: [noShiki(), react(), tailwindcss(), viteSingleFile(), requireTitle(mode), themes()],
+  plugins: [noShiki(), react(), tailwindcss(), viteSingleFile(), requireTitle(mode), themes(), slides(mode)],
   resolve: { alias: { '@': path.resolve(import.meta.dirname, './src') } },
-  build: { assetsInlineLimit: 100_000_000, chunkSizeWarningLimit: 100_000 },
+  build: {
+    assetsInlineLimit: 100_000_000,
+    chunkSizeWarningLimit: 100_000,
+    ...(mode === 'slides' ? { outDir: 'dist-slides', rollupOptions: { input: 'slides.html' } } : {}),
+  },
 }))

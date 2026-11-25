@@ -113,7 +113,9 @@ test("publish.mjs sends --type, and nothing without it, so Nap keeps its default
   const update = await publishBody(["--update", "abc", "--type", "dashboard"]);
   assert.equal(update.id, "abc");
   assert.equal(update.type, "dashboard", "an update can change it");
-  assert.deepEqual(parseNapType("slides"), { error: 'type must be "page" or "dashboard"' });
+  assert.deepEqual(parseNapType("poster"), {
+    error: 'type must be "page", "dashboard" or "slides"',
+  });
   assert.equal(parseNapType(" Dashboard "), "dashboard");
 });
 
@@ -153,6 +155,7 @@ test("publish.mjs help points to the dashboards topic", async () => {
   const { readFile } = await import("node:fs/promises");
   const source = await readFile(SCRIPT, "utf8");
   assert.match(source, /^\/\/ {3}--type type .*\n(\/\/ .*\n)*?\/\/ .*instructions\/dashboards/m);
+  assert.match(source, /^\/\/ {3}--type type .*\n(\/\/ .*\n)*?\/\/ .*slides: a deck to present/m);
 });
 
 /** Runs `publish.mjs read` against a stand-in for Nap that serves one nap with the given files. */

@@ -1,5 +1,6 @@
 import {
   ChartColumnIcon,
+  PresentationIcon,
   FileTextIcon,
   GitBranchIcon,
   GlobeIcon,
@@ -27,11 +28,11 @@ export const KIND_SOFT: Record<Kind, string> = {
 };
 
 /** A nap's type, where it is not a plain page. */
-export const TYPE_LABEL: Record<string, string> = { dashboard: "Dashboard" };
+export const TYPE_LABEL: Record<string, string> = { dashboard: "Dashboard", slides: "Slides" };
 
 /**
  * Sites are a globe, artifacts a page, apps a phone. Each in its kind's colour. A dashboard
- * (`type`) is a chart, in its kind's colour.
+ * (`type`) is a chart and a deck of slides a screen, in its kind's colour.
  */
 export function KindIcon({
   kind,
@@ -44,7 +45,8 @@ export function KindIcon({
   className?: string;
   muted?: boolean;
 }) {
-  const Icon = type === "dashboard" ? ChartColumnIcon : KIND_ICON[kind];
+  const Icon =
+    type === "dashboard" ? ChartColumnIcon : type === "slides" ? PresentationIcon : KIND_ICON[kind];
   const label = type ? TYPE_LABEL[type] : undefined;
   return (
     <Icon

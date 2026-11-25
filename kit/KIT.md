@@ -6,7 +6,8 @@ self-contained `dist/index.html`. The components give you building blocks; how y
 up to you. Each Nap serves the kit with its own themes and may add components; what this page
 says after "On this Nap" is that Nap's own.
 
-Use the kit for pages that are mostly content: reports, write-ups, explainers, dashboards. A page
+Use the kit for pages that are mostly content: reports, write-ups, explainers, dashboards, and
+decks of slides. A page
 that is a single canvas or a game, or anything without Node, is fine as plain HTML. You can also
 skip the kit, or take only its theme.
 
@@ -43,6 +44,7 @@ import { Page, Section, Flow, Stat /* … */ } from '@/kit'      // everything l
 import { BarChart, LineChart, Histogram } from '@/kit/charts'    // Recharts
 import { Code, Diff } from '@/kit/code'                          // WASM highlighter
 import { Dashboard, Panel, Metric, useDataset } from '@/kit/dashboard'  // dashboards
+import { mountIslands } from '@/kit/slides'                       // islands in a deck
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/kit/ui/tabs'  // shadcn/ui
 ```
 
@@ -429,6 +431,37 @@ const signups = useDataset({
 - The look of a dashboard is the theme's: charts use `--chart-1…6`, so a page switches theme with
   the rest of Nap.
 - Label the values that matter on the chart; wall screens and phones have no hover.
+
+## Slides
+
+For a nap of type `slides`. Read the `slides` topic first: it is the contract for a deck (one
+`<section>` a slide on a 1920 × 1080 canvas, notes, steps, transitions, islands). Nap's slides
+shell shows and presents the deck; the kit gives you a deck to start from and its styles.
+
+```sh
+pnpm dev                 # http://localhost:5173/slides.html, with Nap's shell
+pnpm build:slides        # → dist-slides/index.html, one file
+node scripts/shot.mjs out.png 1600 dark no dist-slides/index.html#slide-3   # one slide, in the shell
+node /tmp/nap-publish.mjs dist-slides --type slides
+```
+
+- **`slides.html`** is the deck: plain HTML, one `<section class="slide">` a slide. Set its
+  `<title>`; the build fails on the placeholder. Tailwind classes work in it, next to the deck's own.
+- **`src/slides/deck.css`** styles slides on the theme tokens, in px of the canvas. Layouts go
+  next to `slide`: `title` (bottom-left, with the theme's glow) and `center`. Parts: `eyebrow`,
+  `lede`, `big` (a huge number, with `unit`), `cols` (two columns; `wide-right`), `fill` (takes
+  the room that is left, for an island), `foot`, `accent`. Add your own classes there. Text sizes:
+  body 40 px, `h2` 76 px, `h1` 128 px; nothing a room should read goes under 24 px.
+- **`src/slides/main.tsx`** fills the islands: `mountIslands({ name: Component })` from
+  `@/kit/slides` renders each component into the elements with that `data-island`. All islands
+  share one React tree under `KitRoot`. Every kit part works in an island, and `useDataset`
+  (`@/kit/dashboard`) loads and refreshes its data. Remove the example island, and the charts
+  import, from a deck without one.
+- Inside an island, kit parts are drawn at twice their size (`zoom: 2`): design the island as
+  for a page about 960 px wide, and give charts a `height` of what is left of 540 px.
+- The shell comes from the Nap the kit was fetched from (`nap.local.json`, or `NAP_URL`), in dev
+  and for screenshots; a built deck loads it from Nap itself.
+- A deck has the same themes as a page, and switches the same way.
 
 ## Code (`@/kit/code`) and trees
 

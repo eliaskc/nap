@@ -1,4 +1,4 @@
-import { client, voice, voiceVersion } from "virtual:nap-client";
+import { client, slides, voice, voiceVersion } from "virtual:nap-client";
 import CLIENT_TYPES from "~/client/api.d.ts?raw";
 import { EXTENSIONS } from "~/lib/extension-registry";
 import { clientTypesWithExtensions } from "~/lib/extensions";
@@ -14,6 +14,20 @@ const headers = {
 export function serveSiteDataClient() {
   return new Response(client, {
     headers: { "content-type": "text/javascript; charset=utf-8", ...headers },
+  });
+}
+
+/**
+ * /_nap/slides.js: the slides shell, built from src/slides. Decks load it by this one URL, so a
+ * deck always runs the shell Nap has now. Frames have an opaque origin, so it allows every origin.
+ */
+export function serveSlidesShell() {
+  return new Response(slides, {
+    headers: {
+      "content-type": "text/javascript; charset=utf-8",
+      "access-control-allow-origin": "*",
+      ...headers,
+    },
   });
 }
 

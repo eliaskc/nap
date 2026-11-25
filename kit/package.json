@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "shot": "node scripts/shot.mjs",
     "build:kitchen": "vite build --mode kitchen --outDir dist-kitchen",
-    "build:dashboard": "vite build --mode dashboard --outDir dist-dashboard"
+    "build:dashboard": "vite build --mode dashboard --outDir dist-dashboard",
+    "build:slides": "tsc -b && vite build --mode slides"
   },
   "dependencies": {
     "@base-ui/react": "^1.9.0",

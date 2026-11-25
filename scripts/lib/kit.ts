@@ -22,7 +22,15 @@ import { withInstanceText } from "./instance-text.ts";
 export type KitFile = { path: string; content: string; encoding: "utf8" | "base64" };
 
 /** Folders that are not part of the kit: what installing and building it leaves behind. */
-const SKIPPED = new Set(["node_modules", "dist", "dist-kitchen", "dist-dashboard", ".DS_Store"]);
+const SKIPPED = new Set([
+  "node_modules",
+  "dist",
+  "dist-kitchen",
+  "dist-dashboard",
+  "dist-slides",
+  "nap.local.json",
+  ".DS_Store",
+]);
 const BINARY = new Set([
   ".woff2",
   ".woff",

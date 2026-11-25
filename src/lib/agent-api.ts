@@ -4,7 +4,7 @@ import { Effect, Predicate } from "effect";
 import { napConfig } from "~/nap.config";
 import { kitFiles } from "virtual:nap-instance-content";
 import { agentInstructionsFor } from "~/lib/agent-instructions";
-import { serveClientTypes } from "~/lib/site-data-client";
+import { serveClientTypes, serveSlidesShell } from "~/lib/site-data-client";
 import { DEFAULT_ACCESS, EVERYONE_LABEL, fillDeploymentText } from "~/lib/deployment-text";
 import {
   authenticateAgent,
@@ -136,6 +136,8 @@ export const handleAgentApi = Effect.fn("handleAgentApi")(function* (request: Re
       },
     );
   }
+  // The slides shell (/_nap/slides.js), for a deck's local dev server: it needs no sign-in.
+  if (path === "/slides.js" && method === "GET") return serveSlidesShell();
   // The types of window.nap (/_nap/client.js), for sites written in TypeScript.
   if (path === "/client.d.ts" && method === "GET") return serveClientTypes();
   if (path === "/auth/device") return yield* startDeviceLogin(request, url);

@@ -671,7 +671,7 @@ try {
   // Dashboards: a draft with type=dashboard. Repeat opens of a dashboard are not counted as
   // visits; a page's are.
   assert.equal(
-    (await postDraft("?type=slides", "<h1>x</h1>", tokens[OWNER])).status,
+    (await postDraft("?type=poster", "<h1>x</h1>", tokens[OWNER])).status,
     400,
     "unknown types are refused",
   );
@@ -746,7 +746,7 @@ try {
   assert.equal((await typeSettings(board, { type: "page" })).json.type, "page");
   assert.equal((await openTwice(board)).count, 2, "a page again counts again");
   assert.equal(
-    (await typeSettings(board, { type: "slides" })).status,
+    (await typeSettings(board, { type: "poster" })).status,
     400,
     "unknown types are refused",
   );

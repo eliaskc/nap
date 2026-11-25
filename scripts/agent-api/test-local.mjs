@@ -331,9 +331,9 @@ try {
     );
     assert.equal(board.status, 201, board.text);
     assert.equal(board.json.type, "dashboard");
-    const refused = await html("/_nap/api/naps?type=slides", typesToken, "x");
+    const refused = await html("/_nap/api/naps?type=poster", typesToken, "x");
     assert.equal(refused.status, 400, refused.text);
-    assert.equal(refused.json.error, 'type must be "page" or "dashboard"');
+    assert.equal(refused.json.error, 'type must be "page", "dashboard" or "slides"');
     const plain = await html("/_nap/api/naps?title=Plain", typesToken, "<h1>plain</h1>");
     assert.equal(plain.json.type, "page", "old clients that send no type get a page");
     const hosted = await html("/_nap/api/naps?type=dashboard&ownHost=true", typesToken, "h");
@@ -393,7 +393,7 @@ try {
     assert.equal((await directType({ id: board.json.id })).type, "dashboard", "kept");
     const badDirect = await postJson(
       "/_nap/api/uploads",
-      { files: [{ path: "index.html", size: 4 }], type: "slides" },
+      { files: [{ path: "index.html", size: 4 }], type: "poster" },
       bearer(typesToken),
     );
     assert.equal(badDirect.status, 400, badDirect.text);
@@ -409,9 +409,9 @@ try {
     assert.equal(changed.status, 200, changed.text);
     assert.equal(changed.json.type, "dashboard");
     assert.equal(await typeOf(plain.json.id), "dashboard");
-    const badSetting = await setType(plain.json.id, { type: "slides" });
+    const badSetting = await setType(plain.json.id, { type: "poster" });
     assert.equal(badSetting.status, 400);
-    assert.equal(badSetting.json.error, 'type must be "page" or "dashboard"');
+    assert.equal(badSetting.json.error, 'type must be "page", "dashboard" or "slides"');
     assert.equal((await setType(board.json.id, { type: "page" }, OTHER)).status, 403);
 
     for (const slug of [board.json.id, plain.json.id, hosted.json.id, directBoard.id]) {

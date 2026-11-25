@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>TODO: deck title</title>
+    <script>(()=>{const m=matchMedia("(prefers-color-scheme: dark)"),r=document.documentElement,s=()=>{r.classList.toggle("dark",m.matches);r.style.colorScheme=m.matches?"dark":"light"};s();m.addEventListener("change",s)})()</script>
+    <!-- Nap's slides shell: the column of slides, presenting, notes, PDF. Keep this line as it is. -->
+    <script src="/_nap/slides.js" defer></script>
+  </head>
+  <body>
+    <!-- One <section class="slide"> per slide, drawn on a 1920 × 1080 canvas. See KIT.md, Slides. -->
+
+    <section class="slide title" id="title" data-transition="magic">
+      <p class="eyebrow">Team · Month Year</p>
+      <h1 data-magic="headline">The one thing this deck says</h1>
+      <p class="lede">A line that tells the room why they are here.</p>
+      <aside>Speaker notes go in an aside. People can edit them in Nap.</aside>
+    </section>
+
+    <section class="slide" id="points">
+      <p class="eyebrow">Where we are</p>
+      <h2 data-magic="headline">A headline that states the point</h2>
+      <ul>
+        <li class="fragment">Each point appears on its own step while presenting.</li>
+        <li class="fragment">Keep to a few words a line: the room listens to you.</li>
+        <li class="fragment">Everything is visible outside the show and in the PDF.</li>
+      </ul>
+    </section>
+
+    <section class="slide" id="number">
+      <p class="eyebrow">The number</p>
+      <div class="cols">
+        <div>
+          <p class="big">42<span class="unit">%</span></p>
+          <p class="lede">What the number is, and what it compares to.</p>
+        </div>
+        <!-- An island: src/slides/main.tsx draws it with React and the kit. -->
+        <div class="fill" data-island="trend"></div>
+      </div>
+      <p class="foot">Source and date of the numbers.</p>
+    </section>
+
+    <section class="slide center" id="end">
+      <h2>What happens next</h2>
+      <p class="lede">One ask, one owner, one date.</p>
+    </section>
+
+    <script type="module" src="/src/slides/main.tsx"></script>
+  </body>
+</html>

@@ -563,7 +563,11 @@ export function DashboardActions({
   );
 }
 
-const TYPE_NAMES: Record<NapType, string> = { page: "Page", dashboard: "Dashboard" };
+const TYPE_NAMES: Record<NapType, string> = {
+  page: "Page",
+  dashboard: "Dashboard",
+  slides: "Slides",
+};
 
 /**
  * Right-click on any item, in every layout. `render` replaces the wrapper element, so absolutely

@@ -5,11 +5,13 @@
  * - page: anything. The default.
  * - dashboard: charts and numbers people look at again and again, sometimes left open on a wall
  *   screen. Repeat opens are not counted as visits (visits.ts).
+ * - slides: a deck. Its page holds one <section> per slide and loads Nap's slides shell
+ *   (src/slides, /_nap/slides.js), which shows and presents them.
  *
- * More may come (slides). The type is a column, `sites.type`, never a flag per type.
+ * The type is a column, `sites.type`, never a flag per type.
  * Runs on the server and in the browser.
  */
-export const NAP_TYPES = ["page", "dashboard"] as const;
+export const NAP_TYPES = ["page", "dashboard", "slides"] as const;
 
 export type NapType = (typeof NAP_TYPES)[number];
 
@@ -20,7 +22,9 @@ export function isNapType(value: unknown): value is NapType {
 }
 
 /** The refusal for anything else, with the values Nap takes. */
-export const NAP_TYPE_ERROR = `type must be ${NAP_TYPES.map((type) => `"${type}"`).join(" or ")}`;
+export const NAP_TYPE_ERROR = `type must be ${NAP_TYPES.map((type) => `"${type}"`)
+  .join(", ")
+  .replace(/, ([^,]+)$/, " or $1")}`;
 
 /**
  * A type from an agent or a form: undefined when none was sent (old clients), else the type, or

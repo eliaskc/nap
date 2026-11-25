@@ -34,6 +34,7 @@ Everything you publish is a nap: "make me a nap", "I sent you a nap".
 
 - A nap lives at `https://{{rootDomain}}/<random id>`, or at a name you choose with `--name`: `https://{{rootDomain}}/team-map`. It runs in a sandboxed frame below a small Nap bar with the title and a Share button. Use this for everything: reports, prototypes, tools, dashboards, games, things people come back to.
 - A dashboard, charts and numbers people come back to or leave open on a wall screen, is a nap of type `dashboard` (`--type dashboard`). Read the `dashboards` topic before you make one.
+- A deck of slides to present is a nap of type `slides` (`--type slides`): you write the slides, and Nap's slides shell shows and presents them. Read the `slides` topic before you make one.
 - Only a nap that needs one of these gets its own host, `https://<name>.{{contentDomain}}` (`--own-host`): localStorage or IndexedDB that lasts across reloads, cookies, service workers, client-side routing with real paths, root-absolute URLs that scripts build, or pointer lock. Read the `sites` topic first.
 
 ## Sign in and publish
@@ -45,6 +46,7 @@ Use the publish script. It needs Node 20 or newer; without Node, read the `api` 
     node /tmp/nap-publish.mjs bundle.html --title "Q3 report"  # one HTML file, or a folder with index.html
     node /tmp/nap-publish.mjs dist --title "Team map" --name team-map   # at {{rootDomain}}/team-map
     node /tmp/nap-publish.mjs dist --title "Signups" --type dashboard  # a dashboard (dashboards topic)
+    node /tmp/nap-publish.mjs dist-slides --title "Q3 review" --type slides   # a deck (slides topic)
     node /tmp/nap-publish.mjs dist --update <id> --message "Add the weekly chart"
 
 - `login` prints a link and a code. Give both to the user and ask them to approve. It waits up to 10 minutes, so use a long timeout. It saves the token in `~/.config/nap/{{rootDomain}}/token`. Never print the token or put it in a project. Exit code 3 means you need to sign in, and 4 means the user must open https://{{rootDomain}} first.
@@ -91,6 +93,7 @@ Read one with `curl -fsSL https://{{rootDomain}}/_nap/api/instructions/<topic>`.
 - `voice`: a live audio call between the people on a page (`nap.voice`).
 - `fetch`: reading public APIs from other origins (`nap.fetch`).
 - `dashboards`: dashboards (`--type dashboard`): structure, live data, charts, and any screen size. Read it before you make one.
+- `slides`: decks (`--type slides`): the slide format, notes, steps, transitions, islands, and presenting. Read it before you make one.
 <!-- if notifications -->
 - `notifications`: telling the people on this Nap that something happened, on their phones and in their browsers (`nap.notify`).
 <!-- /if -->

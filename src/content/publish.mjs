@@ -40,9 +40,10 @@
 //                          the few pages that need one (see the instructions).
 //                          (--site is the same as --own-host; --slug name the same as
 //                          --name name --own-host.)
-//   --type type            page (the default) or dashboard: charts and numbers people look at
-//                          again and again. Read the dashboards topic before you make one:
-//                          GET https://{{rootDomain}}/_nap/api/instructions/dashboards.
+//   --type type            page (the default), dashboard: charts and numbers people look at
+//                          again and again, or slides: a deck to present. Read the type's
+//                          topic before you make one:
+//                          GET https://{{rootDomain}}/_nap/api/instructions/dashboards (or /slides).
 //                          With --update, only the owner's publish changes the type.
 //   --access who           New naps only: private, everyone, or selected. Default: {{defaultAccess}}.
 //   --emails a@x,b@x       With --access selected: who can view it.
@@ -745,6 +746,8 @@ async function kit(options) {
       file.encoding === "base64" ? Buffer.from(file.content, "base64") : file.content,
     );
   }
+  // The kit's dev server and screenshots fetch Nap's slides shell from here.
+  await writeFile(join(dir, "nap.local.json"), `${JSON.stringify({ url: NAP_URL }, null, 2)}\n`);
   console.log(`Wrote the kit to ${dir} (${fetched.data.files.length} files).`);
   console.log(`Next: read ${join(dir, "KIT.md")}, then cd ${dir} && pnpm install && pnpm build`);
 }

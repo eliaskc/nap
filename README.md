@@ -500,6 +500,30 @@ A deployment changes the kit without changing Nap (`scripts/lib/kit.ts`):
   topic, below "On this Nap" (`kit.md` to `KIT.md`), or is a topic of its own
   when Nap has none by that name, listed in the index by its first heading.
 
+### Slides
+
+A deck (type `slides`) is a nap whose page holds one `<section>` per slide
+and loads `/_nap/slides.js`, the slides shell (`src/slides/shell.ts`, bundled
+with the client by `scripts/lib/client-bundle.ts`). The shell runs in the
+deck's own document, in the frame: it moves the sections onto a 1920 × 1080
+canvas that it scales, and builds the column of slides, the notes, the show,
+steps, transitions and the print layout around them, in a shadow root. The
+slides stay in the page's document, so the deck's styles and scripts apply:
+most of a slide is plain HTML, and the parts drawn by code are "islands"
+(`data-island`), which the shell leaves alone. That split is what will let
+people edit slides by hand later: what is HTML can be saved back, an island
+cannot.
+
+Unlike the kit, the shell is served, not bundled: a change to it reaches every
+deck. So its contract is the `slides` instructions topic, and it must keep
+working for decks written against earlier versions. Speaker notes people
+write are documents in the nap's collection `slide-notes`. The shell tells the
+viewer where in the deck it is (`nap:slides`), and the Nap bar shows it and
+starts the show by making the frame fill the screen.
+`/_nap/api/slides.js` serves the shell without a sign-in, for the kit's dev
+server. `pnpm test:frame` runs a deck, and theme switching, in Chrome against
+a local stage.
+
 ### Comments
 
 Viewers can select text in an artifact and comment on it. The Nap bar loads

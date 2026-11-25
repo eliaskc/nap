@@ -66,7 +66,7 @@ export function toolbarPage(options: {
       <h1 title="${attr(`${title} · ${owner} · updated ${formatDate(options.updatedAt)}`)}">
         ${text(title)}<span class="owner"> · ${text(owner)}</span>
       </h1>
-      <div class="actions"><span id="nap-theme-slot"></span><span id="nap-history-slot"></span><span id="nap-comments-slot"></span><span id="nap-share-slot"></span></div>
+      <div class="actions"><span id="nap-slides-slot"></span><span id="nap-theme-slot"></span><span id="nap-history-slot"></span><span id="nap-comments-slot"></span><span id="nap-share-slot"></span></div>
     </header>`;
   const body = `${bar ? header : ""}
     <main>${frame}</main>
@@ -107,6 +107,10 @@ export function toolbarPage(options: {
   h1 .owner { color: var(--nap-muted); font-weight: 400; }
   .actions, .actions > span { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
   #nap-theme-slot select { height: 28px; max-width: 120px; padding: 0 6px; border: 1px solid var(--nap-line); border-radius: 6px; background: var(--nap-bg); color: var(--nap-fg); font: inherit; font-size: 12px; cursor: pointer; }
+  #nap-slides-slot .count { color: var(--nap-muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+  #nap-slides-slot button { height: 28px; padding: 0 10px; border: 0; border-radius: 6px; background: var(--nap-fg); color: var(--nap-bg); font: inherit; font-size: 12px; font-weight: 500; cursor: pointer; }
+  #nap-slides-slot button:hover { opacity: 0.88; }
+  main:fullscreen { background: #000; }
   #nap-theme-slot select:hover { background: var(--nap-hover); }
   main { position: relative; display: flex; flex: 1; min-height: 0; }
   iframe { flex: 1; width: 100%; min-width: 0; border: 0; background: #fff; }
@@ -276,6 +280,37 @@ const VIEWER_SOURCE = String.raw`(() => {
     slot.appendChild(select);
   }
 
+  // Slides. A deck's shell (/_nap/slides.js, in the frame) says where in the deck it is. The
+  // bar shows that, and starts the show: this page makes the frame fill the screen, since the
+  // click was here, and the shell changes to its presenting layout.
+  const main = frame.parentElement;
+  let slidesCount = null;
+  function showSlides(index, count) {
+    const slot = document.getElementById("nap-slides-slot");
+    if (!slot) return;
+    if (!slidesCount) {
+      slidesCount = document.createElement("span");
+      slidesCount.className = "count";
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = "Present";
+      button.addEventListener("click", () => {
+        if (!main.requestFullscreen) return;
+        main.requestFullscreen().then(() => {
+          frame.contentWindow.postMessage({ type: "nap:slides:present", on: true }, "*");
+          frame.focus();
+        }, () => {});
+      });
+      slot.append(slidesCount, button);
+    }
+    slidesCount.textContent = (index + 1) + " / " + count;
+  }
+  document.addEventListener("fullscreenchange", () => {
+    if (!document.fullscreenElement && slidesCount) {
+      frame.contentWindow.postMessage({ type: "nap:slides:present", on: false }, "*");
+    }
+  });
+
   frame.src = frame.dataset.src + location.hash;
 
   const token = (frame.dataset.src.match(/^\/_nap\/frame\/([A-Za-z0-9_-]+)\//) || [])[1];
@@ -308,6 +343,10 @@ const VIEWER_SOURCE = String.raw`(() => {
         .slice(0, 12)
         .map((theme) => ({ id: theme.id, label: theme.label.slice(0, 40) }));
       showThemes(themes, typeof data.current === "string" ? data.current : "");
+      return;
+    }
+    if (data && data.type === "nap:slides" && Number.isInteger(data.index) && Number.isInteger(data.count)) {
+      if (data.count > 0 && data.index >= 0 && data.index < data.count) showSlides(data.index, data.count);
       return;
     }
     if (!data || data.type !== "nap:location" || typeof data.path !== "string") return;

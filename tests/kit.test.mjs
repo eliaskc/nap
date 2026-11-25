@@ -78,4 +78,6 @@ test("Nap's own kit has a guide, a neutral theme, and no instance themes", () =>
   });
   assert.doesNotMatch(read("src/theme/instance.css").replace(/\/\*[\s\S]*?\*\//g, ""), /\S/);
   assert.match(read("src/theme/tokens.css"), /--bg:/);
+  // A deck loads Nap's slides shell by the one path Nap serves it at.
+  assert.match(read("slides.html"), /<script src="\/_nap\/slides\.js" defer><\/script>/);
 });

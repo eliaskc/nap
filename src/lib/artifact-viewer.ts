@@ -12,7 +12,7 @@ import { handleNotifyRequest } from "~/lib/notifications";
 import { handleSiteAccessRequest } from "~/lib/site-access";
 import { handleSiteDataRequest } from "~/lib/site-data";
 import { handleSiteFilesRequest } from "~/lib/site-files";
-import { serveSiteDataClient, serveVoiceEngine } from "~/lib/site-data-client";
+import { serveSiteDataClient, serveSlidesShell, serveVoiceEngine } from "~/lib/site-data-client";
 import { handleLiveRequest, publishChange } from "~/lib/site-live";
 import { handleChannelRequest } from "~/lib/site-channel";
 import { handleRtcRequest } from "~/lib/site-rtc";
@@ -280,6 +280,7 @@ export const handleFrameRequest = Effect.fn("handleFrameRequest")(function* (req
 
   if (rest === "/_nap/client.js") return withCors(serveSiteDataClient());
   if (rest === "/_nap/client-voice.js") return serveVoiceEngine(request);
+  if (rest === "/_nap/slides.js") return serveSlidesShell();
   // The share button shows nothing inside a frame. Serve it so pages that include it still load.
   if (rest === "/_nap/share.js") return withCors(serveShareWidget());
   // The comments script for inside the frame (src/comments/frame.ts), built into the Worker.

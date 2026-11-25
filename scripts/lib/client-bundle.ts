@@ -60,5 +60,7 @@ export async function bundleClient(options: { root?: string } = {}) {
     { __NAP_VOICE_VERSION__: JSON.stringify(voiceVersion) },
     options.root,
   );
-  return { client, voice, voiceVersion };
+  // The slides shell (src/slides), which decks load from /_nap/slides.js.
+  const slides = await bundle("src/slides/shell.ts", "iife");
+  return { client, voice, voiceVersion, slides };
 }

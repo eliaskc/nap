@@ -10,7 +10,7 @@ registerHooks({
       "cloudflare:workers": "export const env = {}; export class DurableObject {}",
       "virtual:nap-comments-frame": "export default '';",
       "virtual:nap-client":
-        "export const client = ''; export const voice = ''; export const voiceVersion = '';",
+        "export const client = ''; export const voice = ''; export const voiceVersion = ''; export const slides = '';",
       "virtual:nap-extensions": "export const extensions = [];",
       "virtual:nap-instance-content": "export const kitFiles = []; export const instructions = {};",
     }[specifier];

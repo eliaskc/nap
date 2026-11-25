@@ -95,8 +95,8 @@ function commentsFrameModule(): Plugin {
 
 /**
  * `virtual:nap-client`: window.nap (src/client), the script every site loads from
- * /_nap/client.js, and its voice engine (/_nap/client-voice.js), bundled and served by the
- * Worker as strings.
+ * /_nap/client.js, its voice engine (/_nap/client-voice.js), and the slides shell
+ * (src/slides, /_nap/slides.js), bundled and served by the Worker as strings.
  */
 function napClientModule(): Plugin {
   const id = "virtual:nap-client";
@@ -107,11 +107,13 @@ function napClientModule(): Plugin {
       if (resolved !== `\0${id}`) return;
       for (const file of readdirSync("src/client")) this.addWatchFile(`src/client/${file}`);
       for (const file of extensionFiles(findExtensions())) this.addWatchFile(file);
-      const { client, voice, voiceVersion } = await bundleClient();
+      this.addWatchFile("src/slides/shell.ts");
+      const { client, voice, voiceVersion, slides } = await bundleClient();
       return [
         `export const client = ${JSON.stringify(client)};`,
         `export const voice = ${JSON.stringify(voice)};`,
         `export const voiceVersion = ${JSON.stringify(voiceVersion)};`,
+        `export const slides = ${JSON.stringify(slides)};`,
       ].join("\n");
     },
   };

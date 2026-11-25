@@ -10,7 +10,7 @@ import { route } from "~/server/route";
 
 /**
  * PATCH /api/sites/:slug/settings — { listed?: boolean, toolbar?: boolean, ownHost?: boolean,
- * type?: "page" | "dashboard" }. Owner only.
+ * type?: "page" | "dashboard" | "slides" }. Owner only.
  * - listed: show it in the shared, organisation-wide list.
  * - toolbar: show the Nap bar above it. Off, the nap fills the window.
  * - ownHost: serve it on its own host (<name>.<root>) instead of in Nap's frame (<root>/<name>).

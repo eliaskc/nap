@@ -9,6 +9,7 @@ import fetch from "~/content/instructions/fetch.md?raw";
 import notifications from "~/content/instructions/notifications.md?raw";
 import index from "~/content/instructions/index.md?raw";
 import sites from "~/content/instructions/sites.md?raw";
+import slides from "~/content/instructions/slides.md?raw";
 import source from "~/content/instructions/source.md?raw";
 import voice from "~/content/instructions/voice.md?raw";
 import { EXTENSIONS } from "~/lib/extension-registry";
@@ -37,6 +38,7 @@ const CORE_TOPICS: Record<string, string> = {
   voice,
   fetch,
   dashboards,
+  slides,
   notifications,
   api,
   drafts,
