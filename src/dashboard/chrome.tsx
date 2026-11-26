@@ -5,6 +5,9 @@ import {
   FolderArchiveIcon,
   LayoutGridIcon,
   ListIcon,
+  LogOutIcon,
+  PencilIcon,
+  PlayIcon,
   UploadIcon,
 } from "lucide-react";
 import * as React from "react";
@@ -36,7 +39,7 @@ import {
   type Sort,
 } from "~/dashboard/data";
 import { formatDateTime } from "~/dashboard/format";
-import { GetAppButton } from "~/dashboard/install";
+import { AppleLogo, GetAppButton, HAS_ANDROID, HAS_IOS, useInstall } from "~/dashboard/install";
 import { NotificationsButton } from "~/dashboard/notifications";
 import { KindIcon } from "~/dashboard/kinds";
 import {
@@ -118,29 +121,116 @@ export function TopBar({
           <GetAppButton />
           <NotificationsButton />
           <ConnectedAgents />
-          {profile && (
-            <GroupButton
-              icon
-              nativeButton={false}
-              render={<a href="/welcome?next=/" />}
-              title={`${profile.displayName ?? profile.email} · change your name${napConfig.avatars ? " and look" : ""}`}
-            >
-              {napConfig.avatars && profile.shape && profile.color ? (
-                <Avatar
-                  look={{ shape: profile.shape, color: profile.color }}
-                  name={profile.displayName ?? profile.email}
-                  size={24}
-                />
-              ) : (
-                <span className="grid size-6 place-items-center rounded-full bg-foreground text-xs font-semibold text-background">
-                  {(profile.displayName ?? profile.email).charAt(0).toUpperCase()}
-                </span>
-              )}
-            </GroupButton>
-          )}
+          {profile && <AccountMenu profile={profile} />}
         </Group>
       </div>
     </header>
+  );
+}
+
+function ProfileMark({ profile, size }: { profile: Profile; size: number }) {
+  const name = profile.displayName ?? profile.email;
+  return napConfig.avatars && profile.shape && profile.color ? (
+    <Avatar look={{ shape: profile.shape, color: profile.color }} name={name} size={size} />
+  ) : (
+    <span
+      className="grid shrink-0 place-items-center rounded-full bg-foreground text-xs font-semibold text-background"
+      style={{ width: size, height: size }}
+    >
+      {name.charAt(0).toUpperCase()}
+    </span>
+  );
+}
+
+/**
+ * You: who you're signed in to Nap as, and the accounts your phones use for the app, which are
+ * often others (a personal Apple Account, the Google account on the phone).
+ */
+function AccountMenu({ profile }: { profile: Profile }) {
+  const install = useInstall();
+  const status = install?.status ?? null;
+  const name = profile.displayName ?? profile.email;
+  const apple = install && HAS_IOS;
+  const google = install && HAS_ANDROID;
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger render={<GroupButton icon title={`${name} · ${profile.email}`} />}>
+        <ProfileMark profile={profile} size={24} />
+        <span className="sr-only">Your account</span>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-80">
+        <DropdownMenuGroup>
+          <DropdownMenuLabel className="flex items-center gap-3 px-2 py-2 font-normal text-foreground">
+            <ProfileMark profile={profile} size={36} />
+            <span className="flex min-w-0 flex-col">
+              <b className="truncate text-sm font-semibold">{name}</b>
+              <span className="truncate text-xs text-muted-foreground">
+                Signed in as {profile.email}
+              </span>
+            </span>
+          </DropdownMenuLabel>
+        </DropdownMenuGroup>
+        {(apple || google) && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuGroup>
+              <DropdownMenuLabel>Your accounts for the app</DropdownMenuLabel>
+              {apple && (
+                <DropdownMenuItem
+                  className="items-start gap-2.5 py-1.5"
+                  onClick={() =>
+                    status?.appleEmail ? install.changeAppleAccount() : install.setOpen(true)
+                  }
+                >
+                  <span className="mt-0.5 grid size-7 shrink-0 place-items-center rounded-full bg-foreground text-background">
+                    <AppleLogo className="size-3.5" />
+                  </span>
+                  <span className="flex min-w-0 flex-1 flex-col">
+                    <span className="text-[13px] font-medium">Apple Account · TestFlight</span>
+                    <span className="truncate text-xs text-muted-foreground">
+                      {status?.appleEmail ?? "Not set up yet"}
+                    </span>
+                  </span>
+                  <span className="mt-1 text-xs text-muted-foreground">
+                    {status?.appleEmail ? "Change" : "Set up"}
+                  </span>
+                </DropdownMenuItem>
+              )}
+              {google && (
+                <DropdownMenuItem
+                  className="items-start gap-2.5 py-1.5"
+                  onClick={() => {
+                    install.setTarget("android");
+                    install.setOpen(true);
+                  }}
+                >
+                  <span className="mt-0.5 grid size-7 shrink-0 place-items-center rounded-full bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300">
+                    <PlayIcon className="size-3.5 fill-current" />
+                  </span>
+                  <span className="flex min-w-0 flex-1 flex-col">
+                    <span className="text-[13px] font-medium">Google Play</span>
+                    <span className="text-xs text-muted-foreground">
+                      The Google account on your Android phone
+                    </span>
+                  </span>
+                </DropdownMenuItem>
+              )}
+            </DropdownMenuGroup>
+          </>
+        )}
+        <DropdownMenuSeparator />
+        <DropdownMenuGroup>
+          <DropdownMenuItem render={<a href="/welcome?next=/" />}>
+            <PencilIcon />
+            {napConfig.avatars ? "Name and look" : "Your name"}
+          </DropdownMenuItem>
+          <DropdownMenuItem render={<a href="/cdn-cgi/access/logout" />}>
+            <LogOutIcon />
+            Sign in with another account
+          </DropdownMenuItem>
+        </DropdownMenuGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 

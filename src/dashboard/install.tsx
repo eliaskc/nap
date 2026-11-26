@@ -47,6 +47,9 @@ const TARGETS: Array<Target> = [
   ...(napConfig.apps?.remarkable ? (["remarkable"] as const) : []),
 ];
 export const APP_ENABLED = TARGETS.length > 0;
+/** For the avatar menu: which phone accounts this Nap has. */
+export const HAS_IOS = TARGETS.includes("ios");
+export const HAS_ANDROID = TARGETS.includes("android");
 
 const PLATFORM: Record<Target, { label: string; device: string; icon: typeof SmartphoneIcon }> = {
   ios: { label: "iPhone", device: "phone", icon: SmartphoneIcon },
@@ -95,8 +98,13 @@ type InstallState = {
   setOpen: (open: boolean) => void;
   target: Target;
   setTarget: (target: Target) => void;
-  invite: (email: string) => Promise<void>;
-  forget: () => Promise<void>;
+  /** Sends the invite; true once Apple took it. It also changes the address. */
+  invite: (email: string) => Promise<boolean>;
+  /** The iPhone card shows the email form in place of the account, to change it. */
+  changing: boolean;
+  setChanging: (changing: boolean) => void;
+  /** Opens the sheet on the iPhone card with the email form open (the avatar menu's Change). */
+  changeAppleAccount: () => void;
   refresh: () => Promise<void>;
   dismissNudge: () => void;
   isIOS: boolean;
@@ -194,7 +202,17 @@ export function InstallProvider({ children }: { children: React.ReactNode }) {
   const [app, setApp] = React.useState<AppSheet | null>(null);
   const [error, setError] = React.useState("");
   const [busy, setBusy] = React.useState(false);
-  const [open, setOpen] = React.useState(false);
+  const [open, setOpenState] = React.useState(false);
+  const [changing, setChangingState] = React.useState(false);
+  const setChanging = React.useCallback((next: boolean) => {
+    setChangingState(next);
+    if (!next) setError("");
+  }, []);
+  // Closing the sheet drops a change that was not sent.
+  const setOpen = React.useCallback((next: boolean) => {
+    setOpenState(next);
+    if (!next) setChangingState(false);
+  }, []);
   const isIOS = useIsIOS();
   const isAndroid = useIsAndroid();
   // On an Android phone, its own platform first.
@@ -209,8 +227,10 @@ export function InstallProvider({ children }: { children: React.ReactNode }) {
       setStatus(fresh);
       writeCache({ status: fresh });
       setError("");
+      return true;
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
+      return false;
     } finally {
       setStatusKnown(true);
     }
@@ -250,7 +270,7 @@ export function InstallProvider({ children }: { children: React.ReactNode }) {
       const asked = fromHash();
       if (!asked) return;
       if (asked !== true) setTarget(asked);
-      setOpen(true);
+      setOpenState(true);
       history.replaceState(null, "", window.location.pathname + window.location.search);
     };
     check();
@@ -274,8 +294,9 @@ export function InstallProvider({ children }: { children: React.ReactNode }) {
   const withBusy = React.useCallback(
     async (request: () => Promise<Status>) => {
       setBusy(true);
-      await run(request);
+      const ok = await run(request);
       setBusy(false);
+      return ok;
     },
     [run],
   );
@@ -304,14 +325,39 @@ export function InstallProvider({ children }: { children: React.ReactNode }) {
       setOpen,
       target,
       setTarget,
-      invite: (email) => withBusy(() => call("POST", { email })),
-      forget: () => withBusy(() => call("DELETE")),
-      refresh: () => withBusy(() => call("GET")),
+      invite: async (email) => {
+        const ok = await withBusy(() => call("POST", { email }));
+        if (ok) setChangingState(false);
+        return ok;
+      },
+      changing,
+      setChanging,
+      changeAppleAccount: () => {
+        setTarget("ios");
+        setChangingState(true);
+        setOpenState(true);
+      },
+      refresh: () => withBusy(() => call("GET")).then(() => {}),
       dismissNudge,
       isIOS,
       isAndroid,
     }),
-    [status, statusKnown, app, error, busy, open, target, withBusy, dismissNudge, isIOS, isAndroid],
+    [
+      status,
+      statusKnown,
+      app,
+      error,
+      busy,
+      open,
+      setOpen,
+      changing,
+      setChanging,
+      target,
+      withBusy,
+      dismissNudge,
+      isIOS,
+      isAndroid,
+    ],
   );
 
   if (!APP_ENABLED) return children;
@@ -508,82 +554,71 @@ function CardRow({ art, children }: { art: React.ReactNode; children: React.Reac
 
 // ---- The iPhone card -----------------------------------------------------------------------
 
+/**
+ * The card has two parts: where you are with Apple on top, and under a line, the Apple Account
+ * the invites go to, with Change. That address is often not the Nap sign-in, so it gets its own
+ * row instead of a few words after the status.
+ */
 function IosCard() {
   const install = useInstall()!;
-  const { status, error, busy, isIOS } = install;
+  const { status, error, busy, isIOS, changing } = install;
   const title = appTitle(install);
   if (!status) return error ? null : <Skeleton className="h-49 rounded-xl" />;
 
   if (status.step.kind === "new") return <InviteForm key="new" />;
 
+  // Apple has no invite for the address: the form is the next step, so it is open already.
+  const account =
+    changing || (status.step.kind === "team_invited" && !status.step.pending) ? (
+      <EmailForm
+        current={status.appleEmail}
+        cancel={status.step.kind === "team_invited" && !status.step.pending ? undefined : true}
+      />
+    ) : (
+      <AppleAccountRow />
+    );
+
   if (status.step.kind === "team_invited") {
     const pending = status.step.pending;
     return (
-      <CardRow art={<MailArt />}>
-        <CardText
-          status={
-            pending ? (
-              <StatusLine tone="wait">Invite sent · {status.appleEmail}</StatusLine>
-            ) : (
-              <StatusLine tone="error">No open invite · {status.appleEmail}</StatusLine>
-            )
-          }
-          title={pending ? "Check your email" : "Apple has no invite for you"}
-          detail={
-            pending
-              ? `Accept Apple's email to join ${napConfig.orgName} in App Store Connect, then come back here.`
-              : "If you accepted it with another Apple Account, use that email instead."
-          }
-        >
-          <div className="mt-1 flex flex-wrap justify-center gap-2">
-            <Button className="rounded-full" disabled={busy} onClick={install.refresh}>
-              {busy && <Spinner data-icon="inline-start" />}
-              I've accepted it
-            </Button>
-            <Button
-              variant="outline"
-              className="rounded-full"
-              disabled={busy}
-              onClick={install.forget}
-            >
-              Use another email
-            </Button>
-          </div>
-        </CardText>
-      </CardRow>
+      <CardWithAccount account={account}>
+        <CardRow art={<MailArt tone={pending ? "wait" : "error"} />}>
+          <CardText
+            status={
+              pending ? (
+                <StatusLine tone="wait">Invite sent</StatusLine>
+              ) : (
+                <StatusLine tone="error">Nothing waiting at {status.appleEmail}</StatusLine>
+              )
+            }
+            title={pending ? "Check your email" : "Apple has no invite for you"}
+            detail={
+              pending
+                ? `Accept Apple's email to join ${napConfig.orgName} in App Store Connect, then come back here.`
+                : "Maybe it went to another address, or you accepted it with a different Apple Account. Send it again below."
+            }
+          >
+            {pending && (
+              <div className="mt-1 flex flex-wrap justify-center gap-2">
+                <Button className="rounded-full" disabled={busy} onClick={install.refresh}>
+                  {busy && !changing && <Spinner data-icon="inline-start" />}
+                  I've accepted it
+                </Button>
+              </div>
+            )}
+          </CardText>
+        </CardRow>
+      </CardWithAccount>
     );
   }
 
   const invited = status.step.tester === "invited";
   const line = invited ? (
-    <StatusLine tone="wait">TestFlight invite sent · {status.appleEmail}</StatusLine>
+    <StatusLine tone="wait">TestFlight invite sent</StatusLine>
   ) : (
     <StatusLine tone="ok">
-      {status.step.tester === "installed" ? "Installed" : "You're a tester"} · {status.appleEmail}
+      {status.step.tester === "installed" ? "Installed" : "You're a tester"}
     </StatusLine>
-  );
-  const extras = (
-    <>
-      <BuildState build={status.build} />
-      <span className="flex flex-wrap justify-center gap-x-3 gap-y-1 text-xs text-muted-foreground sm:justify-start">
-        <a
-          href={TESTFLIGHT_STORE_URL}
-          target="_blank"
-          rel="noreferrer"
-          className="underline-offset-2 hover:text-foreground hover:underline"
-        >
-          No TestFlight yet? Get it on the App Store
-        </a>
-        <button
-          type="button"
-          className="underline-offset-2 hover:text-foreground hover:underline"
-          disabled={busy}
-          onClick={install.forget}
-        >
-          Use another email
-        </button>
-      </span>
-    </>
   );
   const detail = invited
     ? `Accept the TestFlight invite Apple emailed you, then install ${title} there. TestFlight keeps it up to date.`
@@ -591,72 +626,231 @@ function IosCard() {
 
   if (isIOS)
     return (
-      // The sheet's head already shows the icon, and there's nothing to scan on the phone itself.
-      <CardRow art={null}>
-        <CardText status={line} title="Open it in TestFlight" detail={detail}>
-          <div className="mt-1 flex flex-wrap justify-center gap-2 sm:justify-start">
-            <Button
-              size="lg"
-              className="rounded-full px-4"
-              nativeButton={false}
-              render={<a href={status.url} />}
-            >
-              <ExternalLinkIcon data-icon="inline-start" />
-              Open in TestFlight
-            </Button>
-            <Button
-              size="lg"
-              variant="outline"
-              className="rounded-full px-4"
-              nativeButton={false}
-              render={<a href={TESTFLIGHT_STORE_URL} target="_blank" rel="noreferrer" />}
-            >
-              <DownloadIcon data-icon="inline-start" />
-              Get TestFlight
-            </Button>
-          </div>
-          <BuildState build={status.build} />
-        </CardText>
-      </CardRow>
+      <CardWithAccount account={account}>
+        {/* The sheet's head already shows the icon, and there's nothing to scan on the phone itself. */}
+        <CardRow art={null}>
+          <CardText status={line} title="Open it in TestFlight" detail={detail}>
+            <div className="mt-1 flex flex-wrap justify-center gap-2 sm:justify-start">
+              <Button
+                size="lg"
+                className="rounded-full px-4"
+                nativeButton={false}
+                render={<a href={status.url} />}
+              >
+                <ExternalLinkIcon data-icon="inline-start" />
+                Open in TestFlight
+              </Button>
+              <Button
+                size="lg"
+                variant="outline"
+                className="rounded-full px-4"
+                nativeButton={false}
+                render={<a href={TESTFLIGHT_STORE_URL} target="_blank" rel="noreferrer" />}
+              >
+                <DownloadIcon data-icon="inline-start" />
+                Get TestFlight
+              </Button>
+            </div>
+            <BuildState build={status.build} />
+          </CardText>
+        </CardRow>
+      </CardWithAccount>
     );
 
   return (
-    <CardRow
-      art={
-        <QrCode
-          value={status.webUrl}
-          className="size-44 rounded-xl ring-1 ring-border sm:size-49"
-        />
-      }
+    <CardWithAccount account={account}>
+      <CardRow
+        art={
+          <QrCode
+            value={status.webUrl}
+            className="size-44 rounded-xl ring-1 ring-border sm:size-49"
+          />
+        }
+      >
+        <CardText status={line} title="Scan with your iPhone camera" detail={detail}>
+          <BuildState build={status.build} />
+          <a
+            href={TESTFLIGHT_STORE_URL}
+            target="_blank"
+            rel="noreferrer"
+            className="text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+          >
+            No TestFlight yet? Get it on the App Store
+          </a>
+        </CardText>
+      </CardRow>
+    </CardWithAccount>
+  );
+}
+
+/** The card's two parts, with a line across the card between them. */
+function CardWithAccount({
+  account,
+  children,
+}: {
+  account: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="flex flex-col gap-5">
+      {children}
+      <div className="-mx-5 border-t sm:-mx-7" />
+      {account}
+    </div>
+  );
+}
+
+/** Apple's logo, for the Apple Account. lucide has none. */
+export function AppleLogo({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" className={className}>
+      <path d="M16.37 12.6c-.02-2.3 1.88-3.4 1.97-3.46-1.07-1.57-2.74-1.78-3.33-1.8-1.42-.14-2.77.83-3.49.83-.72 0-1.83-.81-3.01-.79-1.55.02-2.98.9-3.78 2.29-1.61 2.8-.41 6.94 1.16 9.21.77 1.11 1.68 2.36 2.88 2.31 1.16-.05 1.6-.75 3-.75s1.79.75 3.01.72c1.25-.02 2.04-1.13 2.8-2.25.88-1.29 1.24-2.54 1.26-2.6-.03-.01-2.42-.93-2.45-3.7zM14.08 5.84c.64-.77 1.07-1.85.95-2.92-.92.04-2.03.61-2.69 1.38-.59.68-1.1 1.77-.97 2.82 1.03.08 2.07-.52 2.71-1.28z" />
+    </svg>
+  );
+}
+
+/** Where TestFlight invites go, and Change. */
+function AppleAccountRow() {
+  const install = useInstall()!;
+  const status = install.status!;
+  const invited = status.step.kind === "team_invited";
+  const hint = invited
+    ? "Apple's email went here. Wrong address? Change it."
+    : status.sameAsNap
+      ? "Your Nap sign-in. If your iPhone uses a different Apple Account, use that one."
+      : "TestFlight invites go here.";
+  return (
+    <div className="flex items-start gap-3.5 sm:items-center">
+      <span className="grid size-9 shrink-0 place-items-center rounded-full bg-foreground text-background">
+        <AppleLogo className="size-4" />
+      </span>
+      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <span className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
+          Apple Account
+          {status.sameAsNap && (
+            <span className="rounded-full bg-muted px-2 py-px text-[11px] text-foreground/70">
+              Same as Nap
+            </span>
+          )}
+        </span>
+        <b className="truncate text-[15px] font-semibold">{status.appleEmail}</b>
+        <span className="text-xs leading-snug text-muted-foreground">{hint}</span>
+      </div>
+      <Button
+        variant="outline"
+        className="shrink-0 rounded-full"
+        disabled={install.busy}
+        onClick={() => install.setChanging(true)}
+      >
+        {status.sameAsNap ? "Use another" : "Change"}
+      </Button>
+    </div>
+  );
+}
+
+/**
+ * The Apple Account email, the first time or to change it. Changing sends the new one in one
+ * step; until then nothing changes, and Cancel goes back.
+ */
+function EmailForm({ current, cancel }: { current: string | null; cancel?: boolean }) {
+  const install = useInstall()!;
+  const napEmail = install.status?.napEmail ?? "";
+  const changing = current !== null;
+  // Not the Nap sign-in: most people's Apple Account is a personal address.
+  const [email, setEmail] = React.useState("");
+  const input = React.useRef<HTMLInputElement>(null);
+  React.useEffect(() => {
+    if (changing && cancel) input.current?.focus();
+  }, [changing, cancel]);
+  return (
+    <form
+      className="flex flex-1 flex-col gap-2"
+      onSubmit={(event) => {
+        event.preventDefault();
+        void install.invite(email);
+      }}
     >
-      <CardText status={line} title="Scan with your iPhone camera" detail={detail}>
-        {extras}
-      </CardText>
-    </CardRow>
+      <label htmlFor="apple-email" className="text-xs font-medium text-muted-foreground">
+        {changing ? "Send the invite to another Apple Account" : "Your Apple Account email"}
+      </label>
+      <Input
+        id="apple-email"
+        ref={input}
+        type="email"
+        required
+        value={email}
+        onChange={(event) => setEmail(event.target.value)}
+        placeholder="you@icloud.com"
+        autoComplete="email"
+        disabled={install.busy}
+        className="h-10 rounded-xl text-base sm:text-sm"
+      />
+      {napEmail && current !== napEmail && (
+        <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+          Or use
+          <button
+            type="button"
+            disabled={install.busy}
+            onClick={() => setEmail(napEmail)}
+            className="inline-flex max-w-full items-center gap-1.5 rounded-full border bg-muted/50 py-0.5 pr-2.5 pl-1 text-foreground hover:bg-muted"
+          >
+            <span className="rounded-full border bg-background px-1.5 text-[10.5px] font-semibold text-muted-foreground">
+              Nap sign-in
+            </span>
+            <span className="truncate">{napEmail}</span>
+          </button>
+        </div>
+      )}
+      <span className="text-xs leading-snug text-muted-foreground">
+        The one your iPhone uses for the App Store: Settings › your name shows it. For most people
+        that's a personal address, not their work email.
+      </span>
+      <div className="mt-1 flex flex-wrap items-center gap-2">
+        <Button type="submit" size="lg" className="rounded-full" disabled={install.busy}>
+          {install.busy && <Spinner data-icon="inline-start" />}
+          Send me an invite
+        </Button>
+        {cancel && (
+          <Button
+            type="button"
+            size="lg"
+            variant="ghost"
+            className="rounded-full"
+            disabled={install.busy}
+            onClick={() => install.setChanging(false)}
+          >
+            Cancel
+          </Button>
+        )}
+      </div>
+      {changing && cancel && (
+        <span className="text-xs text-muted-foreground">
+          Until you send it, invites keep going to {current}.
+        </span>
+      )}
+    </form>
   );
 }
 
 /** Stands in for the QR code while there is nothing to scan yet. */
-function MailArt() {
+function MailArt({ tone }: { tone: "wait" | "error" }) {
   return (
-    <span className="grid size-36 shrink-0 place-items-center rounded-2xl border-2 border-dashed bg-muted/50 text-muted-foreground sm:size-49">
+    <span
+      className={cn(
+        "grid size-36 shrink-0 place-items-center rounded-2xl border-2 border-dashed sm:size-49",
+        tone === "wait" &&
+          "border-blue-200 bg-blue-50 text-blue-600 dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-400",
+        tone === "error" && "border-destructive/25 bg-destructive/5 text-destructive",
+      )}
+    >
       <MailIcon className="size-10" />
     </span>
   );
 }
 
 function InviteForm() {
-  const install = useInstall()!;
-  // Not the Nap sign-in: most people's Apple Account is a personal address.
-  const [email, setEmail] = React.useState(install.status?.appleEmail ?? "");
   return (
-    <form
-      className="flex flex-col gap-5 sm:flex-row sm:items-start sm:gap-7"
-      onSubmit={(event) => {
-        event.preventDefault();
-        void install.invite(email);
-      }}
-    >
+    <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:gap-7">
       <div className="flex flex-col gap-2 sm:w-[46%]">
         <b className="text-xl font-semibold tracking-[-0.02em] sm:text-[22px]">
           Get it with TestFlight
@@ -667,27 +861,8 @@ function InviteForm() {
           <li>Install it from the TestFlight app.</li>
         </ol>
       </div>
-      <label className="flex flex-1 flex-col gap-1.5 text-xs text-muted-foreground">
-        Your Apple Account email
-        <Input
-          type="email"
-          required
-          value={email}
-          onChange={(event) => setEmail(event.target.value)}
-          placeholder="you@icloud.com"
-          autoComplete="email"
-          className="h-10 rounded-xl text-base sm:text-sm"
-        />
-        <span>
-          The one you sign in to the App Store with. For most people that's a personal address, not
-          their work email.
-        </span>
-        <Button type="submit" size="lg" className="mt-2 rounded-full" disabled={install.busy}>
-          {install.busy && <Spinner data-icon="inline-start" />}
-          Send me an invite
-        </Button>
-      </label>
-    </form>
+      <EmailForm current={null} />
+    </div>
   );
 }
 

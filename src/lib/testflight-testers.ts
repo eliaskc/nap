@@ -33,6 +33,8 @@ export type InstallStatus = {
   /** The Nap sign-in: the usual guess for the Apple Account. */
   napEmail: string;
   appleEmail: string | null;
+  /** The Apple Account is the Nap sign-in (typed in, or found as a tester already). */
+  sameAsNap: boolean;
   step:
     | { kind: "new" }
     | { kind: "team_invited"; pending: boolean }
@@ -193,6 +195,7 @@ export const installStatus = Effect.fn("installStatus")(function* (identity: Ide
       return {
         ...base,
         appleEmail: row.appleEmail,
+        sameAsNap: row.appleEmail === base.napEmail,
         step: { kind: "team_invited" as const, pending },
       } satisfies InstallStatus;
     }
@@ -205,12 +208,18 @@ export const installStatus = Effect.fn("installStatus")(function* (identity: Ide
   const tester = yield* findTester(appleEmail);
   if (!row && tester) yield* saveRow(identity.email, appleEmail, "tester");
   if (!row && !tester) {
-    return { ...base, appleEmail: null, step: { kind: "new" as const } } satisfies InstallStatus;
+    return {
+      ...base,
+      appleEmail: null,
+      sameAsNap: false,
+      step: { kind: "new" as const },
+    } satisfies InstallStatus;
   }
   const state = tester?.attributes.state;
   return {
     ...base,
     appleEmail,
+    sameAsNap: appleEmail === base.napEmail,
     step: {
       kind: "tester" as const,
       tester:
@@ -221,7 +230,9 @@ export const installStatus = Effect.fn("installStatus")(function* (identity: Ide
 
 /**
  * Asks Apple to invite the caller. An App Store Connect user goes straight into the TestFlight
- * group; anyone else is invited to the team first.
+ * group; anyone else is invited to the team first. It also changes the address: the new one
+ * replaces the old in one step. (Forgetting the old one first would not work: with no row,
+ * installStatus finds a Nap sign-in that is a tester already and saves it straight back.)
  */
 export const requestInvite = Effect.fn("requestInvite")(function* (
   identity: Identity,
@@ -260,12 +271,5 @@ export const requestInvite = Effect.fn("requestInvite")(function* (
   yield* Effect.logInfo("TestFlight invite requested").pipe(
     Effect.annotateLogs({ email: identity.email, appleEmail, member: Boolean(user) }),
   );
-  return yield* installStatus(identity);
-});
-
-/** Starts over, to use another Apple Account email. */
-export const forgetInvite = Effect.fn("forgetInvite")(function* (identity: Identity) {
-  const db = yield* Database;
-  yield* db.run(`DELETE FROM testflight_testers WHERE email = ?`, lower(identity.email));
   return yield* installStatus(identity);
 });
